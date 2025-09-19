@@ -28,4 +28,7 @@ jobs:
           poetry install --no-root
           
       - name: Run ruff check
-        run: make lint-local
+        run: |
+          # Activate the poetry virtual environment and run make
+          source $(poetry env info --path)/bin/activate
+          make lint-local
