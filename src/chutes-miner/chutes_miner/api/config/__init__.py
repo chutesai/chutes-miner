@@ -68,11 +68,11 @@ class Settings(CommonSettings):
     namespace: str = os.getenv("CHUTES_NAMESPACE", "chutes")
     graval_bootstrap_image: str = os.getenv(
         "GRAVAL_BOOTSTRAP_IMAGE",
-        "parachutes/graval-bootstrap-opencl:0.2.5-cuda",
+        "parachutes/graval-bootstrap-opencl:0.2.6-cuda",
     )
     graval_bootstrap_image_rocm: str = os.getenv(
         "GRAVAL_BOOTSTRAP_IMAGE_ROCM",
-        "parachutes/graval-bootstrap-opencl:0.2.5-rocm",
+        "parachutes/graval-bootstrap-opencl:0.2.6-rocm",
     )
     nvidia_runtime: str = os.getenv("NVIDIA_RUNTIME", "nvidia")
     graval_bootstrap_timeout: int = int(os.getenv("GRAVAL_BOOTSTRAP_TIMEOUT", "900"))

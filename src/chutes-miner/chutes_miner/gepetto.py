@@ -6,6 +6,7 @@ import re
 import uuid
 import aiohttp
 import asyncio
+import hashlib
 from chutes_miner.api.k8s.operator import K8sOperator
 from chutes_miner.api.server.util import stop_server_monitoring
 import orjson as json
@@ -91,7 +92,9 @@ class Gepetto:
         """
         Refresh images/chutes from validator(s).
         """
-        async with aiohttp.ClientSession(raise_for_status=True) as session:
+        async with aiohttp.ClientSession(
+            raise_for_status=True, read_bufsize=8 * 1024 * 1024
+        ) as session:
             headers, _ = sign_request(purpose="miner")
             updated_items = {}
             explicit_null = False
@@ -266,7 +269,12 @@ class Gepetto:
                     headers=headers,
                     params=params,
                 ) as resp:
-                    if resp.status != 200:
+                    if resp.status == 423:
+                        logger.warning(
+                            f"Unable to scale up {chute.chute_id} at this time, "
+                            f"at capacity or blocked for another reason: {await resp.text()}"
+                        )
+                    elif resp.status != 200:
                         logger.error(
                             f"Failed to fetch launch token: {resp.status=} -> {await resp.text()}"
                         )
@@ -794,8 +802,8 @@ class Gepetto:
 
         # XXX This is where you as a miner definitely want to customize the strategy!
         supported_gpus = set(chute.supported_gpus)
-        if supported_gpus - set(["h200"]):
-            # Generally speaking, non-h200 GPUs typically have lower compute multipliers than
+        if supported_gpus - set(["h200", "b200"]):
+            # Generally speaking, non-h200/b200 GPUs typically have lower compute multipliers than
             # the job would provide because they regularly do not have even one request in flight
             # on average, although that is not always the case, so this should be updated to be smarter.
             logger.info(
@@ -1260,8 +1268,6 @@ class Gepetto:
             logger.warning(f"Will not scale up banned chute {chute.chute_id=}: {chute.ban_reason=}")
             return None
         supported_gpus = list(chute.supported_gpus)
-        if "h200" in supported_gpus and set(supported_gpus) - set(["h200"]):
-            supported_gpus = list(set(supported_gpus) - set(["h200"]))
         total_gpus_per_server = (
             select(Server.server_id, func.count(GPU.gpu_id).label("total_gpus"))
             .select_from(Server)
@@ -1635,6 +1641,62 @@ class Gepetto:
         except Exception as exc:
             logger.error(f"Failed to refresh remote resources: {exc}")
             return
+
+        # First, let's make sure the chutes database locally is in sync...
+        chute_hashes = {}
+        async with get_session() as session:
+            chutes = (await session.execute(select(Chute))).unique().scalars().all()
+            for chute in chutes:
+                if chute.validator not in chute_hashes:
+                    chute_hashes[chute.validator] = {}
+                chute_hash = hashlib.sha256(
+                    "\n".join(
+                        [
+                            chute.name,
+                            chute.image,
+                            chute.code,
+                            chute.ref_str,
+                            f"{chute.gpu_count}",
+                            f"{chute.chutes_version}",
+                            f"{set(sorted(chute.supported_gpus))}",
+                        ]
+                    ).encode()
+                ).hexdigest()
+                chute_hashes[chute.validator][chute.chute_id] = chute_hash
+
+        for validator, chutes in self.remote_chutes.items():
+            for chute_id, chute_data in chutes.items():
+                chute_hash = hashlib.sha256(
+                    "\n".join(
+                        [
+                            chute_data["name"],
+                            chute_data["image"],
+                            chute_data["code"],
+                            chute_data["ref_str"],
+                            f"{chute_data['node_selector']['gpu_count']}",
+                            f"{chute_data['chutes_version']}",
+                            f"{set(sorted(chute_data['supported_gpus']))}",
+                        ]
+                    ).encode()
+                ).hexdigest()
+
+                # Ignore chutes that don't exist here since they'll be created later down this loop.
+                if chute_id not in chute_hashes.get(validator, {}):
+                    continue
+
+                if chute_hash != chute_hashes.get(validator, {}).get(chute_id):
+                    logger.warning(f"Local chute is outdated: {chute_id=} {chute_data['name']}")
+                    try:
+                        await self.chute_updated(
+                            {
+                                "chute_id": chute_id,
+                                "version": chute_data["version"],
+                                "validator": validator,
+                            }
+                        )
+                        logger.success(f"Successfully synchronized {chute_id=} to {chute_hash=}")
+                    except Exception:
+                        logger.warning(f"Failed to reconcile {chute_id=} with {chute_hash=}")
 
         # Get the chutes currently undergoing a rolling update.
         updating = {}

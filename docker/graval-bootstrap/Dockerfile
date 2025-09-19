@@ -1,4 +1,4 @@
-FROM parachutes/python:3.12.9 AS base-cuda
+FROM parachutes/python:3.12 AS base-cuda
 
 ARG PROJECT_DIR
 ARG PROJECT
@@ -38,7 +38,7 @@ COPY --chown=chutes:chutes ${PROJECT_DIR}/ ./${PROJECT}/
 RUN python -m venv .venv
 RUN . .venv/bin/activate && poetry install --only main -P /app/${PROJECT}
 
-FROM parachutes/python:3.12.9 AS production-cuda
+FROM parachutes/python:3.12 AS production-cuda
 
 ARG PROJECT_DIR
 ARG PROJECT

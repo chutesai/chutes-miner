@@ -33,7 +33,7 @@ from chutes_miner.api.config import settings
 
 def build_chute_job(deployment_id, chute: Chute, server: Server, service: V1Service, 
     gpu_uuids: list[str], probe_port: int, token: Optional[str] = None, 
-    config_id: Optional[str] = None, disk_gb: int  = 10
+    job_id: Optional[str] = None, config_id: Optional[str] = None, disk_gb: int  = 10
 ) -> V1Job:
     cpu = str(server.cpu_per_gpu * chute.gpu_count)
     ram = str(server.memory_per_gpu * chute.gpu_count) + "Gi"
@@ -47,8 +47,11 @@ def build_chute_job(deployment_id, chute: Chute, server: Server, service: V1Serv
 
     if config_id:
         deployment_labels["chutes/config-id"] = config_id
+    if job_id:
+        deployment_labels["chutes/job-id"] = job_id
+        deployment_labels["chutes/job"] = "true"
 
-        # Command will vary depending on chutes version.
+    # Command will vary depending on chutes version.
     extra_env = []
     command = [
         "chutes",
