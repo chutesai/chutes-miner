@@ -28,7 +28,4 @@ jobs:
           poetry install --no-root
           
       - name: Run ruff check
-        run: poetry run ruff check
-        
-      - name: Run ruff format check
-        run: poetry run ruff format --check --line-length 100
+        run: make lint-local
