@@ -25,6 +25,7 @@ class ResourceChangeMessage:
             "timestamp": self.timestamp.isoformat(),
         }
 
+
 class ClusterChangeMessage:
     def __init__(self, cluster: str, event_type: WatchEventType, timestamp: datetime):
         self.cluster = cluster

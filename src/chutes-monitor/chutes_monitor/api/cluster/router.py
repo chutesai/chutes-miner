@@ -51,14 +51,16 @@ class ClusterRouter:
     async def _cluster_exists(self, cluster_name: str):
         async with get_session() as session:
             server = (
-                await session.execute(
-                    select(Server)
-                    .where(Server.name == cluster_name)
-                )).unique().scalar_one_or_none()
+                (await session.execute(select(Server).where(Server.name == cluster_name)))
+                .unique()
+                .scalar_one_or_none()
+            )
             return server is not None
 
     async def register_cluster(
-        self, cluster_name: str, request: SetClusterResourcesRequest,
+        self,
+        cluster_name: str,
+        request: SetClusterResourcesRequest,
         _: None = Depends(authorize(allow_miner=True, purpose=MONITORING_PURPOSE)),
     ):
         """Register and start monitoring a new cluster"""
@@ -66,16 +68,13 @@ class ClusterRouter:
             if not await self._cluster_exists(cluster_name):
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Server does not exist in inventory."
+                    detail="Server does not exist in inventory.",
                 )
 
             await self.cluster_monitor.register_cluster(cluster_name, request.resources)
         except ClusterConflictException as e:
             logger.error(f"Failed to register cluster {cluster_name}:\n{e}")
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=str(e)
-            )
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
         except HTTPException:
             raise
         except Exception as e:
@@ -83,7 +82,8 @@ class ClusterRouter:
             raise HTTPException(status_code=500, detail=str(e))
 
     async def unregister_cluster(
-        self, cluster_name: str,
+        self,
+        cluster_name: str,
         _: None = Depends(authorize(allow_miner=True, purpose=MONITORING_PURPOSE)),
     ):
         """Unregister a cluster completely"""
@@ -99,15 +99,17 @@ class ClusterRouter:
             raise HTTPException(status_code=500, detail=str(e))
 
     async def set_cluster_resources(
-            self, cluster_name: str, request: SetClusterResourcesRequest,
-            _: None = Depends(authorize(allow_miner=True, purpose=MONITORING_PURPOSE)),
+        self,
+        cluster_name: str,
+        request: SetClusterResourcesRequest,
+        _: None = Depends(authorize(allow_miner=True, purpose=MONITORING_PURPOSE)),
     ):
         """Register and start monitoring a new cluster"""
         try:
             if not await self._cluster_exists(cluster_name):
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Server does not exist in inventory."
+                    detail="Server does not exist in inventory.",
                 )
 
             await self.redis_client.update_cluster_status(
@@ -120,10 +122,7 @@ class ClusterRouter:
             await self.cluster_monitor.set_cluster_resources(cluster_name, request.resources)
         except ClusterNotFoundException as e:
             logger.error(f"Failed to set resources for {cluster_name}:\n{e}")
-            raise HTTPException(
-                status_code=status.HTTP_410_GONE,
-                detail=str(e)
-            )
+            raise HTTPException(status_code=status.HTTP_410_GONE, detail=str(e))
         except HTTPException:
             raise
         except Exception as e:
@@ -131,8 +130,10 @@ class ClusterRouter:
             raise HTTPException(status_code=500, detail=str(e))
 
     async def update_resource(
-            self, cluster_name: str, update: ResourceUpdateRequest,
-            _: None = Depends(authorize(allow_miner=True, purpose=MONITORING_PURPOSE)),
+        self,
+        cluster_name: str,
+        update: ResourceUpdateRequest,
+        _: None = Depends(authorize(allow_miner=True, purpose=MONITORING_PURPOSE)),
     ):
         """Receive resource update from a member cluster"""
         try:
@@ -154,9 +155,7 @@ class ClusterRouter:
             current_status = await self.redis_client.get_cluster_status(cluster_name)
 
             if not current_status:
-                logger.debug(
-                    f"Cluster {cluster_name} not in cache, rejecting heartbeat."
-                )
+                logger.debug(f"Cluster {cluster_name} not in cache, rejecting heartbeat.")
                 raise HTTPException(
                     status_code=404, detail="Cluster not in cache.  Resync resources."
                 )

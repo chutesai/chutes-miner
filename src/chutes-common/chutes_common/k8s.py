@@ -1,13 +1,12 @@
 from enum import Enum
 from types import SimpleNamespace
-from typing import Any, Optional, Union
 import json
 from unittest.mock import MagicMock
 from chutes_common.monitoring.models import ResourceType
 from kubernetes_asyncio.client import V1Deployment, V1Pod, V1Service, V1Node, V1Job
 from pydantic import BaseModel, ConfigDict
 from kubernetes_asyncio.client import ApiClient
-from typing import Generator, Optional, Tuple, Union
+from typing import Any, Generator, Optional, Tuple, Union
 
 
 class K8sSerializer:
@@ -46,12 +45,13 @@ serializer = K8sSerializer()
 # ToDo: Update to use values from ResourceType after
 # resolving ciruclar dependency
 _resource_types = {
-    V1Deployment: "deployment", 
-    V1Service: "service", 
-    V1Pod: "pod", 
+    V1Deployment: "deployment",
+    V1Service: "service",
+    V1Pod: "pod",
     V1Node: "node",
-    V1Job: "job"
+    V1Job: "job",
 }
+
 
 class ClusterResources(BaseModel):
     """Cluster monitoring status"""
@@ -98,6 +98,7 @@ class ClusterResources(BaseModel):
         yield ResourceType.NODE, self.nodes
         yield ResourceType.JOB, self.jobs
 
+
 class WatchEventType(Enum):
     """Enumeration of watch event types."""
 
@@ -118,7 +119,9 @@ class WatchEvent(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     type: WatchEventType
-    object: Union[V1Deployment, V1Pod, V1Service, V1Node, V1Job, MagicMock]  # Magic Mock for testing
+    object: Union[
+        V1Deployment, V1Pod, V1Service, V1Node, V1Job, MagicMock
+    ]  # Magic Mock for testing
 
     @classmethod
     def from_dict(cls, event_dict: dict) -> "WatchEvent":

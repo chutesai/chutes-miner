@@ -12,11 +12,7 @@ from chutes_monitor.settings import settings
 
 engine = create_async_engine(settings.sqlalchemy, echo=settings.debug)
 
-SessionLocal = sessionmaker(
-    bind=engine,
-    class_=AsyncSession,
-    expire_on_commit=False
-)
+SessionLocal = sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
 
 Base = declarative_base()
 

@@ -3,7 +3,6 @@ Gepetto - coordinate all the things.
 """
 
 import re
-import uuid
 import aiohttp
 import asyncio
 import hashlib
@@ -220,13 +219,11 @@ class Gepetto:
                 ) as resp:
                     if resp.status >= 300:
                         error = await resp.text()
-                        logger.error(
-                            f"Error announcing deployment to validator:\n{error}"
-                        )
+                        logger.error(f"Error announcing deployment to validator:\n{error}")
                         raise DeploymentFailure(
                             f"Error announcing deployment {deployment.deployment_id} to validator:\n{error}"
                         )
-                    
+
                     instance = await resp.json()
 
                     # Track the instance ID.
@@ -682,7 +679,7 @@ class Gepetto:
                 job_id=job_id,
                 extra_labels={"chutes/job": "true"},
                 disk_gb=disk_gb,
-                extra_service_ports=extra_ports
+                extra_service_ports=extra_ports,
             )
             logger.success(
                 f"Successfully deployed {job_id=} {chute.chute_id=} on {server.server_id=}: {deployment.deployment_id=}"
@@ -944,7 +941,7 @@ class Gepetto:
         """
         server_id = event_data["server_id"]
         logger.info(f"Received server_deleted event {server_id=}")
-        
+
         async with get_session() as session:
             server = (
                 (await session.execute(select(Server).where(Server.server_id == server_id)))
@@ -952,7 +949,6 @@ class Gepetto:
                 .scalar_one_or_none()
             )
             if server:
-
                 # If this is a standalone server, we need to stop monitoring from the agent
                 if server.agent_api:
                     await stop_server_monitoring(server.agent_api)
@@ -1545,7 +1541,7 @@ class Gepetto:
                 token=launch_token["token"] if launch_token else None,
                 config_id=launch_token["config_id"] if launch_token else None,
                 disk_gb=disk_gb,
-                extra_service_ports=extra_ports
+                extra_service_ports=extra_ports,
             )
             logger.success(
                 f"Successfully deployed {chute.chute_id=} {job_id=} via preemption on {server.server_id=}: {deployment.deployment_id=}"

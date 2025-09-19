@@ -5,7 +5,11 @@ import os
 from typing import Any, Callable, Optional
 from chutes_common.monitoring.models import ClusterState, MonitoringState, MonitoringStatus
 from chutes_common.k8s import WatchEvent, serializer
-from chutes_common.exceptions import ClusterConflictException, ClusterNotFoundException, ServerNotFoundException
+from chutes_common.exceptions import (
+    ClusterConflictException,
+    ClusterNotFoundException,
+    ServerNotFoundException,
+)
 from kubernetes_asyncio import client, config, watch
 from kubernetes_asyncio.client.exceptions import ApiException
 from chutes_agent.client import ControlPlaneClient
@@ -20,6 +24,7 @@ from tenacity import (
     before_sleep_log,
     after_log,
 )
+
 
 class ResourceMonitor:
     def __init__(self):
@@ -48,7 +53,7 @@ class ResourceMonitor:
     @property
     def state(self) -> MonitoringState:
         return self._status.state
-    
+
     @state.setter
     def state(self, value: MonitoringState):
         self._status.state = value
@@ -281,7 +286,7 @@ class ResourceMonitor:
             await self.control_plane_client.remove_cluster()
             await self.control_plane_client.register_cluster(initial_resources)
 
-        logger.info(f"Registered cluster with control plane.")
+        logger.info("Registered cluster with control plane.")
 
     async def _send_all_resources(self):
         # Collect and send initial resources
@@ -316,7 +321,6 @@ class ResourceMonitor:
             self.status.error_message = str(err)
             logger.error(f"Exception encoutering while watching resources: {err}")
             self._restart()
-            
 
     async def watch_namespaced_deployments(self, namespace: str):
         """Watch deployments for changes"""
@@ -336,9 +340,7 @@ class ResourceMonitor:
 
     async def watch_namespaced_jobs(self, namespace: str):
         """Watch jobs for changes"""
-        await self._watch_resources(
-            "jobs", self.batch_v1.list_namespaced_job, namespace=namespace
-        )
+        await self._watch_resources("jobs", self.batch_v1.list_namespaced_job, namespace=namespace)
 
     async def watch_nodes(self):
         """Watch services for changes"""
@@ -350,7 +352,7 @@ class ResourceMonitor:
         retry=retry_if_exception_type(Exception),
         before_sleep=before_sleep_log(logger, logging.WARNING),
         after=after_log(logger, logging.DEBUG),
-        reraise=True
+        reraise=True,
     )
     async def _get_initial_resource_version(self, func, **kwargs):
         """Get initial resource version with retry logic"""
@@ -364,50 +366,53 @@ class ResourceMonitor:
         wait=wait_exponential(multiplier=2, min=1, max=30),
         retry=retry_if_exception_type(Exception),
         before_sleep=before_sleep_log(logger, logging.WARNING),
-        reraise=True
+        reraise=True,
     )
     async def _process_watch_stream(self, func, resource_version, **kwargs):
         """Process a single watch stream with retry for transient errors"""
         watch_kwargs = kwargs.copy()
-        watch_kwargs.update({
-            'watch': True,
-            'resource_version': resource_version,
-            'timeout_seconds': 300,  # 5 minute timeout
-            'limit': 200,
-        })
-        
+        watch_kwargs.update(
+            {
+                "watch": True,
+                "resource_version": resource_version,
+                "timeout_seconds": 300,  # 5 minute timeout
+                "limit": 200,
+            }
+        )
+
         logger.debug(f"Starting watch stream from resource version {resource_version}")
-        
+
         async with watch.Watch().stream(func, **watch_kwargs) as stream:
             event_count = 0
             stream_start_time = asyncio.get_event_loop().time()
-            
+
             async for event in stream:
                 try:
                     event_count += 1
                     event = WatchEvent.from_dict(event)
-                    
+
                     # Update resource version from each event
-                    if (hasattr(event.object, 'metadata') and 
-                        hasattr(event.object.metadata, 'resource_version')):
+                    if hasattr(event.object, "metadata") and hasattr(
+                        event.object.metadata, "resource_version"
+                    ):
                         resource_version = event.object.metadata.resource_version
-                    
+
                     await self.handle_resource_event(event)
-                    
+
                     # Log progress periodically
                     if event_count % 10 == 0:
                         elapsed = asyncio.get_event_loop().time() - stream_start_time
                         logger.debug(f"Processed {event_count} events in {elapsed:.1f}s")
-                        
+
                 except Exception as e:
                     logger.error(f"Error processing event: {e}")
                     # Continue processing other events
                     continue
-            
+
             # Stream ended normally
             elapsed = asyncio.get_event_loop().time() - stream_start_time
             logger.debug(f"Watch stream ended after {elapsed:.1f}s, {event_count} events")
-            
+
         return resource_version  # Return updated resource version
 
     async def _watch_resources(
@@ -415,20 +420,22 @@ class ResourceMonitor:
     ) -> None:
         """Watch resources for changes with tenacity-managed retries"""
         resource_version = None
-        
+
         while True:
             try:
                 logger.debug(f"Watching {resource_type}")
-                
+
                 # Get initial resource version if needed
                 if resource_version is None:
                     try:
                         resource_version = await self._get_initial_resource_version(func, **kwargs)
                     except Exception as e:
-                        logger.error(f"Failed to get initial {resource_type} list after retries: {e}")
+                        logger.error(
+                            f"Failed to get initial {resource_type} list after retries: {e}"
+                        )
                         await asyncio.sleep(5)
                         continue
-                
+
                 # Process watch stream
                 try:
                     resource_version = await self._process_watch_stream(
@@ -436,7 +443,9 @@ class ResourceMonitor:
                     )
                 except ApiException as e:
                     if e.status == 410:  # Gone - resource version too old
-                        logger.warning(f"{resource_type} resource version {resource_version} too old, resetting")
+                        logger.warning(
+                            f"{resource_type} resource version {resource_version} too old, resetting"
+                        )
                         resource_version = None
                         await asyncio.sleep(1)
                         continue
@@ -447,11 +456,11 @@ class ResourceMonitor:
                     # Normal timeout, just restart
                     logger.debug(f"{resource_type} watch timed out, restarting (normal)")
                     continue
-                    
+
             except asyncio.CancelledError:
                 logger.info(f"{resource_type} watch cancelled")
                 break
-                
+
             except Exception as e:
                 logger.error(f"Unhandled error watching {resource_type}: {e}")
                 # If we get here, tenacity has exhausted retries

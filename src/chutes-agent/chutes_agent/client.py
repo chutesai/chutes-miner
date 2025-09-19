@@ -1,14 +1,17 @@
 # agent/client/api_client.py
 from datetime import datetime, timezone
 import json
-import logging
 import aiohttp
 from chutes_common.auth import sign_request
 from chutes_common.constants import CLUSTER_ENDPOINT, MONITORING_PURPOSE
 from chutes_common.k8s import WatchEvent, ClusterResources
 from chutes_common.monitoring.models import ClusterState, HeartbeatData
 from chutes_common.monitoring.requests import SetClusterResourcesRequest, ResourceUpdateRequest
-from chutes_common.exceptions import ClusterConflictException, ClusterNotFoundException, ServerNotFoundException
+from chutes_common.exceptions import (
+    ClusterConflictException,
+    ClusterNotFoundException,
+    ServerNotFoundException,
+)
 from loguru import logger
 from chutes_agent.config import settings
 from typing import Optional
@@ -50,11 +53,11 @@ class ControlPlaneClient:
         url = f"{self.base_url}{CLUSTER_ENDPOINT}/{self.cluster_name}"
 
         # Serialize all Kubernetes objects
-        request = SetClusterResourcesRequest(
-            resources=resources
-        )
+        request = SetClusterResourcesRequest(resources=resources)
 
-        headers, payload = sign_request(request.model_dump_json(), purpose=MONITORING_PURPOSE, management=True)
+        headers, payload = sign_request(
+            request.model_dump_json(), purpose=MONITORING_PURPOSE, management=True
+        )
         # Need to apply json header since passing in string instead of dict
         headers["Content-Type"] = "application/json"
 
@@ -68,14 +71,13 @@ class ControlPlaneClient:
                     try:
                         error_json = await response.json()
                         error = json.dumps(error_json)
-                    except:
+                    except Exception:
                         error = await response.text()
                     raise Exception(
                         f"Failed to send initial resources: {response.status} - {error}"
                     )
-            
-            logger.info("Successfully sent initial resources")
 
+            logger.info("Successfully sent initial resources")
 
     async def remove_cluster(self):
         """Send initial resource dump to control plane"""
@@ -90,7 +92,7 @@ class ControlPlaneClient:
                 try:
                     error_json = await response.json()
                     error = json.dumps(error_json)
-                except:
+                except Exception:
                     error = await response.text()
                 raise Exception(f"Failed to remove cluster: {response.status} - {error}")
             logger.info("Successfully removed cluster")
@@ -104,7 +106,9 @@ class ControlPlaneClient:
         # Serialize the Kubernetes object
         request = SetClusterResourcesRequest(resources=resources)
 
-        headers, payload = sign_request(request.model_dump_json(), purpose=MONITORING_PURPOSE, management=True)
+        headers, payload = sign_request(
+            request.model_dump_json(), purpose=MONITORING_PURPOSE, management=True
+        )
         # Need to apply json header since passing in string instead of dict
         headers["Content-Type"] = "application/json"
 
@@ -118,7 +122,7 @@ class ControlPlaneClient:
                     try:
                         error_json = await response.json()
                         error = json.dumps(error_json)
-                    except:
+                    except Exception:
                         error = await response.text()
                     raise Exception(f"Failed to set cluster resources: {response.status} - {error}")
 
@@ -131,7 +135,9 @@ class ControlPlaneClient:
         # Serialize the Kubernetes object
         request = ResourceUpdateRequest(event=event)
 
-        headers, payload = sign_request(request.model_dump_json(), purpose=MONITORING_PURPOSE, management=True)
+        headers, payload = sign_request(
+            request.model_dump_json(), purpose=MONITORING_PURPOSE, management=True
+        )
         # Need to apply json header since passing in string instead of dict
         headers["Content-Type"] = "application/json"
 
@@ -140,7 +146,7 @@ class ControlPlaneClient:
                 try:
                     error_json = await response.json()
                     error = json.dumps(error_json)
-                except:
+                except Exception:
                     error = await response.text()
                 raise Exception(f"Failed to send resource update: {response.status} - {error}")
 
@@ -154,7 +160,9 @@ class ControlPlaneClient:
             state=state, timestamp=datetime.now(timezone.utc).isoformat()
         )
 
-        headers, payload = sign_request(heartbeat_data.model_dump_json(), purpose=MONITORING_PURPOSE, management=True)
+        headers, payload = sign_request(
+            heartbeat_data.model_dump_json(), purpose=MONITORING_PURPOSE, management=True
+        )
         # Need to apply json header since passing in string instead of dict
         headers["Content-Type"] = "application/json"
 
@@ -163,7 +171,7 @@ class ControlPlaneClient:
                 try:
                     error_json = await response.json()
                     error = json.dumps(error_json)
-                except:
+                except Exception:
                     error = await response.text()
                 raise Exception(f"Failed to send heartbeat: {response.status} - {error}")
             logger.debug("Heartbeat sent successfully")

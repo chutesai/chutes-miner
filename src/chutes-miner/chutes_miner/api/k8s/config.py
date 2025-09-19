@@ -122,13 +122,15 @@ class KubeConfig:
 
     def __hash__(self):
         # Hash based on immutable content
-        return hash((
-            self.apiVersion,
-            self.kind,
-            tuple([c.name for c in self.clusters]),  # Convert lists to tuples
-            tuple([c.name for c in self.contexts]),
-            tuple([c.name for c in self.users])
-        ))
+        return hash(
+            (
+                self.apiVersion,
+                self.kind,
+                tuple([c.name for c in self.clusters]),  # Convert lists to tuples
+                tuple([c.name for c in self.contexts]),
+                tuple([c.name for c in self.users]),
+            )
+        )
 
     @classmethod
     def from_dict(cls, config_dict: dict) -> "KubeConfig":
@@ -265,8 +267,8 @@ class MultiClusterKubeConfig:
     _instance: Optional["MultiClusterKubeConfig"] = None
 
     def __init__(self):
-        if not hasattr(self, '_kubeconfig'):
-            # Only set once to ensure we don't overwrite 
+        if not hasattr(self, "_kubeconfig"):
+            # Only set once to ensure we don't overwrite
             # when getting the singleton
             self._kubeconfig: Optional[KubeConfig] = None
             self._load_sync()
@@ -281,11 +283,11 @@ class MultiClusterKubeConfig:
             cls._instance = super().__new__(MultiClusterKubeConfig)
 
         return cls._instance
-    
+
     def _load_sync(self):
         if self._kubeconfig:
             return
-        
+
         try:
             # Try to get existing event loop to determine context
             asyncio.get_running_loop()
@@ -298,7 +300,7 @@ class MultiClusterKubeConfig:
     async def _load_async(self):
         if self._kubeconfig:
             return
-        
+
         try:
             async with get_session() as session:
                 servers = (await session.execute(select(Server))).unique().scalars()
@@ -347,7 +349,9 @@ class MultiClusterKubeConfig:
 
         # Merge with prefix to avoid naming conflicts
         self.kubeconfig.merge(other_config)
-        logger.debug(f"Add config for {', '.join([c.name for c in other_config.clusters])} from kubeconfig.")
+        logger.debug(
+            f"Add config for {', '.join([c.name for c in other_config.clusters])} from kubeconfig."
+        )
 
     def remove_config(self, context: str):
         self.kubeconfig.remove_context(context)

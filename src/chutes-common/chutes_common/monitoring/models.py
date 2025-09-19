@@ -54,6 +54,7 @@ class ClusterStatus(BaseModel):
     def is_healthy(self):
         return self.state in [ClusterState.ACTIVE, ClusterState.STARTING]
 
+
 class HeartbeatData(BaseModel):
     """Heartbeat data from member cluster"""
 

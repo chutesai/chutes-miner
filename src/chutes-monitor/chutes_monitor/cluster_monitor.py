@@ -180,8 +180,10 @@ class HealthChecker:
                 try:
                     cluster_name = cluster_status.cluster_name
 
-                    if cluster_status.last_heartbeat < cutoff_time \
-                        and cluster_status.state != ClusterState.ERROR:
+                    if (
+                        cluster_status.last_heartbeat < cutoff_time
+                        and cluster_status.state != ClusterState.ERROR
+                    ):
                         logger.info(f"Cleaning up stale cluster {cluster_name}")
                         # Only clear the resources.  Do not remove health or node info
                         # to avoid triggering a delete event in Gepetto.
@@ -224,7 +226,6 @@ class ClusterMonitor:
     async def register_cluster(self, cluster_name: str, resources: ClusterResources) -> bool:
         """Register and start monitoring on a member cluster"""
         try:
-
             clusters = self.redis_client.get_all_cluster_names()
             if cluster_name in clusters:
                 raise ClusterConflictException(f"Cluster {cluster_name} already exists.")

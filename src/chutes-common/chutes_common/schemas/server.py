@@ -37,7 +37,7 @@ class Server(Base):
     memory_per_gpu = Column(Integer, nullable=False, default=1)
     hourly_cost = Column(Float, nullable=False)
     locked = Column(Boolean, default=False)
-    kubeconfig = Column(Text, nullable=True) # Make this false if enforicng migration
+    kubeconfig = Column(Text, nullable=True)  # Make this false if enforicng migration
 
     gpus = relationship("GPU", back_populates="server", lazy="joined", cascade="all, delete-orphan")
     deployments = relationship(

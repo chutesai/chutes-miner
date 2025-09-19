@@ -14,6 +14,7 @@ router = APIRouter()
 # Global monitoring state
 resource_monitor = ResourceMonitor()
 
+
 @router.get("/health")
 async def health_check():
     """Health check endpoint"""
@@ -36,8 +37,7 @@ async def start_monitoring(
         # Stop existing monitoring if running
         if resource_monitor.state == MonitoringState.RUNNING:
             raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Monitoring process already running."
+                status_code=status.HTTP_409_CONFLICT, detail="Monitoring process already running."
             )
 
         await resource_monitor.start(request.control_plane_url)

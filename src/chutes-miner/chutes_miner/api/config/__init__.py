@@ -4,7 +4,6 @@ Application-wide settings.
 
 import os
 import json
-from loguru import logger
 import redis.asyncio as redis
 from functools import lru_cache
 from typing import Any

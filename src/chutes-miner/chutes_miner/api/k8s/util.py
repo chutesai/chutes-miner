@@ -1,11 +1,8 @@
 from typing import Any, Optional
 import uuid
 from kubernetes.client import (
-    V1Deployment,
     V1Service,
     V1ObjectMeta,
-    V1DeploymentSpec,
-    V1DeploymentStrategy,
     V1PodTemplateSpec,
     V1PodSpec,
     V1Container,
@@ -22,7 +19,7 @@ from kubernetes.client import (
     V1EmptyDirVolumeSource,
     V1ExecAction,
     V1Job,
-    V1JobSpec
+    V1JobSpec,
 )
 
 from chutes_common.schemas.chute import Chute
@@ -31,9 +28,17 @@ from chutes_common.schemas.server import Server
 from chutes_miner.api.config import settings
 
 
-def build_chute_job(deployment_id, chute: Chute, server: Server, service: V1Service, 
-    gpu_uuids: list[str], probe_port: int, token: Optional[str] = None, 
-    job_id: Optional[str] = None, config_id: Optional[str] = None, disk_gb: int  = 10
+def build_chute_job(
+    deployment_id,
+    chute: Chute,
+    server: Server,
+    service: V1Service,
+    gpu_uuids: list[str],
+    probe_port: int,
+    token: Optional[str] = None,
+    job_id: Optional[str] = None,
+    config_id: Optional[str] = None,
+    disk_gb: int = 10,
 ) -> V1Job:
     cpu = str(server.cpu_per_gpu * chute.gpu_count)
     ram = str(server.memory_per_gpu * chute.gpu_count) + "Gi"
@@ -257,7 +262,8 @@ def build_chute_job(deployment_id, chute: Chute, server: Server, service: V1Serv
                                 ),
                                 V1EnvVar(name="HF_HOME", value="/cache"),
                                 V1EnvVar(name="CIVITAI_HOME", value="/cache/civitai"),
-                            ] + extra_env,
+                            ]
+                            + extra_env,
                             resources=V1ResourceRequirements(
                                 requests={
                                     "cpu": cpu,
@@ -309,7 +315,9 @@ def build_chute_job(deployment_id, chute: Chute, server: Server, service: V1Serv
     )
 
 
-def build_chute_service(chute: Chute, deployment_id: str, extra_service_ports: list[dict[str, Any]] = []):
+def build_chute_service(
+    chute: Chute, deployment_id: str, extra_service_ports: list[dict[str, Any]] = []
+):
     return V1Service(
         metadata=V1ObjectMeta(
             name=f"{CHUTE_SVC_PREFIX}-{deployment_id}",

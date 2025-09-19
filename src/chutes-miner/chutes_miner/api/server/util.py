@@ -87,17 +87,16 @@ async def get_server_kubeconfig(agent_url: str):
         ) as response:
             if response.status != 200:
                 raise RuntimeError(f"Failed to retrieve kubeconfig from {agent_url}.")
-            
+
             try:
                 data = await response.json()
                 return KubeConfig.from_dict(yaml.safe_load(data["kubeconfig"]))
             except Exception as err:
                 raise RuntimeError(f"Failed to retrieve kubeconfig from {agent_url}:\n{err}")
-        
+
+
 async def start_server_monitoring(agent_url: str):
-    request = StartMonitoringRequest(
-        control_plane_url=settings.monitor_api
-    )
+    request = StartMonitoringRequest(control_plane_url=settings.monitor_api)
     payload = request.model_dump()
     async with aiohttp.ClientSession() as session:
         headers, payload_string = sign_request(payload, purpose="monitoring", management=True)
@@ -216,9 +215,7 @@ async def deploy_graval(
     node_labels = node_object.metadata.labels or {}
 
     # Double check that we don't already have chute deployments.
-    existing_jobs = K8sOperator().get_jobs(
-        label_selector="chute/chute=true,app=graval"
-    )
+    existing_jobs = K8sOperator().get_jobs(label_selector="chute/chute=true,app=graval")
     if any([job for job in existing_jobs.items if job.spec.template.spec.node_name == node_name]):
         raise NonEmptyServer(
             f"Kubernetes node {node_name} already has one or more chute and/or graval jobs."
@@ -320,9 +317,12 @@ async def deploy_graval(
 
 
 async def track_server(
-    validator: str, hourly_cost: float, node_object: V1Node, 
-    add_labels: Dict[str, str] = None, agent_api: Optional[str] = None,
-    kubeconfig: Optional[KubeConfig] = None
+    validator: str,
+    hourly_cost: float,
+    node_object: V1Node,
+    add_labels: Dict[str, str] = None,
+    agent_api: Optional[str] = None,
+    kubeconfig: Optional[KubeConfig] = None,
 ) -> Tuple[V1Node, Server]:
     """
     Track a new kubernetes (worker/GPU) node in our inventory.
@@ -391,8 +391,8 @@ async def track_server(
             cpu_per_gpu=cpu_per_gpu,
             memory_per_gpu=memory_per_gpu,
             hourly_cost=hourly_cost,
-            kubeconfig = json.dumps(kubeconfig.to_dict()),
-            agent_api=agent_api
+            kubeconfig=json.dumps(kubeconfig.to_dict()),
+            agent_api=agent_api,
         )
         session.add(server)
         try:
@@ -528,13 +528,11 @@ async def bootstrap_server(
                 await stop_server_monitoring(server_args.agent_api)
                 logger.info(f"Stopped monitoring for {node_name=} {node_uid=}")
 
-
     yield sse_message(
         f"attempting to add node server_id={node_object.metadata.uid} to inventory...",
     )
     seed = None
     try:
-
         if kubeconfig:
             # Make sure this is available for deploying
             MultiClusterKubeConfig().add_config(kubeconfig)
@@ -549,7 +547,7 @@ async def bootstrap_server(
                 "chutes/worker": "true",
             },
             agent_api=server_args.agent_api,
-            kubeconfig=kubeconfig
+            kubeconfig=kubeconfig,
         )
 
         # Great, now it's in our database, but we need to startup graval so the validator can check the GPUs.
@@ -629,7 +627,7 @@ async def bootstrap_server(
             error_message = f"GPU verification failed for {validator.hotkey}, aborting!"
             yield sse_message(error_message)
             raise GraValBootstrapFailure(error_message)
-        
+
         if server_args.agent_api:
             # If this is a mutli cluster setup, need to propagate existing Chute CMs to the cluster
             async with get_session() as session:

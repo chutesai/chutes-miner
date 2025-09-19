@@ -1,6 +1,5 @@
 # app/cache/redis_client.py
 from datetime import datetime, timezone
-from re import A
 from chutes_common.k8s import ClusterResources, WatchEvent, WatchEventType, serializer
 from chutes_common.monitoring.messages import ClusterChangeMessage, ResourceChangeMessage
 from chutes_common.monitoring.models import (
@@ -149,7 +148,9 @@ class MonitoringRedisClient:
         return pubsub
 
     def subscribe_to_resource_type(
-        self, resource_type: ResourceType, cluster_name: Optional[str] = None,
+        self,
+        resource_type: ResourceType,
+        cluster_name: Optional[str] = None,
     ) -> PubSub:
         """Subscribe to specific resource type changes"""
         pubsub = self.redis.pubsub()
@@ -170,7 +171,7 @@ class MonitoringRedisClient:
         pubsub.subscribe(channel)
         logger.info(f"Subscribed to channel: {channel}")
         return pubsub
-    
+
     def subscribe_to_clusters(self) -> PubSub:
         """Subscribe to cluster changes"""
         pubsub = self.redis.pubsub()
@@ -214,8 +215,7 @@ class MonitoringRedisClient:
         self._publish_resource_change(cluster_name, event)
 
     def delete_resource(
-            self, name: str, cluster: str = "*", type: ResourceType = ResourceType.ALL,
-            namespace = "*"
+        self, name: str, cluster: str = "*", type: ResourceType = ResourceType.ALL, namespace="*"
     ):
         key = f"clusters:{cluster}:resources:{type.value}"
         map_key = f"{namespace}:{name}"
@@ -296,7 +296,7 @@ class MonitoringRedisClient:
 
     async def clear_cluster_resources(self, cluster_name: str, clear_nodes: bool = False):
         """Clear all resources for a cluster"""
-        
+
         for resource_type in ResourceType:
             if resource_type == ResourceType.ALL or (
                 resource_type == ResourceType.NODE and not clear_nodes

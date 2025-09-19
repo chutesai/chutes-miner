@@ -28,7 +28,7 @@ from kubernetes.client import (
     V1DeploymentList,
     V1ConfigMap,
     V1Job,
-    V1JobList
+    V1JobList,
 )
 from kubernetes.client.rest import ApiException
 from kubernetes.client import CoreV1Api
@@ -80,7 +80,9 @@ class K8sOperator(abc.ABC):
         # Otherwise, determine which implementation to use
         try:
             # Detection logic
-            nodes = k8s_core_client().list_node(label_selector="node.kubernetes.io/instance-type=k3s")
+            nodes = k8s_core_client().list_node(
+                label_selector="node.kubernetes.io/instance-type=k3s"
+            )
             if nodes.items:
                 logger.debug("Creating K8S Operator for Multi-Cluster")
                 cls._instance = super().__new__(MultiClusterK8sOperator)
@@ -159,7 +161,9 @@ class K8sOperator(abc.ABC):
         Check if a job's pod is running and ready
         """
         # Get pods for this job
-        pod_label_selector = f"chutes/deployment-id={job.metadata.labels.get('chutes/deployment-id')}"
+        pod_label_selector = (
+            f"chutes/deployment-id={job.metadata.labels.get('chutes/deployment-id')}"
+        )
         pods = self.get_pods(namespace=job.metadata.namespace, label_selector=pod_label_selector)
 
         for pod in pods.items:
@@ -170,7 +174,6 @@ class K8sOperator(abc.ABC):
                     if all_ready:
                         return True
         return False
-
 
     def _extract_job_info(self, job: Any) -> Dict:
         """
@@ -185,7 +188,7 @@ class K8sOperator(abc.ABC):
             "chute_id": job.metadata.labels.get("chutes/chute-id"),
             "version": job.metadata.labels.get("chutes/version"),
             "node_selector": job.spec.template.spec.node_selector,
-            "node": job.spec.template.spec.node_name
+            "node": job.spec.template.spec.node_name,
         }
 
         # Job status information
@@ -198,13 +201,19 @@ class K8sOperator(abc.ABC):
             "start_time": job.status.start_time,
         }
 
-        pod_label_selector = f"chutes/deployment-id={job.metadata.labels.get('chutes/deployment-id')}"
+        pod_label_selector = (
+            f"chutes/deployment-id={job.metadata.labels.get('chutes/deployment-id')}"
+        )
         pods = self.get_pods(namespace=job.metadata.namespace, label_selector=pod_label_selector)
         job_info["pods"] = []
         for pod in pods.items:
-            state = pod.status.container_statuses[0].state if pod.status.container_statuses else None
+            state = (
+                pod.status.container_statuses[0].state if pod.status.container_statuses else None
+            )
             last_state = (
-                pod.status.container_statuses[0].last_state if pod.status.container_statuses else None
+                pod.status.container_statuses[0].last_state
+                if pod.status.container_statuses
+                else None
             )
             pod_info = {
                 "name": pod.metadata.name,
@@ -214,7 +223,9 @@ class K8sOperator(abc.ABC):
                 else 0,
                 "state": {
                     "running": state.running.to_dict() if state and state.running else None,
-                    "terminated": state.terminated.to_dict() if state and state.terminated else None,
+                    "terminated": state.terminated.to_dict()
+                    if state and state.terminated
+                    else None,
                     "waiting": state.waiting.to_dict() if state and state.waiting else None,
                 }
                 if state
@@ -300,7 +311,7 @@ class K8sOperator(abc.ABC):
         if not node.status.capacity or not node.status.capacity.get("nvidia.com/gpu"):
             logger.warning(f"Node has no GPU capacity: {node.metadata.name=}")
             return None
-        
+
         gpu_count = int(node.status.capacity["nvidia.com/gpu"])
         gpu_mem_mb = int(node.metadata.labels.get("nvidia.com/gpu.memory", "32"))
         gpu_mem_gb = int(gpu_mem_mb / 1024)
@@ -320,7 +331,7 @@ class K8sOperator(abc.ABC):
             if total_memory_gb <= gpu_count
             else min(gpu_mem_gb, math.floor(total_memory_gb * 0.8 / gpu_count))
         )
-        
+
         # Get disk space information
         disk_info = await self.get_node_disk_info(node.metadata.name)
 
@@ -334,7 +345,7 @@ class K8sOperator(abc.ABC):
             "memory_gb_per_gpu": memory_gb_per_gpu,
             "disk_total_gb": disk_info.get("total_gb", 0),
             "disk_available_gb": disk_info.get("available_gb", 0),
-            "disk_used_gb": disk_info.get("used_gb", 0)
+            "disk_used_gb": disk_info.get("used_gb", 0),
         }
         return node_info
 
@@ -406,15 +417,13 @@ class K8sOperator(abc.ABC):
         """
         jobs = []
         label_selector = "chutes/chute=true"
-        job_list = self.get_jobs(
-            namespace=settings.namespace,
-            label_selector=label_selector
-        )
+        job_list = self.get_jobs(namespace=settings.namespace, label_selector=label_selector)
         for job in job_list.items:
             jobs.append(self._extract_job_info(job))
-            logger.info(f"Found chute job: {job.metadata.name} in namespace {job.metadata.namespace}")
+            logger.info(
+                f"Found chute job: {job.metadata.name} in namespace {job.metadata.namespace}"
+            )
         return jobs
-        
 
     async def _get_chute_deployments(self) -> List[Dict]:
         """
@@ -444,7 +453,6 @@ class K8sOperator(abc.ABC):
         except Exception as e:
             logger.error(f"Failed to get legacy deployments: {e}")
         return deployments
-    
 
     async def delete_code(self, chute_id: str, version: str) -> None:
         """
@@ -492,9 +500,7 @@ class K8sOperator(abc.ABC):
         """
         node_name = None
         try:
-            job = await self.get_deployment(
-                deployment_id=deployment_id
-            )
+            job = await self.get_deployment(deployment_id=deployment_id)
             node_name = job.get("node", None)
         except Exception:
             pass
@@ -502,15 +508,13 @@ class K8sOperator(abc.ABC):
         try:
             if node_name:
                 self._delete_job(
-                    name=f"{CHUTE_DEPLOY_PREFIX}-{deployment_id}",
-                    namespace=settings.namespace
+                    name=f"{CHUTE_DEPLOY_PREFIX}-{deployment_id}", namespace=settings.namespace
                 )
             else:
                 # Handle fallback to cleaning up old deployments, from instances
                 # Created before the 2025-07-17 upgrade.
                 self._delete_deployment(
-                    name=f"{CHUTE_DEPLOY_PREFIX}-{deployment_id}",
-                    namespace=settings.namespace
+                    name=f"{CHUTE_DEPLOY_PREFIX}-{deployment_id}", namespace=settings.namespace
                 )
         except Exception as exc:
             logger.warning(f"Error deleting deployment from k8s: {exc}")
@@ -518,24 +522,29 @@ class K8sOperator(abc.ABC):
         try:
             self._delete_service(f"{CHUTE_SVC_PREFIX}-{deployment_id}")
         except Exception as exc:
-            logger.warning(f"Error removing primary service {CHUTE_SVC_PREFIX}-{deployment_id}: {exc}")
+            logger.warning(
+                f"Error removing primary service {CHUTE_SVC_PREFIX}-{deployment_id}: {exc}"
+            )
 
         await self.wait_for_deletion(f"chutes/deployment-id={deployment_id}", timeout_seconds=15)
-        
+
         if node_name:
             self.invalidate_node_disk_cache(node_name)
-        
 
     @abc.abstractmethod
-    def _deploy_service(self, service: V1Service, server_name: Optional[str] = None, namespace=settings.namespace):
+    def _deploy_service(
+        self, service: V1Service, server_name: Optional[str] = None, namespace=settings.namespace
+    ):
         raise NotImplementedError()
 
     @abc.abstractmethod
     def _delete_service(self, name, namespace=settings.namespace):
         raise NotImplementedError()
-    
+
     @abc.abstractmethod
-    def _deploy_job(self, job: V1Job, server_name: Optional[str] = None, namespace=settings.namespace):
+    def _deploy_job(
+        self, job: V1Job, server_name: Optional[str] = None, namespace=settings.namespace
+    ):
         raise NotImplementedError()
 
     @abc.abstractmethod
@@ -571,15 +580,15 @@ class K8sOperator(abc.ABC):
         raise NotImplementedError()
 
     async def deploy_chute(
-        self, 
-        chute_id: Union[str | Chute], 
+        self,
+        chute_id: Union[str | Chute],
         server_id: Union[str | Server],
         token: str = None,
         job_id: str = None,
         config_id: str = None,
         disk_gb: int = 10,
         extra_labels: dict[str, str] = {},
-        extra_service_ports: list[dict[str, Any]] = []
+        extra_service_ports: list[dict[str, Any]] = [],
     ) -> Tuple[Deployment, V1Job]:
         """Deploy a chute!"""
         try:
@@ -602,12 +611,13 @@ class K8sOperator(abc.ABC):
                 )
 
             # Build the service that exposes it.
-            service = self._create_service_for_deployment(chute, server, deployment_id, extra_service_ports)
+            service = self._create_service_for_deployment(
+                chute, server, deployment_id, extra_service_ports
+            )
 
             # Create the deployment.
             job = self._create_job_for_deployment(
-                deployment_id, chute, server, service, 
-                gpu_uuids, token, config_id, disk_gb
+                deployment_id, chute, server, service, gpu_uuids, token, config_id, disk_gb
             )
 
             # Deploy the chute
@@ -616,21 +626,19 @@ class K8sOperator(abc.ABC):
             self.invalidate_node_disk_cache(server.name)
             return deployment, job
         except Exception as exc:
-
             if deployment_id:
                 await self._clear_deployment(deployment_id)
-
 
             try:
                 if service:
                     self._delete_service(service.metadata.name)
-            except:
+            except Exception:
                 ...
 
             try:
                 if job:
                     self._delete_job(job.metadata.name)
-            except:
+            except Exception:
                 ...
 
             logger.warning(
@@ -678,7 +686,13 @@ class K8sOperator(abc.ABC):
         return available_gpus
 
     async def _track_deployment(
-        self, session: AsyncSession, chute: Chute, server: Server, available_gpus, job_id: str = None, config_id: str = None
+        self,
+        session: AsyncSession,
+        chute: Chute,
+        server: Server,
+        available_gpus,
+        job_id: str = None,
+        config_id: str = None,
     ):
         # Immediately track this deployment (before actually creating it) to avoid allocation contention.
         deployment_id = str(uuid.uuid4())
@@ -697,14 +711,14 @@ class K8sOperator(abc.ABC):
             verified_at=None,
             stub=True,
             job_id=job_id,
-            config_id=config_id
+            config_id=config_id,
         )
         session.add(deployment)
         deployment.gpus = gpus
         await session.commit()
 
         return deployment_id, gpu_uuids
-    
+
     async def _clear_deployment(self, deployment_id: str):
         async with get_session() as session:
             deployment = (
@@ -719,7 +733,7 @@ class K8sOperator(abc.ABC):
             if deployment:
                 await session.delete(deployment)
                 await session.commit()
-    
+
     async def _update_deployment(self, deployment_id: str, server: Server, service: V1Service):
         deployment_port = service.spec.ports[0].node_port
         async with get_session() as session:
@@ -750,8 +764,8 @@ class K8sOperator(abc.ABC):
             )
 
     def _get_probe_port(self, chute: Chute):
-         # Determine the port to use for the liveness probe.
-        probe_port=8000
+        # Determine the port to use for the liveness probe.
+        probe_port = 8000
         core_version = re.match(
             r"^([0-9]+\.[0-9]+\.[0-9]+).*", (chute.chutes_version or "0.0.0")
         ).group(1)
@@ -811,7 +825,7 @@ class K8sOperator(abc.ABC):
             await self.wait_for_deletion(label_selector)
         except Exception:
             ...
-    
+
     def invalidate_node_disk_cache(self, node_name: str):
         """
         Invalidate the disk cache for a specific node.
@@ -819,7 +833,7 @@ class K8sOperator(abc.ABC):
         if node_name in _disk_info_cache:
             logger.info(f"Invalidating cached disk size check for {node_name=}")
             del _disk_info_cache[node_name]
-    
+
     async def get_node_disk_info(self, node_name: str) -> Dict[str, float]:
         """
         Get disk space information for a specific node with caching.
@@ -843,9 +857,7 @@ class K8sOperator(abc.ABC):
 
             logger.info(f"Fetching fresh disk info for node {node_name}")
             try:
-                pods = self.get_pods(
-                    field_selector=f"spec.nodeName={node_name}"
-                )
+                pods = self.get_pods(field_selector=f"spec.nodeName={node_name}")
                 used_disk_gb = 0
                 for pod in pods.items:
                     if pod.status.phase not in ["Running", "Pending"]:
@@ -868,7 +880,9 @@ class K8sOperator(abc.ABC):
                                             float(ephemeral_storage.replace("Mi", "")) / 1024
                                         )
                                     elif ephemeral_storage.endswith("M"):
-                                        used_disk_gb += float(ephemeral_storage.replace("M", "")) / 1024
+                                        used_disk_gb += (
+                                            float(ephemeral_storage.replace("M", "")) / 1024
+                                        )
                                     elif ephemeral_storage.endswith("Ki"):
                                         used_disk_gb += (
                                             float(ephemeral_storage.replace("Ki", "")) / 1024 / 1024
@@ -891,7 +905,9 @@ class K8sOperator(abc.ABC):
                                             float(ephemeral_storage.replace("Mi", "")) / 1024
                                         )
                                     elif ephemeral_storage.endswith("M"):
-                                        used_disk_gb += float(ephemeral_storage.replace("M", "")) / 1024
+                                        used_disk_gb += (
+                                            float(ephemeral_storage.replace("M", "")) / 1024
+                                        )
                                     elif ephemeral_storage.endswith("Ki"):
                                         used_disk_gb += (
                                             float(ephemeral_storage.replace("Ki", "")) / 1024 / 1024
@@ -949,8 +965,14 @@ class K8sOperator(abc.ABC):
         """
         disk_info = await self.get_node_disk_info(node_name)
         return disk_info.get("available_gb", 0) >= required_disk_gb
-    
-    def _create_service_for_deployment(self, chute: Chute, server: Server, deployment_id: str, extra_service_ports: list[dict[str, Any]] = []):
+
+    def _create_service_for_deployment(
+        self,
+        chute: Chute,
+        server: Server,
+        deployment_id: str,
+        extra_service_ports: list[dict[str, Any]] = [],
+    ):
         service = build_chute_service(chute, deployment_id, extra_service_ports)
 
         try:
@@ -959,19 +981,24 @@ class K8sOperator(abc.ABC):
             raise DeploymentFailure(
                 f"Failed to create service for {chute.chute_id=} and {deployment_id=}"
             )
-        
+
         return created_service
-    
+
     def _create_job_for_deployment(
-        self, deployment_id, chute: Chute, server: Server, service: V1Service, 
-        gpu_uuids: list[str], token: Optional[str] = None, 
-        config_id: Optional[str] = None, disk_gb: int  = 10
+        self,
+        deployment_id,
+        chute: Chute,
+        server: Server,
+        service: V1Service,
+        gpu_uuids: list[str],
+        token: Optional[str] = None,
+        config_id: Optional[str] = None,
+        disk_gb: int = 10,
     ) -> V1Job:
         probe_port = self._get_probe_port(chute)
         job = build_chute_job(
-                deployment_id, chute, server, service, 
-                gpu_uuids, probe_port, token, config_id, disk_gb
-            )        
+            deployment_id, chute, server, service, gpu_uuids, probe_port, token, config_id, disk_gb
+        )
 
         try:
             created_job = self._deploy_job(job, server_name=server.name)
@@ -979,7 +1006,7 @@ class K8sOperator(abc.ABC):
             raise DeploymentFailure(
                 f"Failed to create job for {chute.chute_id=} and {deployment_id=}"
             )
-        
+
         return created_job
 
 
@@ -1172,11 +1199,8 @@ class SingleClusterK8sOperator(K8sOperator):
 
         return jobs_list
 
-    def _deploy_service(self, service, server_name = None, namespace=settings.namespace):
-        return k8s_core_client().create_namespaced_service(
-            namespace=namespace,
-            body=service
-        )
+    def _deploy_service(self, service, server_name=None, namespace=settings.namespace):
+        return k8s_core_client().create_namespaced_service(namespace=namespace, body=service)
 
     def _delete_service(self, name, namespace=settings.namespace):
         k8s_core_client().delete_namespaced_service(
@@ -1184,17 +1208,12 @@ class SingleClusterK8sOperator(K8sOperator):
             namespace=namespace,
         )
 
-    def _deploy_job(self, job, server_name = None, namespace=settings.namespace):
-        return k8s_batch_client().create_namespaced_job(
-            namespace=namespace,
-            body=job
-        )
+    def _deploy_job(self, job, server_name=None, namespace=settings.namespace):
+        return k8s_batch_client().create_namespaced_job(namespace=namespace, body=job)
 
     def _delete_job(self, name, namespace=settings.namespace):
         k8s_batch_client().delete_namespaced_job(
-            name=name,
-            namespace=namespace,
-            propagation_policy="Foreground"
+            name=name, namespace=namespace, propagation_policy="Foreground"
         )
 
     def delete_config_map(self, name, namespace=settings.namespace):
@@ -1220,10 +1239,9 @@ class MultiClusterK8sOperator(K8sOperator):
             self._cluster_monitor_task = asyncio.create_task(self._watch_clusters())
 
     async def _watch_clusters(self):
-
         try:
             pubsub = self._redis.subscribe_to_clusters()
-            
+
             while True:
                 try:
                     message = pubsub.get_message(timeout=1)
@@ -1242,7 +1260,7 @@ class MultiClusterK8sOperator(K8sOperator):
             pass
         except Exception as e:
             logger.error(f"Unexpected error while watching clusters:\n{e}")
-        finally: 
+        finally:
             pubsub.close()
 
     async def _handle_cluster_change(self, message: ClusterChangeMessage):
@@ -1251,21 +1269,31 @@ class MultiClusterK8sOperator(K8sOperator):
                 self._manager.multi_config.remove_config(message.cluster)
             elif message.event_type == WatchEventType.ADDED:
                 async with get_session() as session:
-                    server = (await session.execute(
-                        select(Server)
-                        .where(Server.name == message.cluster))
-                    ).unique().scalar_one_or_none()
+                    server = (
+                        (
+                            await session.execute(
+                                select(Server).where(Server.name == message.cluster)
+                            )
+                        )
+                        .unique()
+                        .scalar_one_or_none()
+                    )
 
                     if server:
                         if server.kubeconfig:
-                            self._manager.multi_config.add_config(KubeConfig.from_dict(yaml.safe_load(server.kubeconfig)))
+                            self._manager.multi_config.add_config(
+                                KubeConfig.from_dict(yaml.safe_load(server.kubeconfig))
+                            )
                         else:
-                            logger.warning(f"Received add event for cluster {message.cluster} but no kubeconfig is set in DB.")
+                            logger.warning(
+                                f"Received add event for cluster {message.cluster} but no kubeconfig is set in DB."
+                            )
                     else:
-                        logger.warning(f"Received add event for cluster {message.cluster}, but does not exist in DB")
+                        logger.warning(
+                            f"Received add event for cluster {message.cluster}, but does not exist in DB"
+                        )
         except Exception as e:
             logger.error(f"Unexpected exception while handling cluster change:\n{e}")
-
 
     def get_node(self, name: str, kubeconfig: Optional[KubeConfig] = None) -> V1Node:
         """
@@ -1317,16 +1345,15 @@ class MultiClusterK8sOperator(K8sOperator):
             if e.status == 404:
                 # Not found, remove from redis
                 self._redis.delete_resource(name, context, ResourceType.DEPLOYMENT, namespace)
-                logger.warning(f"Attempted to delete deployment {name}, but appears to have disappeared.  Removed from redis cache.")
+                logger.warning(
+                    f"Attempted to delete deployment {name}, but appears to have disappeared.  Removed from redis cache."
+                )
             else:
                 raise
 
     def _deploy_service(self, service, server_name, namespace=settings.namespace):
         client = self._manager.get_core_client(server_name)
-        return client.create_namespaced_service(
-            namespace=namespace,
-            body=service
-        )
+        return client.create_namespaced_service(namespace=namespace, body=service)
 
     def _delete_service(self, name, namespace=settings.namespace):
         context = self._redis.get_resource_cluster(
@@ -1342,7 +1369,9 @@ class MultiClusterK8sOperator(K8sOperator):
             if e.status == 404:
                 # Not found, remove from redis
                 self._redis.delete_resource(name, context, ResourceType.SERVICE, namespace)
-                logger.warning(f"Attempted to delete service {name}, but appears to have disappeared.  Removed from redis cache.")
+                logger.warning(
+                    f"Attempted to delete service {name}, but appears to have disappeared.  Removed from redis cache."
+                )
             else:
                 raise
 
@@ -1370,28 +1399,25 @@ class MultiClusterK8sOperator(K8sOperator):
 
     def _deploy_job(self, job, server_name, namespace=settings.namespace):
         client = self._manager.get_batch_client(server_name)
-        return client.create_namespaced_job(
-            namespace=namespace,
-            body=job
-        )
+        return client.create_namespaced_job(namespace=namespace, body=job)
 
     def _delete_job(self, name, namespace=settings.namespace):
         context = self._redis.get_resource_cluster(
             resource_name=name, resource_type=ResourceType.JOB, namespace=namespace
         )
         client = self._manager.get_batch_client(context)
-        
+
         try:
             client.delete_namespaced_job(
-                name=name,
-                namespace=namespace,
-                propagation_policy="Foreground"
+                name=name, namespace=namespace, propagation_policy="Foreground"
             )
         except ApiException as e:
             if e.status == 404:
                 # Not found, remove from redis
                 self._redis.delete_resource(name, context, ResourceType.JOB, namespace)
-                logger.warning(f"Attempted to delete job {name}, but appears to have disappeared.  Removed from redis cache.")
+                logger.warning(
+                    f"Attempted to delete job {name}, but appears to have disappeared.  Removed from redis cache."
+                )
             else:
                 raise
 
@@ -1451,7 +1477,7 @@ class MultiClusterK8sOperator(K8sOperator):
         ):
             yield event
 
-    def get_jobs(self, namespace = None, label_selector = None, field_selector = None, timeout=120):
+    def get_jobs(self, namespace=None, label_selector=None, field_selector=None, timeout=120):
         resources = self._redis.get_resources(resource_type=ResourceType.JOB)
 
         job_list = [
@@ -1476,9 +1502,11 @@ class MultiClusterK8sOperator(K8sOperator):
         try:
             while True:
                 if time.time() - start_time > timeout:
-                    logger.warning(f"Watch timeout waiting for updates on {resource_type.value} after {timeout}s.")
+                    logger.warning(
+                        f"Watch timeout waiting for updates on {resource_type.value} after {timeout}s."
+                    )
                     break
-                
+
                 message = pubsub.get_message(timeout=1)
                 if message and message["type"] == "message":
                     data = json.loads(message["data"])
@@ -1565,8 +1593,8 @@ class MultiClusterK8sOperator(K8sOperator):
         """Get field value from deployment using dot notation."""
         obj = deployment
         for part in field_path.split("."):
-            if hasattr(obj, 'attribute_map'):
-                attribute_lookup = { v: k for k, v in obj.attribute_map.items() }
+            if hasattr(obj, "attribute_map"):
+                attribute_lookup = {v: k for k, v in obj.attribute_map.items()}
                 if part in attribute_lookup:
                     part = attribute_lookup[part]
             if hasattr(obj, part):

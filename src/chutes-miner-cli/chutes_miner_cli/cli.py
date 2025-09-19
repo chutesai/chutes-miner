@@ -250,7 +250,7 @@ def add_node(
                 "validator": validator,
                 "hourly_cost": hourly_cost,
                 "gpu_short_ref": gpu_short_ref,
-                "agent_api": agent_api
+                "agent_api": agent_api,
             }
             headers, payload_string = sign_request(hotkey, payload=payload)
             async with session.post(
