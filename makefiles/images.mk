@@ -22,19 +22,28 @@ tag:
 					available_targets=$$(grep -i "^FROM.*AS" $$dockerfile | sed 's/.*AS[[:space:]]*\([^[:space:]]*\).*/\1/' | tr '[:upper:]' '[:lower:]' || echo "production development"); \
 					image_conf=$$(cat $$image_dir/image.conf); \
 					registry=$$(echo "$$image_conf" | cut -d'/' -f1); \
-					image_name=$$(echo "$$image_conf" | cut -d'/' -f2); \
+					image_full_name=$$(echo "$$image_conf" | cut -d'/' -f2); \
+					if [[ "$$image_full_name" == *:* ]]; then \
+						image_name=$$(echo "$$image_full_name" | cut -d':' -f1); \
+						image_tag="$$(echo "$$image_full_name" | cut -d':' -f2)-"; \
+					else \
+						image_name=$$(echo "$$image_conf" | cut -d'/' -f2); \
+						image_tag=""; \
+					fi; \
 					for stage_target in $$available_targets; do \
 						if [[ "$$stage_target" == production* ]]; then \
 							if [[ "$$stage_target" == *-* ]]; then \
 								suffix=$$(echo $$stage_target | sed 's/production-//'); \
-								image_tag="$$pkg_version-$$suffix"; \
+								latest_tag="$$image_tag$$suffix-latest"; \
+								target_tag="$$image_tag$$suffix-$$pkg_version"; \
 							else \
-								image_tag="$$pkg_version"; \
+								latest_tag=$$image_tag"latest"; \
+								target_tag="$$image_tag$$pkg_version"; \
 							fi; \
-							echo "docker tag $$pkg_name:$$image_tag $$registry/$$image_name:$$image_tag"; \
-							docker tag $$pkg_name:$$image_tag $$registry/$$image_name:$$image_tag; \
-							echo "docker tag $$pkg_name:$$image_tag $$registry/$$image_name:latest"; \
-							docker tag $$pkg_name:$$image_tag $$registry/$$image_name:latest; \
+							echo "docker tag $$pkg_name:$$pkg_version $$registry/$$image_name:$$target_tag"; \
+							docker tag $$pkg_name:$$pkg_version $$registry/$$image_name:$$target_tag
+							echo "docker tag $$pkg_name:$$pkg_version $$registry/$$image_name:$$latest_tag"; \
+							docker tag $$pkg_name:$$pkg_version $$registry/$$image_name:$$latest_tag
 						fi; \
 					done; \
 				else \
@@ -73,19 +82,28 @@ push:
 					available_targets=$$(grep -i "^FROM.*AS" $$dockerfile | sed 's/.*AS[[:space:]]*\([^[:space:]]*\).*/\1/' | tr '[:upper:]' '[:lower:]' || echo "production development"); \
 					image_conf=$$(cat $$image_dir/image.conf); \
 					registry=$$(echo "$$image_conf" | cut -d'/' -f1); \
-					image_name=$$(echo "$$image_conf" | cut -d'/' -f2); \
+					image_full_name=$$(echo "$$image_conf" | cut -d'/' -f2); \
+					if [[ "$$image_full_name" == *:* ]]; then \
+						image_name=$$(echo "$$image_full_name" | cut -d':' -f1); \
+						image_tag="$$(echo "$$image_full_name" | cut -d':' -f2)-"; \
+					else \
+						image_name=$$(echo "$$image_conf" | cut -d'/' -f2); \
+						image_tag=""; \
+					fi; \
 					for stage_target in $$available_targets; do \
 						if [[ "$$stage_target" == production* ]]; then \
 							if [[ "$$stage_target" == *-* ]]; then \
 								suffix=$$(echo $$stage_target | sed 's/production-//'); \
-								image_tag="$$pkg_version-$$suffix"; \
+								latest_tag="$$image_tag$$suffix-latest"; \
+								target_tag="$$image_tag$$suffix-$$pkg_version"; \
 							else \
-								image_tag="$$pkg_version"; \
+								latest_tag=$$image_tag"latest"; \
+								target_tag="$$image_tag$$pkg_version"; \
 							fi; \
-							echo "docker push $$registry/$$image_name:$$image_tag"; \
-							docker push $$registry/$$image_name:$$image_tag; \
-							echo "docker push $$registry/$$image_name:latest"; \
-							docker push $$registry/$$image_name:latest; \
+							echo "docker push $$registry/$$image_name:$$target_tag"; \
+							docker push $$registry/$$image_name:$$target_tag; \
+							echo "docker push $$registry/$$image_name:$$latest_tag"; \
+							docker push $$registry/$$image_name:$$latest_tag; \
 						fi; \
 					done; \
 				else \
