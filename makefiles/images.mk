@@ -41,9 +41,9 @@ tag:
 								target_tag="$$image_tag$$pkg_version"; \
 							fi; \
 							echo "docker tag $$pkg_name:$$pkg_version $$registry/$$image_name:$$target_tag"; \
-							docker tag $$pkg_name:$$pkg_version $$registry/$$image_name:$$target_tag
+							docker tag $$pkg_name:$$pkg_version $$registry/$$image_name:$$target_tag; \
 							echo "docker tag $$pkg_name:$$pkg_version $$registry/$$image_name:$$latest_tag"; \
-							docker tag $$pkg_name:$$pkg_version $$registry/$$image_name:$$latest_tag
+							docker tag $$pkg_name:$$pkg_version $$registry/$$image_name:$$latest_tag; \
 						fi; \
 					done; \
 				else \
