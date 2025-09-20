@@ -1,3 +1,5 @@
+multiCluster: true
+
 validators:
   defaultRegistry: registry.chutes.ai
   defaultApi: https://api.chutes.ai

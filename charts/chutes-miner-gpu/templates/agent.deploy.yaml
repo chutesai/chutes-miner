@@ -1,3 +1,4 @@
+{{ if .Values.multiCluster }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -79,3 +80,4 @@ spec:
           hostPath:
             path: /var/lib/chutes/agent
             type: DirectoryOrCreate
+{{- end }}

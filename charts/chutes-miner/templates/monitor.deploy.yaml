@@ -1,3 +1,4 @@
+{{ if .Values.multiCluster }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -64,3 +65,4 @@ spec:
               protocol: TCP
           resources:
             {{- toYaml .Values.monitor.resources | nindent 12 }}
+{{- end }}

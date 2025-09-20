@@ -1,3 +1,4 @@
+{{ if .Values.multiCluster }}
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -80,3 +81,4 @@ roleRef:
   kind: Role
   name: agent-secret-access
   apiGroup: rbac.authorization.k8s.io
+{{- end }}

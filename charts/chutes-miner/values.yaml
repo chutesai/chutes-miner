@@ -1,4 +1,4 @@
-# Set this value to true if oeprating a mutli cluster karmada environment
+# Set this value to true if oeprating a mutli cluster k3s environment
 multiCluster: true
 
 calico: true
