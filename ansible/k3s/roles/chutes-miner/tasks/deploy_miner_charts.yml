@@ -1,0 +1,35 @@
+- name: Create temporary directory for miner charts
+  ansible.builtin.file:
+    path: /tmp/chutes-miner
+    state: directory
+    mode: "0755"
+
+- name: Copy monitoring charts from local directory
+  ansible.builtin.copy:
+    src: "{{ role_path }}/../../../../charts/chutes-miner/"
+    dest: /tmp/chutes-miner/
+    mode: preserve
+  register: copy_charts_result
+  changed_when: copy_charts_result.changed
+
+- name: Copy custom values
+  ansible.builtin.copy:
+    src: "{{ chart_values }}"
+    dest: /tmp/chutes-miner.yaml
+    mode: preserve
+  register: copy_values_result
+  changed_when: copy_values_result.changed
+
+- name: Install or upgrade Monitoring
+  ansible.builtin.command: >
+    helm upgrade --install chutes /tmp/chutes-miner
+    --namespace chutes
+    --kube-context {{ inventory_hostname }}
+    --create-namespace
+    -f /tmp/chutes-miner.yaml
+  register: miner_deployment
+  changed_when: miner_deployment.rc == 0
+
+- name: Display Miner deployment result
+  debug:
+    var: miner_deployment

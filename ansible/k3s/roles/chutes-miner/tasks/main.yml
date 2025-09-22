@@ -2,3 +2,11 @@
 - name: Setup monitoring
   ansible.builtin.include_tasks: setup_monitoring.yml
   tags: monitoring
+
+- name: Deploy miner charts
+  ansible.builtin.include_tasks: deploy_miner_charts.yml
+  tags: miner-charts
+
+- name: Deploy miner credentials
+  ansible.builtin.include_tasks: setup_miner_credentials.yml
+  tags: miner-credentials

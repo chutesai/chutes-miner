@@ -52,7 +52,7 @@ minerApi:
 
 
 gepetto:
-  image: parachutes/chutes-miner:k3s-latest
+  image: parachutes/miner:k3s-latest
   imagePullPolicy: Always
   resources:
     requests:
@@ -146,7 +146,7 @@ auditExporter:
 monitor:
   image: parachutes/chutes-monitor:k3s-latest
   imagePullPolicy: Always
-  externalUrl: "http://52.90.127.45:32001"
+  externalUrl: "http://54.205.225.44:32001"
   resources:
     requests:
       cpu: "250m"

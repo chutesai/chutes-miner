@@ -14,6 +14,10 @@
       ansible.builtin.include_role:
         name: k3s
 
+    - name: Setup chutes control node
+      ansible.builtin.include_role:
+        name: chutes-miner
+
     - name: Create gepetto-cm on control cluster
       kubernetes.core.k8s:
         state: present # Ensures it exists and matches this definition. Updates if different.
@@ -25,7 +29,7 @@
             name: gepetto-code
             namespace: chutes
           data:
-            gepetto.py: "{{ lookup('file', '{{ playbook_dir }}/../tasks/migration/files/gepetto.py') }}"
+            gepetto.py: "{{ lookup('file', '{{ playbook_dir }}/../tasks/migration/files/gepetto-k3s.py') }}"
 
     - name: Ensure ansible directory exists
       ansible.builtin.file:

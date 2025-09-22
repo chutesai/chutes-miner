@@ -24,3 +24,8 @@ all:
     setup_local_kubeconfig: false
     controller_kubeconfig: ~/.kube/chutes.config
     controller_kubectl_staging_dir: "{{ '~/.kube' | expanduser }}/chutes-staging" # noqa var-naming[no-role-prefix]
+
+    ss58_address: "<REPLACE_ME>"
+    secret_seed: "<REPLACE_ME>"
+
+    chart_values: "~/chutes/values.yaml"
