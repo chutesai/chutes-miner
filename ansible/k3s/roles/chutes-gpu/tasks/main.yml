@@ -7,11 +7,16 @@
   ansible.builtin.include_tasks: setup_monitoring.yml
   tags: monitoring
 
-- name: Setup kubectl
-  ansible.builtin.include_tasks: setup_kubectl.yml
-  tags: setup-kubectl
+- name: Deploy miner gpu charts
+  ansible.builtin.include_tasks: deploy_gpu_charts.yml
+  tags: miner-gpu-charts
+
+- name: Setup miner credentials
+  ansible.builtin.include_tasks: setup_miner_credentials.yml
+  tags: setup-miner-credentials
   vars:
     cert_name: miner
     cert_organization: chutes
     namespace: default  # Change this to your desired namespace
     store_as: secret   # Options: 'secret' or 'configmap'
+  
