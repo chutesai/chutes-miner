@@ -1299,9 +1299,15 @@ class MultiClusterK8sOperator(K8sOperator):
         """
         Retrieve a node from the cluster by name.
         """
-        _client: CoreV1Api = self._manager.get_core_client(context_name=name, kubeconfig=kubeconfig)
+        node = None
+        try:
+            _client: CoreV1Api = self._manager.get_core_client(context_name=name, kubeconfig=kubeconfig)
 
-        return _client.read_node(name=name)
+            node = _client.read_node(name=name)
+        except Exception as e:
+            logger.warning(f"Failed to get node:\n{e}")
+
+        return node
 
     def _get_nodes(self) -> V1NodeList:
         resources = self._redis.get_resources(resource_type=ResourceType.NODE)
