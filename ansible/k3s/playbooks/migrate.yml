@@ -186,6 +186,25 @@
             mode: "0644"
           when: not k3s_marker.stat.exists
 
+    - name: Setup Chutes
+      block:
+        - name: Check if Chutes has been setup
+          ansible.builtin.stat:
+            path: /etc/ansible/.chutes
+          register: chutes_marker
+
+        - name: Chutes Setup
+          ansible.builtin.include_role:
+            name: chutes-gpu
+          when: not chutes_marker.stat.exists
+
+        - name: Mark Chutes as setup
+          ansible.builtin.file:
+            path: /etc/ansible/.chutes
+            state: touch
+            mode: "0644"
+          when: not chutes_marker.stat.exists
+
     - name: Setup GPU
       block:
         - name: Check if GPU has been setup
@@ -233,6 +252,7 @@
       when:
         - removed_marker.stat.exists
         - reset_marker.stat.exists
+        - chutes_marker.stat.exists
         - setup_marker.stat.exists
         - k3s_marker.stat.exists
         - gpu_marker.stat.exists
@@ -247,6 +267,7 @@
       when:
         - removed_marker.stat.exists
         - reset_marker.stat.exists
+        - chutes_marker.stat.exists
         - setup_marker.stat.exists
         - k3s_marker.stat.exists
         - gpu_marker.stat.exists
