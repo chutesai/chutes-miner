@@ -378,6 +378,8 @@ async def track_server(
         else min(gpu_mem_gb, math.floor(total_memory_gb * 0.8 / gpu_count))
     )
 
+    _kubeconfig = json.dumps(kubeconfig.to_dict()) if kubeconfig else None
+
     # Track the server in our inventory.
     async with get_session() as session:
         server = Server(
@@ -391,7 +393,7 @@ async def track_server(
             cpu_per_gpu=cpu_per_gpu,
             memory_per_gpu=memory_per_gpu,
             hourly_cost=hourly_cost,
-            kubeconfig=json.dumps(kubeconfig.to_dict()),
+            kubeconfig=_kubeconfig,
             agent_api=agent_api,
         )
         session.add(server)
