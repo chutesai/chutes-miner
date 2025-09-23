@@ -51,7 +51,7 @@ def build_chute_job(
     }
 
     if config_id:
-        deployment_labels["chutes/config-id"] = config_id
+        deployment_labels["chutes/config-id"] = str(config_id)
     if job_id:
         deployment_labels["chutes/job-id"] = job_id
         deployment_labels["chutes/job"] = "true"

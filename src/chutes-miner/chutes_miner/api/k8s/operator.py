@@ -1080,12 +1080,20 @@ class SingleClusterK8sOperator(K8sOperator):
                 else ",".join([f"{k}={v}" for k, v in field_selector.items()])
             )
 
-        pods = k8s_core_client().list_namespaced_pod(
-            namespace=namespace,
-            label_selector=label_selector,
-            field_selector=field_selector,
-            timeout_seconds=timeout,
-        )
+        if namespace:
+            pods = k8s_core_client().list_namespaced_pod(
+                namespace=namespace,
+                label_selector=label_selector,
+                field_selector=field_selector,
+                timeout_seconds=timeout,
+            )
+        else:
+            pods = k8s_core_client().list_pod_for_all_namespaces(
+                label_selector=label_selector,
+                field_selector=field_selector,
+                timeout_seconds=timeout,
+            )
+        
         return pods
 
     async def get_deployment(self, deployment_id: str) -> Dict:
