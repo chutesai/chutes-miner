@@ -8,6 +8,7 @@ import time
 import uuid
 import traceback
 import abc
+from pydantic import ValidationError
 import semver
 from chutes_common.monitoring.messages import ClusterChangeMessage, ResourceChangeMessage
 from chutes_common.monitoring.models import ResourceType
@@ -48,7 +49,7 @@ from chutes_miner.api.k8s.util import build_chute_job, build_chute_service
 from chutes_common.schemas.server import Server
 from chutes_common.schemas.chute import Chute
 from chutes_common.schemas.deployment import Deployment
-from chutes_miner.api.config import k8s_core_client, k8s_app_client, k8s_batch_client, settings
+from chutes_miner.api.config import k8s_api_client, k8s_core_client, k8s_app_client, k8s_batch_client, settings
 from redis.client import PubSub
 import yaml
 
@@ -1057,7 +1058,12 @@ class SingleClusterK8sOperator(K8sOperator):
             field_selector=field_selector,
             timeout_seconds=timeout,
         ):
-            yield WatchEvent.from_dict(event)
+            # Need to pass in object as dict to avoid pydantic errors
+            # Since watch event expects objects from k8s_asyncio
+            yield WatchEvent.from_dict({
+                "type": event["type"],
+                "object": k8s_api_client().sanitize_for_serialization(event["object"])
+            })
 
     def get_pods(
         self,
@@ -1169,7 +1175,13 @@ class SingleClusterK8sOperator(K8sOperator):
             field_selector=field_selector,
             timeout_seconds=timeout,
         ):
-            yield WatchEvent.from_dict(event)
+            # Need to pass in object as dict to avoid pydantic errors
+            # Since watch event expects objects from k8s_asyncio
+            yield WatchEvent.from_dict({
+                "type": event["type"],
+                "object": k8s_api_client().sanitize_for_serialization(event["object"])
+            })
+
 
     def _delete_deployment(self, name, namespace=settings.namespace):
         k8s_app_client().delete_namespaced_deployment(
