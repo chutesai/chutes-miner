@@ -72,5 +72,3 @@ agent:
 
 failedChuteCleanup:
   image: bitnami/kubectl:latest
-  nodeSelector:
-    chutes/worker: "true"
