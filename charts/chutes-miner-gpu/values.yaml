@@ -47,10 +47,7 @@ auth:
     limits:
       cpu: 250m
       memory: 256Mi
-  service:
-    type: ClusterIP
-    port: 8080
-    targetPort: 8000
+  port: 8000
 
 agent:
   image: parachutes/chutes-agent:k3s-latest
