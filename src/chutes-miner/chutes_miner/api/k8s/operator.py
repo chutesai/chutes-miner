@@ -618,7 +618,15 @@ class K8sOperator(abc.ABC):
 
             # Create the deployment.
             job = self._create_job_for_deployment(
-                deployment_id, chute, server, service, gpu_uuids, token, config_id, disk_gb
+                deployment_id,
+                chute, 
+                server, 
+                service, 
+                gpu_uuids, 
+                token=token, 
+                job_id=job_id,
+                config_id=config_id, 
+                disk_gb=disk_gb
             )
 
             # Deploy the chute
@@ -993,12 +1001,22 @@ class K8sOperator(abc.ABC):
         service: V1Service,
         gpu_uuids: list[str],
         token: Optional[str] = None,
+        job_id: Optional[str] = None,
         config_id: Optional[str] = None,
         disk_gb: int = 10,
     ) -> V1Job:
         probe_port = self._get_probe_port(chute)
         job = build_chute_job(
-            deployment_id, chute, server, service, gpu_uuids, probe_port, token, config_id, disk_gb
+            deployment_id, 
+            chute, 
+            server, 
+            service, 
+            gpu_uuids, 
+            probe_port, 
+            token=token, 
+            job_id=job_id, 
+            config_id=config_id, 
+            disk_gb=disk_gb
         )
 
         try:
