@@ -48,7 +48,7 @@ class ClusterRouter:
         )
         self.router.add_api_route("/{cluster_name}/health", self.handle_heartbeat, methods=["PUT"])
 
-    async def _cluster_exists(self, cluster_name: str):
+    async def _server_exists(self, cluster_name: str):
         async with get_session() as session:
             server = (
                 (await session.execute(select(Server).where(Server.name == cluster_name)))
@@ -65,7 +65,7 @@ class ClusterRouter:
     ):
         """Register and start monitoring a new cluster"""
         try:
-            if not await self._cluster_exists(cluster_name):
+            if not await self._server_exists(cluster_name):
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Server does not exist in inventory.",
@@ -106,7 +106,7 @@ class ClusterRouter:
     ):
         """Register and start monitoring a new cluster"""
         try:
-            if not await self._cluster_exists(cluster_name):
+            if not await self._server_exists(cluster_name):
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Server does not exist in inventory.",
