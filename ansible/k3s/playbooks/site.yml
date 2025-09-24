@@ -114,7 +114,7 @@
 
     - name: Record chutes role completion
       ansible.builtin.set_fact:
-        chutes_setup: true
+        chutes_gpu_setup: true
       when: "not skip_configuration | default(false)"
 
 - name: Mark configuration as complete
@@ -138,5 +138,6 @@
       when:
         - common_setup | default(false)
         - k3s_setup | default(false)
+        - chutes_gpu_setup | default(false)
         - chutes_setup | default(false)
         - not skip_configuration | default(false)
