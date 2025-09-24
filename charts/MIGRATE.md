@@ -26,7 +26,7 @@ cd ..
 
 Update gepetto:
 ```bash
-kubectl create configmap gepetto-code --from-file=src/chutes-miner/chutes_miner/gepetto.py -o yaml --dry-run=client | kubectl apply -n chutes -f -
+kubectl create configmap gepetto-code --from-file=$HOME/chutes/gepetto.py -o yaml --dry-run=client | kubectl apply -n chutes -f -
 ```
 
 Deploy `chutes-miner` charts for control node components
