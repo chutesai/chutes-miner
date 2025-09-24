@@ -14,7 +14,6 @@ fullnameOverride: ''
 
 prometheus:
   deploy: true
-  karmadaToken: REPLACEME
   createSecret: false
   alertmanager:
     enabled: false
@@ -42,7 +41,6 @@ prometheus:
     scrapePrometheus: true
     scrapePods: true
     scrapeNodes: true
-    scrapeKarmada: false
     customScrapeConfigs: []
     additionalConfigs: []
   propagationPolicies:
@@ -53,8 +51,6 @@ prometheus:
 
 grafana:
   deploy: true
-  propagationPolicies:
-    create: false
   
 
 serviceAccount:
