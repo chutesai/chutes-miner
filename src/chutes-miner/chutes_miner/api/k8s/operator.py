@@ -1420,14 +1420,19 @@ class MultiClusterK8sOperator(K8sOperator):
                 raise
 
     def delete_config_map(self, name, namespace=settings.namespace):
-        context = self._redis.get_resource_cluster(
-            resource_name=name, resource_type=ResourceType.SERVICE, namespace=namespace
-        )
-        client = self._manager.get_core_client(context)
-        client.delete_namespaced_config_map(
-            name=name,
-            namespace=namespace,
-        )
+        # Create CM on all clusters
+        clusters = self._redis.get_all_cluster_names()
+        for cluster in clusters:
+            client = self._manager.get_core_client(cluster)
+            # Need to handle 404 per cluster so we don't break out early
+            try:
+                client.delete_namespaced_config_map(
+                    name=name,
+                    namespace=namespace,
+                )
+            except ApiException as e:
+                if e.status != 404:
+                    raise
 
     def _deploy_config_map(self, config_map: V1ConfigMap, namespace=settings.namespace):
         # Create CM on all clusters
