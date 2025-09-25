@@ -29,7 +29,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0  # Full history to ensure base ref availability
+
+      - name: Fetch base branch for PRs
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch origin ${{ github.base_ref }}:${{ github.base_ref }}
 
       - name: Setup Helm
         uses: azure/setup-helm@v4
@@ -46,8 +51,13 @@ jobs:
         id: check
         run: |
           # Determine base ref
-          BASE_REF="${{ github.event_name == 'pull_request' && github.base_ref || 'HEAD~1' }}"
-          IS_MAIN="${{ github.ref == 'refs/heads/main' && 'true' || 'false' }}"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_REF="${{ github.base_ref }}"
+            IS_MAIN="${{ github.base_ref == 'main' && 'true' || 'false' }}"
+          else
+            BASE_REF="HEAD~1"
+            IS_MAIN="${{ github.ref == 'refs/heads/main' && 'true' || 'false' }}"
+          fi
           
           # Get current and previous versions
           CURRENT_VERSIONS=""
@@ -55,7 +65,7 @@ jobs:
             [ -f "$chart_dir" ] && CURRENT_VERSIONS="$CURRENT_VERSIONS\n$(basename "$(dirname "$chart_dir")"):$(yq e '.version' "$chart_dir")"
           done
           
-          git checkout $BASE_REF -- ${{ env.CHART_DIR }}/
+          git checkout "$BASE_REF" -- ${{ env.CHART_DIR }}/ || { echo "::error::Failed to checkout $BASE_REF"; exit 1; }
           PREVIOUS_VERSIONS=""
           for chart_dir in ${{ env.CHART_DIR }}/*/Chart.yaml; do
             [ -f "$chart_dir" ] && PREVIOUS_VERSIONS="$PREVIOUS_VERSIONS\n$(basename "$(dirname "$chart_dir")"):$(yq e '.version' "$chart_dir")"
@@ -69,9 +79,9 @@ jobs:
           
           while IFS=: read -r chart_name current_version; do
             [ -z "$chart_name" ] && continue
-            previous_version=$(echo "$PREVIOUS_VERSIONS" | grep "^$chart_name:" | cut -d: -f2)
+            previous_version=$(echo -e "$PREVIOUS_VERSIONS" | grep "^$chart_name:" | cut -d: -f2 || echo "")
             
-            if [ "$current_version" != "$previous_version" ]; then
+            if [ -n "$current_version" ] && [ "$current_version" != "$previous_version" ]; then
               echo "✅ $chart_name: $previous_version → $current_version"
               VERSION_CHANGES="$VERSION_CHANGES\n$chart_name: $current_version"
               
@@ -170,3 +180,13 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               body: `## 🎉 Charts Published
+
+              **Changes:**${{ steps.check.outputs.version_changes }}
+
+              **Test Commands:**
+              \`\`\`bash
+              helm repo add chutes https://rayonlabs.github.io/chutes-miner
+              helm repo update
+              helm search repo chutes --versions
+              \`\`\`
+            });
