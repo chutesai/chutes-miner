@@ -1,5 +1,4 @@
 name: Publish Helm Charts
-
 on:
   pull_request:
     types: [opened, synchronize, reopened]
@@ -11,12 +10,10 @@ on:
     paths:
       - 'charts/**'
   workflow_dispatch:
-
 env:
   CHART_DIR: charts
   HELM_CHART_DIR: charts-gh-pages
   REPO_URL: "https://rayonlabs.github.io/chutes-miner"
-
 jobs:
   check-and-publish:
     runs-on: ubuntu-latest
@@ -29,24 +26,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Full history to ensure base ref availability
-
+          fetch-depth: 0 # Full history to ensure base ref availability
       - name: Fetch base branch for PRs
         if: github.event_name == 'pull_request'
         run: |
           git fetch origin ${{ github.base_ref }}:${{ github.base_ref }}
-
       - name: Setup Helm
         uses: azure/setup-helm@v4
         with:
           version: v3.14.0
-
       - name: Install yq
         run: |
           wget https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64 -O /usr/local/bin/yq
           chmod +x /usr/local/bin/yq
           yq --version
-
       - name: Check Chart.yaml changes and validate
         id: check
         run: |
@@ -58,36 +51,59 @@ jobs:
             BASE_REF="HEAD~1"
             IS_MAIN="${{ github.ref == 'refs/heads/main' && 'true' || 'false' }}"
           fi
-          
-          # Get current and previous versions
+
+          # Initialize variables
           CURRENT_VERSIONS=""
-          for chart_dir in ${{ env.CHART_DIR }}/*/Chart.yaml; do
-            [ -f "$chart_dir" ] && CURRENT_VERSIONS="$CURRENT_VERSIONS\n$(basename "$(dirname "$chart_dir")"):$(yq e '.version' "$chart_dir")"
-          done
-          
-          git checkout "$BASE_REF" -- ${{ env.CHART_DIR }}/ || { echo "::error::Failed to checkout $BASE_REF"; exit 1; }
           PREVIOUS_VERSIONS=""
-          for chart_dir in ${{ env.CHART_DIR }}/*/Chart.yaml; do
-            [ -f "$chart_dir" ] && PREVIOUS_VERSIONS="$PREVIOUS_VERSIONS\n$(basename "$(dirname "$chart_dir")"):$(yq e '.version' "$chart_dir")"
-          done
-          git checkout HEAD -- ${{ env.CHART_DIR }}/
-          
-          # Compare and validate
-          SHOULD_PUBLISH=false
           VERSION_CHANGES=""
           INVALID_VERSIONS=""
-          
+          SHOULD_PUBLISH=false
+
+          # Get current versions
+          for chart_dir in ${{ env.CHART_DIR }}/*/Chart.yaml; do
+            if [ -f "$chart_dir" ]; then
+              chart_name=$(basename "$(dirname "$chart_dir")")
+              version=$(yq e '.version' "$chart_dir")
+              if [ -n "$version" ]; then
+                CURRENT_VERSIONS="${CURRENT_VERSIONS}${chart_name}:${version}\n"
+              fi
+            fi
+          done
+
+          # Get previous versions
+          git checkout "$BASE_REF" -- ${{ env.CHART_DIR }}/ || { echo "::error::Failed to checkout $BASE_REF"; exit 1; }
+          for chart_dir in ${{ env.CHART_DIR }}/*/Chart.yaml; do
+            if [ -f "$chart_dir" ]; then
+              chart_name=$(basename "$(dirname "$chart_dir")")
+              version=$(yq e '.version' "$chart_dir")
+              if [ -n "$version" ]; then
+                PREVIOUS_VERSIONS="${PREVIOUS_VERSIONS}${chart_name}:${version}\n"
+              fi
+            fi
+          done
+          git checkout HEAD -- ${{ env.CHART_DIR }}/
+
+          # Debug output
+          echo "Current versions:"
+          echo -e "$CURRENT_VERSIONS"
+          echo "Previous versions:"
+          echo -e "$PREVIOUS_VERSIONS"
+
+          # Compare and validate
           while IFS=: read -r chart_name current_version; do
-            [ -z "$chart_name" ] && continue
+            # Skip empty or invalid lines
+            if [ -z "$chart_name" ] || [ -z "$current_version" ]; then
+              continue
+            fi
             previous_version=$(echo -e "$PREVIOUS_VERSIONS" | grep "^$chart_name:" | cut -d: -f2 || echo "")
             
             if [ -n "$current_version" ] && [ "$current_version" != "$previous_version" ]; then
               echo "✅ $chart_name: $previous_version → $current_version"
-              VERSION_CHANGES="$VERSION_CHANGES\n$chart_name: $current_version"
+              VERSION_CHANGES="${VERSION_CHANGES}${chart_name}: $current_version\n"
               
               if [ "$IS_MAIN" = "true" ]; then
                 if [[ "$current_version" =~ -dev$|-alpha$|-beta$|-rc[0-9]*$ ]]; then
-                  INVALID_VERSIONS="$INVALID_VERSIONS\n$chart_name: $current_version"
+                  INVALID_VERSIONS="${INVALID_VERSIONS}${chart_name}: $current_version\n"
                 else
                   SHOULD_PUBLISH=true
                 fi
@@ -96,47 +112,46 @@ jobs:
               fi
             fi
           done <<< "$CURRENT_VERSIONS"
-          
+
           # Block merge if invalid versions on main
           if [ "$IS_MAIN" = "true" ] && [ -n "$INVALID_VERSIONS" ]; then
             echo -e "🚫 Blocking merge to main: Invalid versions detected\n$INVALID_VERSIONS"
             echo "::error::Invalid versions for main branch:$INVALID_VERSIONS"
             exit 1
           fi
-          
+
+          # Output to GITHUB_OUTPUT
           echo "should_publish=$SHOULD_PUBLISH" >> $GITHUB_OUTPUT
           echo "version_changes<<EOF" >> $GITHUB_OUTPUT
-          $VERSION_CHANGES
-          EOF
-
+          echo -e "$VERSION_CHANGES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
       - name: Checkout existing charts
         if: steps.check.outputs.should_publish == 'true'
         uses: actions/checkout@v4
         with:
           ref: gh-pages
           path: existing-charts
-
       - name: Package and publish charts
         if: steps.check.outputs.should_publish == 'true'
         id: package
         run: |
           mkdir -p ${{ env.HELM_CHART_DIR }}
-          
+
           # Copy existing charts
           [ -d existing-charts ] && cp -r existing-charts/* ${{ env.HELM_CHART_DIR }}/
-          
+
           # Package changed charts
           NEW_CHARTS=0
           CHANGED_CHARTS=$(echo "${{ steps.check.outputs.version_changes }}" | grep -oE '^[a-zA-Z0-9-]+' | sort -u)
-          
+
           for chart_name in $CHANGED_CHARTS; do
             if [ -d "${{ env.CHART_DIR }}/$chart_name" ]; then
               chart_version=$(yq e '.version' "${{ env.CHART_DIR }}/$chart_name/Chart.yaml")
               if [ -f "${{ env.HELM_CHART_DIR }}/$chart_name-$chart_version.tgz" ]; then
-                echo "⚠️  $chart_name-$chart_version already exists, skipping"
+                echo "⚠️ $chart_name-$chart_version already exists, skipping"
                 continue
               fi
-              
+
               helm lint "${{ env.CHART_DIR }}/$chart_name/"
               helm package "${{ env.CHART_DIR }}/$chart_name" \
                 --destination "${{ env.HELM_CHART_DIR }}" \
@@ -144,7 +159,7 @@ jobs:
               NEW_CHARTS=$((NEW_CHARTS + 1))
             fi
           done
-          
+
           # Update index
           cd ${{ env.HELM_CHART_DIR }}
           if [ -f index.yaml ]; then
@@ -154,22 +169,20 @@ jobs:
           else
             helm repo index . --url "${{ env.REPO_URL }}"
           fi
-          
-          echo "new_charts=$NEW_CHARTS" >> $GITHUB_OUTPUT
 
+          echo "new_charts=$NEW_CHARTS" >> $GITHUB_OUTPUT
       - name: Deploy to GitHub Pages
         if: steps.check.outputs.should_publish == 'true'
-        uses: peaceiris/actions-gh-pages@v3
+        uses: actions/gh-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./charts-gh-pages
           publish_branch: gh-pages
           commit_message: |
             Publish charts
-            
+
             Changes:${{ steps.check.outputs.version_changes }}
             New versions: ${{ steps.package.outputs.new_charts }}
-
       - name: Comment PR with publish info
         if: github.event_name == 'pull_request' && steps.check.outputs.should_publish == 'true'
         uses: actions/github-script@v7
@@ -180,9 +193,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               body: `## 🎉 Charts Published
-
               **Changes:**${{ steps.check.outputs.version_changes }}
-
               **Test Commands:**
               \`\`\`bash
               helm repo add chutes https://rayonlabs.github.io/chutes-miner
