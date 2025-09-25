@@ -1,16 +1,18 @@
 from datetime import datetime, timezone
-from typing import List, Dict, Any
+from typing import List, Dict, Optional
 from chutes_common.k8s import ClusterResources
 from chutes_monitor.exceptions import ResourceRetreivalException
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 from loguru import logger
 
 from chutes_common.redis import MonitoringRedisClient
 from chutes_common.monitoring.models import ClusterState, ResourceType
 from chutes_monitor.api.monitoring.schemas import (
+    ClusterDetailResponse,
     ClusterOverview,
     ClusterDetail,
-    ClusterResourceTypeResponse,
+    ClusterResourcesResponse,
+    ClusterResourcesResponseItem,
     DashboardOverview,
     HealthSummary,
     ResourceSummary,
@@ -33,9 +35,9 @@ class MonitoringRouter:
     def _setup_routes(self):
         """Setup all the monitoring routes"""
         self.router.add_api_route("/clusters", self.list_clusters, methods=["GET"])
-        self.router.add_api_route("/clusters/{cluster_name}", self.get_cluster_detail, methods=["GET"])
-        self.router.add_api_route("/clusters/{cluster_name}/resources", self.get_cluster_resources, methods=["GET"])
-        self.router.add_api_route("/clusters/{cluster_name}/resources/{resource_type}", self.get_cluster_resource_type, methods=["GET"])
+        self.router.add_api_route("/clusters/details", self.get_cluster_detail, methods=["GET"])
+        self.router.add_api_route("/clusters/resources", self.get_cluster_resources, methods=["GET"])
+        # self.router.add_api_route("/clusters_resources", self.get_cluster_resource_type, methods=["GET"])
         self.router.add_api_route("/overview", self.get_dashboard_overview, methods=["GET"])
 
     async def list_clusters(self) -> List[ClusterOverview]:
@@ -75,99 +77,27 @@ class MonitoringRouter:
             logger.error(f"Error listing clusters: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
-    async def get_cluster_detail(self, cluster_name: str) -> ClusterDetail:
+    async def get_cluster_detail(self, cluster_name: Optional[str] = Query(None, description="Optional cluster name; omit for all clusters")) -> ClusterDetailResponse:
         """Get detailed information about a specific cluster including all resources"""
         try:
-            # Check if cluster exists
             cluster_names = self.redis_client.get_all_cluster_names()
-            if cluster_name not in cluster_names:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Cluster {cluster_name} not found"
-                )
+            if cluster_name:
+                # Check if cluster exists
+                if cluster_name not in cluster_names:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"Cluster {cluster_name} not found"
+                    )
+                requested_clusters = [cluster_name]
+            else:
+                requested_clusters = cluster_names
 
-            # Get cluster status
-            cluster_status = await self.redis_client.get_cluster_status(cluster_name)
-            if not cluster_status:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Cluster status for {cluster_name} not found"
-                )
+            details: list[ClusterDetail] = []
+            for cluster in requested_clusters:
+                details.append(self._get_cluster_details(cluster))
 
-            # Get all resources for this cluster
-            resources = await self._get_cluster_resources(cluster_name)
-            
-            # Create resource summaries
-            resource_summary = []
-            for resource_type, resource_list in resources.items():
-                summary = ResourceSummary(
-                    resource_type=resource_type,
-                    count=len(resource_list),
-                    sample_data=resource_list[0] if resource_list else None
-                )
-                resource_summary.append(summary)
-
-            detail = ClusterDetail(
-                cluster_name=cluster_name,
-                state=cluster_status.state,
-                last_heartbeat=cluster_status.last_heartbeat,
-                error_message=cluster_status.error_message,
-                is_healthy=cluster_status.is_healthy,
-                resources=resources,
-                resource_summary=resource_summary
-            )
-
-            return detail
-
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error(f"Error getting cluster detail for {cluster_name}: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
-
-    async def get_cluster_resources(self, cluster_name: str) -> Dict[str, List[Dict[str, Any]]]:
-        """Get all resources for a cluster, grouped by type"""
-        try:
-            # Check if cluster exists
-            cluster_names = self.redis_client.get_all_cluster_names()
-            if cluster_name not in cluster_names:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Cluster {cluster_name} not found"
-                )
-
-            resources = await self._get_cluster_resources(cluster_name)
-            return resources.to_dict()
-
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error(f"Error getting resources for cluster {cluster_name}: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
-
-    async def get_cluster_resource_type(
-        self, cluster_name: str, resource_type: str
-    ) -> ClusterResourceTypeResponse:
-        """Get specific resource type for a cluster"""
-        try:
-            # Check if cluster exists
-            cluster_names = self.redis_client.get_all_cluster_names()
-            if cluster_name not in cluster_names:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Cluster {cluster_name} not found"
-                )
-
-            # Get resources of specific type
-            resources = self.redis_client.get_resources(cluster_name, ResourceType(resource_type))
-            if resources is None:
-                resources = []
-
-            response = ClusterResourceTypeResponse(
-                cluster_name=cluster_name,
-                resource_type=resource_type,
-                resources=resources,
-                count=len(resources)
+            response = ClusterDetailResponse(
+                clusters=details
             )
 
             return response
@@ -175,8 +105,94 @@ class MonitoringRouter:
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"Error getting {resource_type} resources for cluster {cluster_name}: {e}")
+            logger.error(f"Error getting cluster detail for {cluster_name}: {e}")
             raise HTTPException(status_code=500, detail=str(e))
+        
+    async def _get_cluster_details(self, cluster_name):
+        # Get cluster status
+        cluster_status = await self.redis_client.get_cluster_status(cluster_name)
+        if not cluster_status:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Cluster status for {cluster_name} not found"
+            )
+
+        # Get all resources for this cluster
+        resources = await self._get_cluster_resources(cluster_name)
+        
+        # Create resource summaries
+        resource_summary = []
+        for resource_type, resource_list in resources.items():
+            summary = ResourceSummary(
+                resource_type=resource_type,
+                count=len(resource_list),
+                sample_data=resource_list[0] if resource_list else None
+            )
+            resource_summary.append(summary)
+
+        detail = ClusterDetail(
+            cluster_name=cluster_name,
+            state=cluster_status.state,
+            last_heartbeat=cluster_status.last_heartbeat,
+            error_message=cluster_status.error_message,
+            is_healthy=cluster_status.is_healthy,
+            resources=resources.to_dict(),
+            resource_summary=resource_summary
+        )
+
+        return detail
+
+    async def get_cluster_resources(
+            self, 
+            cluster_name: Optional[str] = Query(None, description="Optional cluster name; omit for all clusters"),
+            resource_type: Optional[str] = Query(None, description="Optional resource type to filter for")
+    ) -> ClusterResourcesResponse:
+        """Get all resources for a cluster, grouped by type"""
+        try:
+            cluster_names = self.redis_client.get_all_cluster_names()
+            if cluster_name:
+                # Check if cluster exists
+                if cluster_name not in cluster_names:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"Cluster {cluster_name} not found"
+                    )
+                requested_clusters = [cluster_name]
+            else:
+                requested_clusters = cluster_names
+
+            if resource_type:
+                try:
+                    _resource_type = ResourceType(resource_type)
+                except:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Invalid resource type supplied: {resource_type}"
+                    )
+            else:
+                _resource_type = ResourceType.ALL
+
+            response_items: list[ClusterResourcesResponseItem] = []
+            for cluster in requested_clusters:
+                resources = await self._get_cluster_resources(cluster, _resource_type)
+                response_items.append(ClusterResourcesResponseItem(
+                    cluster_name=cluster,
+                    resources=resources.to_dict(),
+                    count = resources.count
+                ))
+
+            response = ClusterResourcesResponse(
+                clusters=response_items
+            )
+
+            return response
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error getting resources for cluster {cluster_name}: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+        
 
     async def get_dashboard_overview(self) -> DashboardOverview:
         """Get comprehensive dashboard overview with system-wide statistics"""
@@ -216,11 +232,11 @@ class MonitoringRouter:
 
         return resource_counts
 
-    async def _get_cluster_resources(self, cluster_name: str) -> ClusterResources:
+    async def _get_cluster_resources(self, cluster_name: str, resource_type: ResourceType = ResourceType.ALL) -> ClusterResources:
         """Get all resources for a cluster, organized by type"""
 
         try:
-            cluster_resources = self.redis_client.get_resources(cluster_name)
+            cluster_resources = self.redis_client.get_resources(cluster_name, resource_type)
         except Exception as e:
             logger.debug(f"Error getting resources for {cluster_name}: {e}")
             raise ResourceRetreivalException(f"Failed to retrieve resources for {cluster_name}")

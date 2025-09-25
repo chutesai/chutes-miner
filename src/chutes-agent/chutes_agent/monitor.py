@@ -307,8 +307,7 @@ class ResourceMonitor:
                     asyncio.create_task(self.watch_namespaced_deployments(namespace)),
                     asyncio.create_task(self.watch_namespaced_pods(namespace)),
                     asyncio.create_task(self.watch_namespaced_services(namespace)),
-                    asyncio.create_task(self.watch_namespaced_jobs(namespace)),
-                    asyncio.create_task(self.watch_namespaced_configmaps(namespace)),
+                    asyncio.create_task(self.watch_namespaced_jobs(namespace))
                 ]
                 tasks += namespace_tasks
 
@@ -342,10 +341,6 @@ class ResourceMonitor:
     async def watch_namespaced_jobs(self, namespace: str):
         """Watch jobs for changes"""
         await self._watch_resources("jobs", self.batch_v1.list_namespaced_job, namespace=namespace)
-
-    async def watch_namespaced_configmaps(self, namespace: str):
-        """Watch jobs for changes"""
-        await self._watch_resources("configmaps", self.core_v1.list_namespaced_config_map, namespace=namespace)
 
     async def watch_nodes(self):
         """Watch services for changes"""

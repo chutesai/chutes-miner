@@ -21,6 +21,9 @@ class ClusterOverview(BaseModel):
     resource_counts: Dict[str, int]  # {"nodes": 3, "pods": 10, etc.}
     total_resources: int
 
+class ClusterDetailResponse(BaseModel):
+    """Response for cluster detail information"""
+    clusters: list["ClusterDetail"]
 
 class ClusterDetail(BaseModel):
     """Detailed cluster information including all resources"""
@@ -50,10 +53,11 @@ class DashboardOverview(BaseModel):
     cluster_overviews: List[ClusterOverview]
     last_updated: datetime
 
+class ClusterResourcesResponse(BaseModel):
+    clusters: list["ClusterResourcesResponseItem"]
 
-class ClusterResourceTypeResponse(BaseModel):
-    """Response for specific resource type endpoint"""
+class ClusterResourcesResponseItem(BaseModel):
+    """Response details for cluster resource"""
     cluster_name: str
-    resource_type: str
-    resources: List[Dict[str, Any]]
+    resources: Dict[str, List[Dict[str, Any]]]
     count: int
