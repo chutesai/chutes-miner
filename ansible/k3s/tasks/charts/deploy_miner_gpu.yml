@@ -1,13 +1,18 @@
+- name: Clean directory for fresh install
+  ansible.builtin.file:
+    path: /tmp/chutes-miner-gpu
+    state: absent
+
 - name: Create temporary directory for miner charts
   ansible.builtin.file:
-    path: /tmp/chutes-miner
+    path: /tmp/chutes-miner-gpu
     state: directory
     mode: "0755"
 
-- name: Copy monitoring charts from local directory
+- name: Copy miner-gpu charts from local directory
   ansible.builtin.copy:
-    src: "{{ role_path }}/../../../../charts/chutes-miner/"
-    dest: /tmp/chutes-miner/
+    src: "{{ playbook_dir }}/../../../charts/chutes-miner-gpu/"
+    dest: /tmp/chutes-miner-gpu/
     mode: preserve
   register: copy_charts_result
   changed_when: copy_charts_result.changed
@@ -15,21 +20,21 @@
 - name: Copy custom values
   ansible.builtin.copy:
     src: "{{ chart_values }}"
-    dest: /tmp/chutes-miner.yaml
+    dest: /tmp/chutes-miner-gpu.yaml
     mode: preserve
   register: copy_values_result
   changed_when: copy_values_result.changed
 
 - name: Install or upgrade Monitoring
   ansible.builtin.command: >
-    helm upgrade --install chutes /tmp/chutes-miner
+    helm upgrade --install chutes /tmp/chutes-miner-gpu
     --namespace chutes
     --kube-context {{ inventory_hostname }}
     --create-namespace
-    -f /tmp/chutes-miner.yaml
+    -f /tmp/chutes-miner-gpu.yaml
   register: miner_deployment
   changed_when: miner_deployment.rc == 0
 
-- name: Display Miner deployment result
+- name: Display Miner GPU deployment result
   debug:
     var: miner_deployment
