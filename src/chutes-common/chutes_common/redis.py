@@ -184,7 +184,7 @@ class MonitoringRedisClient:
     async def set_cluster_resources(self, cluster_name: str, resources: ClusterResources):
         """Sets cluster resources in redis, overwrite any existing resources."""
 
-        self.clear_cluster_resources(cluster_name)
+        await self.clear_cluster_resources(cluster_name)
 
         for resource_type, items in resources.items():
             if items:
@@ -310,7 +310,7 @@ class MonitoringRedisClient:
 
             if keys:
                 self.redis.delete(*keys)
-                logger.info(f"Cleared {len(keys)} resource keys for cluster {cluster_name}")
+                logger.info(f"Cleared {len(keys)} {resource_type.value} keys for cluster {cluster_name}")
 
     # Health tracking methods
     async def update_cluster_status(self, status: ClusterStatus):
