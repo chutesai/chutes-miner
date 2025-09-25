@@ -424,6 +424,11 @@
               "selector": "metadata.labels.chutes/chute",
               "text": "is_chute",
               "type": "boolean"
+            },
+            {
+              "selector": "cluster_name",
+              "text": "Node",
+              "type": "string"
             }
           ],
           "datasource": {
@@ -435,10 +440,10 @@
           "global_query_id": "",
           "parser": "backend",
           "refId": "A",
-          "root_selector": "clusters.resources.pods",
+          "root_selector": "clusters.(\n  $cluster_name := cluster_name;\n  resources.pods.$merge({\n    \"cluster_name\": $cluster_name,\n    \"metadata\": metadata,\n    \"spec\": spec,\n    \"status\": status,\n    \"apiVersion\": apiVersion,\n    \"kind\": kind\n  })\n)",
           "source": "url",
           "type": "json",
-          "url": "/api/v1/monitoring/clusters/resources?cluster_name=${clusters:raw}",
+          "url": "/api/v1/monitoring/clusters/resources?&resource_type=pod&cluster_name=${clusters:raw}",
           "url_options": {
             "data": "",
             "method": "GET"
@@ -470,7 +475,12 @@
               "is_chute": true
             },
             "includeByName": {},
-            "indexByName": {},
+            "indexByName": {
+              "Name": 0,
+              "Node": 2,
+              "Status": 1,
+              "is_chute": 3
+            },
             "renameByName": {}
           }
         }
@@ -506,7 +516,20 @@
             ]
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Name"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 471
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 7,
@@ -525,7 +548,8 @@
           ],
           "show": false
         },
-        "showHeader": true
+        "showHeader": true,
+        "sortBy": []
       },
       "pluginVersion": "11.6.0",
       "targets": [
@@ -545,6 +569,11 @@
               "selector": "metadata.labels.chutes/chute",
               "text": "is_chute",
               "type": "boolean"
+            },
+            {
+              "selector": "cluster_name",
+              "text": "Node",
+              "type": "string"
             }
           ],
           "datasource": {
@@ -556,7 +585,7 @@
           "global_query_id": "",
           "parser": "backend",
           "refId": "A",
-          "root_selector": "clusters.resources.pods",
+          "root_selector": "clusters.(\n  $cluster_name := cluster_name;\n  resources.pods.$merge({\n    \"cluster_name\": $cluster_name,\n    \"metadata\": metadata,\n    \"spec\": spec,\n    \"status\": status,\n    \"apiVersion\": apiVersion,\n    \"kind\": kind\n  })\n)",
           "source": "url",
           "type": "json",
           "url": "/api/v1/monitoring/clusters/resources?cluster_name=${clusters:raw}",
@@ -591,7 +620,12 @@
               "is_chute": true
             },
             "includeByName": {},
-            "indexByName": {},
+            "indexByName": {
+              "Name": 0,
+              "Node": 2,
+              "Status": 1,
+              "is_chute": 3
+            },
             "renameByName": {}
           }
         }
@@ -659,6 +693,18 @@
                 "value": true
               }
             ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Image"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 324
+              }
+            ]
           }
         ]
       },
@@ -679,7 +725,8 @@
           ],
           "show": false
         },
-        "showHeader": true
+        "showHeader": true,
+        "sortBy": []
       },
       "pluginVersion": "11.6.0",
       "targets": [
@@ -691,11 +738,6 @@
               "type": "string"
             },
             {
-              "selector": "spec.template.spec.containers.0.image",
-              "text": "Image",
-              "type": "string"
-            },
-            {
               "selector": "status.readyReplicas",
               "text": "Ready Replicas",
               "type": "number"
@@ -704,6 +746,11 @@
               "selector": "status.replicas",
               "text": "Target Replicas",
               "type": "number"
+            },
+            {
+              "selector": "cluster_name",
+              "text": "Node",
+              "type": "string"
             }
           ],
           "datasource": {
@@ -715,7 +762,7 @@
           "global_query_id": "",
           "parser": "backend",
           "refId": "A",
-          "root_selector": "clusters.resources.deployments",
+          "root_selector": "clusters.(\n  $cluster_name := cluster_name;\n  resources.deployments.$merge({\n    \"cluster_name\": $cluster_name,\n    \"metadata\": metadata,\n    \"spec\": spec,\n    \"status\": status,\n    \"apiVersion\": apiVersion,\n    \"kind\": kind\n  })\n)",
           "source": "url",
           "type": "json",
           "url": "/api/v1/monitoring/clusters/resources?resource_type=deployment&cluster_name=${clusters:raw}",
@@ -818,6 +865,42 @@
                 "value": 525
               }
             ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Target Port"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 105
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Port"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 93
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Node Port"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 105
+              }
+            ]
           }
         ]
       },
@@ -864,6 +947,11 @@
               "selector": "spec.ports.0.targetPort",
               "text": "Target Port",
               "type": "string"
+            },
+            {
+              "selector": "cluster_name",
+              "text": "Node",
+              "type": "string"
             }
           ],
           "datasource": {
@@ -875,7 +963,7 @@
           "global_query_id": "",
           "parser": "backend",
           "refId": "A",
-          "root_selector": "clusters.resources.services",
+          "root_selector": "clusters.(\n  $cluster_name := cluster_name;\n  resources.services.$merge({\n    \"cluster_name\": $cluster_name,\n    \"metadata\": metadata,\n    \"spec\": spec,\n    \"status\": status,\n    \"apiVersion\": apiVersion,\n    \"kind\": kind\n  })\n)",
           "source": "url",
           "type": "json",
           "url": "/api/v1/monitoring/clusters/resources?resource_type=service&cluster_name=${clusters:raw}",
@@ -925,10 +1013,11 @@
             },
             "includeByName": {},
             "indexByName": {
-              "Image": 1,
               "Name": 0,
-              "Ready Replicas": 2,
-              "Target Replicas": 3
+              "Node": 4,
+              "Node Port": 1,
+              "Port": 2,
+              "Target Port": 3
             },
             "renameByName": {}
           }
@@ -979,6 +1068,42 @@
                 "value": 444
               }
             ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Ready"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 103
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Succeeded"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 137
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Terminating"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 139
+              }
+            ]
           }
         ]
       },
@@ -1025,6 +1150,11 @@
               "selector": "status.terminating",
               "text": "Terminating",
               "type": "number"
+            },
+            {
+              "selector": "cluster_name",
+              "text": "Node",
+              "type": "string"
             }
           ],
           "datasource": {
@@ -1036,7 +1166,7 @@
           "global_query_id": "",
           "parser": "backend",
           "refId": "A",
-          "root_selector": "clusters.resources.jobs",
+          "root_selector": "clusters.(\n  $cluster_name := cluster_name;\n  resources.jobs.$merge({\n    \"cluster_name\": $cluster_name,\n    \"metadata\": metadata,\n    \"spec\": spec,\n    \"status\": status,\n    \"apiVersion\": apiVersion,\n    \"kind\": kind\n  })\n)",
           "source": "url",
           "type": "json",
           "url": "/api/v1/monitoring/clusters/resources?resource_type=job&cluster_name=${clusters:raw}",
@@ -1086,10 +1216,11 @@
             },
             "includeByName": {},
             "indexByName": {
-              "Image": 1,
               "Name": 0,
-              "Ready Replicas": 2,
-              "Target Replicas": 3
+              "Node": 4,
+              "Ready": 1,
+              "Succeeded": 2,
+              "Terminating": 3
             },
             "renameByName": {}
           }
@@ -1158,5 +1289,5 @@
   "timezone": "browser",
   "title": "Chutes Monitor",
   "uid": "fez34w7nfsqgwb",
-  "version": 1
+  "version": 2
 }
