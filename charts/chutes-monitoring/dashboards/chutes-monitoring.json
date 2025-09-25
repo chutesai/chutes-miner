@@ -18,7 +18,7 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": 2,
+  "id": 3,
   "links": [],
   "panels": [
     {
@@ -718,7 +718,7 @@
           "root_selector": "clusters.resources.deployments",
           "source": "url",
           "type": "json",
-          "url": "/api/v1/monitoring/clusters/resources?cluster_name=${clusters:raw}&resource_type=deployment",
+          "url": "/api/v1/monitoring/clusters/resources?resource_type=deployment&cluster_name=${clusters:raw}",
           "url_options": {
             "data": "",
             "method": "GET"
@@ -878,7 +878,7 @@
           "root_selector": "clusters.resources.services",
           "source": "url",
           "type": "json",
-          "url": "/api/v1/monitoring/clusters/resources?cluster_name=${clusters:raw}&resource_type=service",
+          "url": "/api/v1/monitoring/clusters/resources?resource_type=service&cluster_name=${clusters:raw}",
           "url_options": {
             "data": "",
             "method": "GET"
@@ -1039,7 +1039,7 @@
           "root_selector": "clusters.resources.jobs",
           "source": "url",
           "type": "json",
-          "url": "/api/v1/monitoring/clusters/resources?cluster_name=${clusters:raw}&resource_type=job",
+          "url": "/api/v1/monitoring/clusters/resources?resource_type=job&cluster_name=${clusters:raw}",
           "url_options": {
             "data": "",
             "method": "GET"
@@ -1104,6 +1104,7 @@
   "templating": {
     "list": [
       {
+        "allValue": " ",
         "current": {
           "text": "All",
           "value": "$__all"
