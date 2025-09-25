@@ -43,8 +43,6 @@ prometheus:
     scrapeNodes: true
     customScrapeConfigs: []
     additionalConfigs: []
-  propagationPolicies:
-    create: false
   networkPolicies:
     create: false
     allowedCIDRs: []
@@ -52,7 +50,6 @@ prometheus:
 grafana:
   deploy: true
   
-
 serviceAccount:
   # Specifies whether a service account should be created
   create: true
