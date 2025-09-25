@@ -129,15 +129,29 @@
         mode: "0755"
       when: "not skip_configuration | default(false)"
 
-    - name: Mark node as configured
+    - name: Mark control node as configured
       ansible.builtin.file:
         path: /etc/ansible/.configured
         state: touch
         mode: "0644"
       register: marker_result
       when:
+        - inventory_hostname in groups['control']
+        - not skip_configuration | default(false)
         - common_setup | default(false)
         - k3s_setup | default(false)
-        - chutes_gpu_setup | default(false)
         - chutes_setup | default(false)
+
+    - name: Mark worker node as configured
+      ansible.builtin.file:
+        path: /etc/ansible/.configured
+        state: touch
+        mode: "0644"
+      register: marker_result
+      when:
+        - inventory_hostname in groups['workers']
         - not skip_configuration | default(false)
+        - common_setup | default(false)
+        - k3s_setup | default(false)
+        - gpu_setup | default(false)
+        - chutes_gpu_setup | default(false)
