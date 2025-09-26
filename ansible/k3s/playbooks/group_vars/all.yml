@@ -44,3 +44,12 @@ ipv6_enabled: true
 
 # Chutes config
 validator: 5Dt7HZ7Zpw4DppPxFM7Ke3Cm7sDAWhsZXmM5ZAmE7dSVJbcQ
+
+# Kubectl config
+setup_local_kubeconfig: false
+controller_kubeconfig: ~/.kube/chutes.config
+controller_kubectl_staging_dir: "{{ '~/.kube' | expanduser }}/chutes-staging" # noqa var-naming[no-role-prefix]
+
+# Chart variables
+monitoring_namespace: monitoring
+grafana_password: chutethis

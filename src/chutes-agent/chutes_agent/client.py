@@ -10,6 +10,7 @@ from chutes_common.monitoring.requests import SetClusterResourcesRequest, Resour
 from chutes_common.exceptions import (
     ClusterConflictException,
     ClusterNotFoundException,
+    ClusterRegistrationException,
     ServerNotFoundException,
 )
 from loguru import logger
@@ -61,23 +62,27 @@ class ControlPlaneClient:
         # Need to apply json header since passing in string instead of dict
         headers["Content-Type"] = "application/json"
 
-        async with self._session.post(url, data=payload, headers=headers) as response:
-            if response.status != 200:
-                if response.status == 409:
-                    raise ClusterConflictException()
-                elif response.status == 404:
-                    raise ServerNotFoundException()
-                else:
-                    try:
-                        error_json = await response.json()
-                        error = json.dumps(error_json)
-                    except Exception:
-                        error = await response.text()
-                    raise Exception(
-                        f"Failed to send initial resources: {response.status} - {error}"
-                    )
+        try:
 
-            logger.info("Successfully sent initial resources")
+            async with self._session.post(url, data=payload, headers=headers) as response:
+                if response.status != 200:
+                    if response.status == 409:
+                        raise ClusterConflictException()
+                    elif response.status == 404:
+                        raise ServerNotFoundException()
+                    else:
+                        try:
+                            error_json = await response.json()
+                            error = json.dumps(error_json)
+                        except Exception:
+                            error = await response.text()
+                        raise Exception(
+                            f"Failed to send initial resources: {response.status} - {error}"
+                        )
+
+                logger.info("Successfully sent initial resources")
+        except TimeoutError:
+            raise ClusterRegistrationException(f"Failed to register the cluster: Timeout - {url}.")
 
     async def remove_cluster(self):
         """Send initial resource dump to control plane"""

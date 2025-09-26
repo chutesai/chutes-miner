@@ -38,7 +38,7 @@ registry:
       defaultUpstream: "registry.chutes.ai"
 
 auth:
-  image: parachutes/registry
+  image: parachutes/registry:k3s-latest
   imagePullPolicy: Always
   resources:
     requests:
@@ -47,13 +47,10 @@ auth:
     limits:
       cpu: 250m
       memory: 256Mi
-  service:
-    type: ClusterIP
-    port: 8080
-    targetPort: 8000
+  port: 8000
 
 agent:
-  image: parachutes/chutes-agent
+  image: parachutes/chutes-agent:k3s-latest
   imagePullPolicy: Always
   resources:
     requests:
@@ -72,5 +69,3 @@ agent:
 
 failedChuteCleanup:
   image: bitnami/kubectl:latest
-  nodeSelector:
-    chutes/worker: "true"

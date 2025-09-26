@@ -1,15 +1,57 @@
-# Karmada Migration Playbook
+# K3S Migration Guide
 
-This playbook (`playbooks/migrate.yml`) automates the migration of nodes from a MicroK8s-based Chutes deployment to a Karmada-based K3s deployment. It handles the complete migration workflow including node removal, system reset, setup, and re-registration.
+## 📋 Table of Contents
+
+- [K3S Migration Guide](#k3s-migration-guide)
+- [Overview](#overview)
+  - [Process Overview](#process-overview)
+- [Prerequisites](#prerequisites)
+  - [Infrastructure Requirements](#infrastructure-requirements)
+  - [Software Requirements](#software-requirements)
+  - [Configuration Files](#configuration-files)
+- [Migration Guide](#migration-guide)
+  - [1. Configuration](#1-configuration)
+    - [Migration Configuration (`vars/migrate.yml`)](#migration-configuration-varsmigrateyml)
+    - [Auto-Generated Variables](#auto-generated-variables)
+    - [Local Chutes Configuration](#local-chutes-configuration)
+  - [2. Migration](#2-migration)
+    - [2.1: Control Plane Setup](#21-control-plane-setup)
+    - [2.2 Migration Preparation](#22-migration-preparation)
+      - [Verify Chutes components](#verify-chutes-components)
+    - [2.3 Node Migration](#23-node-migration)
+    - [2.4 Cleanup](#24-cleanup)
+    - [Complete Migration](#complete-migration)
+- [Migration Markers](#migration-markers)
+- [Usage Examples](#usage-examples)
+  - [Basic Migration](#basic-migration)
+  - [Preparation Commands](#preparation-commands)
+  - [Recovery Scenarios](#recovery-scenarios)
+- [CLI Execution Modes](#cli-execution-modes)
+  - [Remote Execution (Default)](#remote-execution-default)
+  - [Local Execution](#local-execution)
+- [Migration Verification](#migration-verification)
+  - [Verify Control Plane](#verify-control-plane)
+  - [Verify Worker Nodes](#verify-worker-nodes)
+- [Monitoring and Observability](#monitoring-and-observability)
+- [Security Considerations](#security-considerations)
+- [Rollback Procedures](#rollback-procedures)
+- [Kubectl and Cluster Management Setup](#kubectl-and-cluster-management-setup)
+  - [Kubectl Configuration](#kubectl-configuration)
+  - [Cluster Management Utilities](#cluster-management-utilities)
+    - [ktx (Kube Context Switcher)](#ktx-kube-context-switcher)
+    - [kns (Kube Namespace Switcher)](#kns-kube-namespace-switcher)
+  - [Available Contexts After Migration](#available-contexts-after-migration)
 
 ## Overview
 
-The migration process transforms your infrastructure from MicroK8s to Karmada/K3s while preserving node information and ensuring a smooth transition with minimal downtime.
+This playbook (`playbooks/migrate.yml`) automates the migration of nodes from a MicroK8s-based Chutes deployment to a K3s-based deployment. It handles the complete migration workflow including node removal, system reset, setup, and re-registration.
+
+The migration process transforms your infrastructure from MicroK8s to K3s while preserving node information and ensuring a smooth transition with minimal downtime.
 
 ### Process Overview
 
-1. **Sets up the Karmada control plane** on designated control node
-2. **Migrates worker nodes** from MicroK8s to K3s/Karmada in a controlled manner
+1. **Sets up the K3s control plane** on designated control node
+2. **Migrates worker nodes** from MicroK8s to K3s in a controlled manner
 3. **Preserves node metadata** (GPU types, costs) during migration
 4. **Handles failure scenarios** with migration markers to prevent re-processing
 
@@ -17,7 +59,7 @@ The migration process transforms your infrastructure from MicroK8s to Karmada/K3
 
 ### Infrastructure Requirements
 
-- **Control plane node**: A dedicated node to run the Karmada control plane
+- **Control plane node**: A dedicated node to run the K3s control plane
 - **Microk8s nodes**: Existing MicroK8s nodes to be migrated
 - **Network connectivity**: All nodes must have a public IP
 - **SSH access**: Ansible must have sudo access to all nodes
@@ -26,7 +68,7 @@ The migration process transforms your infrastructure from MicroK8s to Karmada/K3
 
 - Ansible 2.15+
 - Python 3.x
-- `chutes-miner-cli` package (installed automatically)
+- `chutes-miner-cli` package (>=0.2.0, installed automatically)
 - Bittensor hotkey for existing microk8s cluster
 
 ### Configuration Files
@@ -35,33 +77,11 @@ The migration process transforms your infrastructure from MicroK8s to Karmada/K3
 - **Hotkey file**: Valid Bittensor wallet hotkey
 - **Variables**: Configuration in `vars/migrate.yml`
 
-## Inventory Structure
+## Migration Guide
 
-Your `inventory.yml` should define these groups:
+## 1. Configuration
 
-```yaml
-all:
-  children:
-    control: # New control node for Karmada.  This MUST be a new node, can not reuse existing microk8s node
-      hosts:
-        chutes-miner-cpu-0:
-          ansible_host: 192.0.2.1 # Public IP of the new control node for Karmada
-    workers: # Existing GPU nodes from microk8s inventory go in this group
-      hosts:
-        chutes-miner-gpu-0:
-          ansible_host: 192.0.2.2 # Public IP of miner node GPU 0
-        chutes-miner-gpu1: 
-          ansible_host: 192.0.2.3 # Public IP of miner node GPU 1
-    microk8s:  # Existing MicroK8s control plane (chutes-miner-cpu-0) from your microk8s inventory
-      hosts:
-        chutes-miner-control-0: # Note the naming convention (cpu-0 -> control-0).
-          ansible_host: 198.51.100.1
-```
-**IMPORTANT: Note the naming convention for the microk8s group.  This ensures the name does not conflict with the new control host**
-
-## Configuration Variables
-
-### Core Variables (`vars/migrate.yml`)
+### Migration Configuration (`vars/migrate.yml`)
 
 ```yaml
 # CLI execution location
@@ -88,32 +108,56 @@ chutes_nodes:
   ...
 ```
 
-## Migration Process
+### Local Chutes Configuration 
 
-### Phase 1: Control Plane Setup
+Follow steps 2 and 3 from the [deployment docs](../../README.md#2-configure-prerequisites) to setup the necessary configuration for the control node and gpu nodes before actually running any migration steps.
+
+Once you have the local configuration files setup, update them to include the microk8s group as shown below:
+
+```yaml
+all:
+  children:
+    control: # New control node for K3s.  This MUST be a new node, can not reuse existing microk8s node
+      hosts:
+        chutes-miner-cpu-0:
+          ansible_host: 192.0.2.1 # Public IP of the new control node for K3s
+    workers: # Existing GPU nodes from microk8s inventory go in this group
+      hosts:
+        chutes-miner-gpu-0:
+          ansible_host: 192.0.2.2 # Public IP of miner node GPU 0
+        chutes-miner-gpu-1: 
+          ansible_host: 192.0.2.3 # Public IP of miner node GPU 1
+    microk8s:  # Existing MicroK8s control plane (chutes-miner-cpu-0) from your microk8s inventory
+      hosts:
+        chutes-miner-control-0: # Note the naming convention (cpu-0 -> control-0).
+          ansible_host: 198.51.100.1
+```
+**IMPORTANT: Note the naming convention for the microk8s group.  This ensures the name does not conflict with the new control host**
+
+## 2. Migration
+
+**NOTE** All ansible commands must be run from the `ansible/k3s` directory.
+
+### 2.1: Control Plane Setup
 
 ```bash
-ansible-playbook playbooks/migrate.yml --tags setup-control-plane
+ansible-playbook -i ~/chutes/inventory.yml playbooks/migrate.yml --tags setup-control-plane
 ```
 
 **What happens:**
 - Installs and configures K3s on control node
-- Deploys Karmada control plane
 - Sets up monitoring
+- Installs the chutes-miner charts on the control node
 - Configures networking and certificates
 
-### Phase 2: Migration Preparation
+### 2.2 Migration Preparation
 
-#### Deploy the Chutes components
+#### Verify Chutes components
 
-Follow steps 2, 3 and 5 from the [deployment docs](../../README.md#2-configure-prerequisites) to deploy the Chutes API and GPU charts.
-
-**__Do NOT perform step 4, it will fail anyway, ansible deploys a gepetto code file for you to ensure it does not delete chutes in the old cluster__**
-
-Then run the migration prep phase of the ansible playbooks.
+Run the migration prep phase of the ansible playbooks.
 
 ```bash
-ansible-playbook playbooks/migrate.yml --tags migrate-prep
+ansible-playbook -i ~/chutes/inventory.yml playbooks/migrate.yml --tags migrate-prep
 ```
 
 **What happens:**
@@ -121,14 +165,14 @@ ansible-playbook playbooks/migrate.yml --tags migrate-prep
 - Checks Chutes components readiness
     * Disables the audit exporter cronjob
     * Overwrites the gepetto configmap to avoid reconciliation loops overriding each other
-    * Ensure miner credentials exist in the karmada control plane and api server contexts
+    * Ensure miner credentials exist in the k3s control plane
 - Gathers node information (costs, GPU types)
 - Creates `vars/chutes_nodes.yml`
 
-### Phase 3: Node Migration
+### 2.3 Node Migration
 
 ```bash
-ansible-playbook playbooks/migrate.yml --tags migrate-nodes
+ansible-playbook -i ~/chutes/inventory.yml playbooks/migrate.yml --tags migrate-nodes
 ```
 
 The node migration is a serial process, meaning only one node at a time is migrated from microk8s to the k3s cluster.  If a node fails the entire migration process will stop.  Subsequent runs will not attempt to migrate nodes which have already been migrated.
@@ -138,10 +182,10 @@ The node migration is a serial process, meaning only one node at a time is migra
 2. **Reset**: Stops MicroK8s, cleans system, reboots the GPU node
 3. **Setup**: Installs system packages, configures environment
 4. **K3s Setup**: Installs and configures K3s agent
-5. **Karmada Join**: Registers node with Karmada control plane
+5. **Karmada Join**: Registers node with K3s control plane
 6. **Re-registration**: Adds node back to Chutes inventory
 
-### Phase 4: Cleanup
+### 2.4 Cleanup
 
 1. Remove the microk8s group from the ansible inventory
 2. Clean up the old microk8s control node.
@@ -174,20 +218,20 @@ These markers enable:
 
 ```bash
 # Setup the control plane
-ansible-playbook playbooks/migrate.yml --tags setup-control-plane
+ansible-playbook -i ~/chutes/inventory.yml playbooks/migrate.yml --tags setup-control-plane
 
 # Migrate specific nodes
-ansible-playbook playbooks/migrate.yml --limit chutes-miner-gpu-0 --tags migrate-nodes
+ansible-playbook -i ~/chutes/inventory.yml playbooks/migrate.yml --limit chutes-miner-gpu-0 --tags migrate-nodes
 ```
 
 ### Preparation Commands
 
 ```bash
 # Verify CLI and gather node info
-ansible-playbook playbooks/migrate.yml --tags verify-cli,get-node-info
+ansible-playbook -i ~/chutes/inventory.yml playbooks/migrate.yml --tags verify-cli,get-node-info
 
 # Re-verify Chutes components
-ansible-playbook playbooks/migrate.yml --tags verify-chutes
+ansible-playbook -i ~/chutes/inventory.yml playbooks/migrate.yml --tags verify-chutes
 ```
 
 ### Recovery Scenarios
@@ -221,11 +265,8 @@ Set `run_cli_locally: true` to:
 ### Verify Control Plane
 
 ```bash
-# Check Karmada components
-kubectl --context chutes-miner-cpu-0 get pods -n karmada-system
-
-# Verify registered clusters
-kubectl --context karmada-apiserver get clusters
+# Check Chutes components
+kubectl --context chutes-miner-cpu-0 get pods -n chutes
 ```
 
 ### Verify Worker Nodes
@@ -243,7 +284,7 @@ kubectl get nodes --show-labels
 The migration sets up monitoring components:
 
 - **Prometheus**: Metrics collection on port 30090
-- **Grafana**: Dashboard on port 30080 (admin/chutethis)
+- **Grafana**: Dashboard on port 30080 (chutes/chutethis)
 - **Node Exporter**: Node metrics on port 9100
 
 Access dashboards at:
@@ -253,9 +294,8 @@ Access dashboards at:
 ## Security Considerations
 
 - **Hotkeys**: Stored in `/etc/chutes-miner/` with 600 permissions
-- **Certificates**: Auto-generated for Karmada components
+- **Certificates**: Auto-generated for components
 - **Network**: UFW rules configured for required ports
-- **API Access**: Karmada API exposed on NodePort 32443
 
 ## Rollback Procedures
 
@@ -263,25 +303,15 @@ If migration fails and rollback to MicroK8s is needed:
 
 1. **Remove migration markers**:
    ```bash
-   ansible workers -b -m file -a "path=/etc/ansible state=absent recurse=yes"
+   ansible workers -i ~/chutes/inventory.yml -b -m file -a "path=/etc/ansible state=absent recurse=yes"
    ```
 
 2. **Reset nodes completely**:
    ```bash
-   ansible-playbook playbooks/reset.yml
+   ansible-playbook -i ~/chutes/inventory.yml playbooks/reset.yml
    ```
 
 3. **Reinstall MicroK8s** (manual process required, use microk8s ansible)
-
-## Support and Maintenance
-
-### Configuration Files
-
-- **K3s config**: `/etc/rancher/k3s/config.yaml`
-- **Kubeconfig**: `~/.kube/config`
-- **Hotkey**: `/etc/chutes-miner/hotkey.json`
-
-For additional support, consult the Chutes documentation or raise issues in the project repository.
 
 ## Kubectl and Cluster Management Setup
 

@@ -86,6 +86,14 @@ class ClusterResources(BaseModel):
                 result[field_name] = serializer.serialize(field_value)
 
         return result
+    
+    @property
+    def count(self):
+        _count = 0
+        for _, resources in self.items():
+            _count += len(resources)
+        
+        return _count
 
     def items(
         self,

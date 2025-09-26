@@ -15,6 +15,11 @@ spec:
       labels:
         {{- include "agent.labels" . | nindent 8 }}
     spec:
+      priorityClassName: critical-pod-priority
+      tolerations:
+      - key: "node.kubernetes.io/disk-pressure"
+        operator: "Exists"
+        effect: "NoSchedule"
       serviceAccountName: agent
       securityContext:
         fsGroup: 1000  # This will make mounted volumes owned by group 1000
@@ -32,6 +37,11 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      priorityClassName: critical-priority
+      tolerations:
+      - key: "node.kubernetes.io/disk-pressure"
+        operator: "Exists"
+        effect: "NoSchedule"
       initContainers:
         - name: fix-permissions
           image: busybox:1.35

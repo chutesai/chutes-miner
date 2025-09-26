@@ -12,9 +12,9 @@ spec:
       template:
         spec:
           serviceAccountName: chutes
-          {{- with .Values.failedChuteCleanup.nodeSelector }}
+          {{- if not .Values.multiCluster}}
           nodeSelector:
-            {{- toYaml . | nindent 12 }}
+            node.kubernetes.io/microk8s-controlplane: microk8s-controlplane
           {{- end }}
           containers:
           - name: cleanup

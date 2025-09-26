@@ -5,6 +5,8 @@ NONCE_HEADER = "X-Chutes-Nonce"
 SIGNATURE_HEADER = "X-Chutes-Signature"
 
 # Monitoring
-CLUSTER_ENDPOINT = "/api/v1/cluster"
+API_PREFIX = "/api/v1"
+CLUSTER_ENDPOINT = f"{API_PREFIX}/clusters"
+MONITORING_ENDPOINT = f"{API_PREFIX}/monitoring"
 MONITORING_PURPOSE = "monitoring"
 HEALTH_PURPOSE = "health"

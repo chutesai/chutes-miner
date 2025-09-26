@@ -8,6 +8,7 @@ import time
 import uuid
 import traceback
 import abc
+from pydantic import ValidationError
 import semver
 from chutes_common.monitoring.messages import ClusterChangeMessage, ResourceChangeMessage
 from chutes_common.monitoring.models import ResourceType
@@ -48,7 +49,7 @@ from chutes_miner.api.k8s.util import build_chute_job, build_chute_service
 from chutes_common.schemas.server import Server
 from chutes_common.schemas.chute import Chute
 from chutes_common.schemas.deployment import Deployment
-from chutes_miner.api.config import k8s_core_client, k8s_app_client, k8s_batch_client, settings
+from chutes_miner.api.config import k8s_api_client, k8s_core_client, k8s_app_client, k8s_batch_client, settings
 from redis.client import PubSub
 import yaml
 
@@ -617,7 +618,15 @@ class K8sOperator(abc.ABC):
 
             # Create the deployment.
             job = self._create_job_for_deployment(
-                deployment_id, chute, server, service, gpu_uuids, token, config_id, disk_gb
+                deployment_id,
+                chute, 
+                server, 
+                service, 
+                gpu_uuids, 
+                token=token, 
+                job_id=job_id,
+                config_id=config_id, 
+                disk_gb=disk_gb
             )
 
             # Deploy the chute
@@ -992,12 +1001,22 @@ class K8sOperator(abc.ABC):
         service: V1Service,
         gpu_uuids: list[str],
         token: Optional[str] = None,
+        job_id: Optional[str] = None,
         config_id: Optional[str] = None,
         disk_gb: int = 10,
     ) -> V1Job:
         probe_port = self._get_probe_port(chute)
         job = build_chute_job(
-            deployment_id, chute, server, service, gpu_uuids, probe_port, token, config_id, disk_gb
+            deployment_id, 
+            chute, 
+            server, 
+            service, 
+            gpu_uuids, 
+            probe_port, 
+            token=token, 
+            job_id=job_id, 
+            config_id=config_id, 
+            disk_gb=disk_gb
         )
 
         try:
@@ -1057,7 +1076,12 @@ class SingleClusterK8sOperator(K8sOperator):
             field_selector=field_selector,
             timeout_seconds=timeout,
         ):
-            yield WatchEvent.from_dict(event)
+            # Need to pass in object as dict to avoid pydantic errors
+            # Since watch event expects objects from k8s_asyncio
+            yield WatchEvent.from_dict({
+                "type": event["type"],
+                "object": k8s_api_client().sanitize_for_serialization(event["object"])
+            })
 
     def get_pods(
         self,
@@ -1080,12 +1104,20 @@ class SingleClusterK8sOperator(K8sOperator):
                 else ",".join([f"{k}={v}" for k, v in field_selector.items()])
             )
 
-        pods = k8s_core_client().list_namespaced_pod(
-            namespace=namespace,
-            label_selector=label_selector,
-            field_selector=field_selector,
-            timeout_seconds=timeout,
-        )
+        if namespace:
+            pods = k8s_core_client().list_namespaced_pod(
+                namespace=namespace,
+                label_selector=label_selector,
+                field_selector=field_selector,
+                timeout_seconds=timeout,
+            )
+        else:
+            pods = k8s_core_client().list_pod_for_all_namespaces(
+                label_selector=label_selector,
+                field_selector=field_selector,
+                timeout_seconds=timeout,
+            )
+        
         return pods
 
     async def get_deployment(self, deployment_id: str) -> Dict:
@@ -1161,7 +1193,13 @@ class SingleClusterK8sOperator(K8sOperator):
             field_selector=field_selector,
             timeout_seconds=timeout,
         ):
-            yield WatchEvent.from_dict(event)
+            # Need to pass in object as dict to avoid pydantic errors
+            # Since watch event expects objects from k8s_asyncio
+            yield WatchEvent.from_dict({
+                "type": event["type"],
+                "object": k8s_api_client().sanitize_for_serialization(event["object"])
+            })
+
 
     def _delete_deployment(self, name, namespace=settings.namespace):
         k8s_app_client().delete_namespaced_deployment(
@@ -1299,9 +1337,15 @@ class MultiClusterK8sOperator(K8sOperator):
         """
         Retrieve a node from the cluster by name.
         """
-        _client: CoreV1Api = self._manager.get_core_client(context_name=name, kubeconfig=kubeconfig)
+        node = None
+        try:
+            _client: CoreV1Api = self._manager.get_core_client(context_name=name, kubeconfig=kubeconfig)
 
-        return _client.read_node(name=name)
+            node = _client.read_node(name=name)
+        except Exception as e:
+            logger.warning(f"Failed to get node:\n{e}")
+
+        return node
 
     def _get_nodes(self) -> V1NodeList:
         resources = self._redis.get_resources(resource_type=ResourceType.NODE)
@@ -1376,14 +1420,19 @@ class MultiClusterK8sOperator(K8sOperator):
                 raise
 
     def delete_config_map(self, name, namespace=settings.namespace):
-        context = self._redis.get_resource_cluster(
-            resource_name=name, resource_type=ResourceType.SERVICE, namespace=namespace
-        )
-        client = self._manager.get_core_client(context)
-        client.delete_namespaced_config_map(
-            name=name,
-            namespace=namespace,
-        )
+        # Create CM on all clusters
+        clusters = self._redis.get_all_cluster_names()
+        for cluster in clusters:
+            client = self._manager.get_core_client(cluster)
+            # Need to handle 404 per cluster so we don't break out early
+            try:
+                client.delete_namespaced_config_map(
+                    name=name,
+                    namespace=namespace,
+                )
+            except ApiException as e:
+                if e.status != 404:
+                    raise
 
     def _deploy_config_map(self, config_map: V1ConfigMap, namespace=settings.namespace):
         # Create CM on all clusters

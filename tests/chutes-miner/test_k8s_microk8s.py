@@ -337,12 +337,15 @@ async def test_wait_for_deletion_with_pods(mock_k8s_core_client, mock_watch):
         pod_list_empty,  # Check in the watch loop - pods gone
     ]
 
-    mock_event = Mock()
-    mock_event.is_deleted = True
+    mock_event = {}
+    mock_event["type"] = "ADDED"
+    mock_event["object"] = MagicMock()
+    mock_watch_event = Mock()
+    mock_watch_event.is_deleted = True
     mock_watch.stream.return_value = [mock_event]
 
     with patch("chutes_miner.api.k8s.operator.WatchEvent") as mock_event_class:
-        mock_event_class.from_dict.return_value = mock_event
+        mock_event_class.from_dict.return_value = mock_watch_event
 
         # Call the function
         await k8s.wait_for_deletion("app=test")

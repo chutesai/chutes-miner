@@ -8,6 +8,9 @@ grafana:
     type: NodePort
     nodePort: 30080
 
+  plugins:
+    - yesoreyeram-infinity-datasource
+
   # Data sources configuration
   datasources:
     datasources.yaml:
@@ -18,6 +21,21 @@ grafana:
           url: http://prometheus 
           access: proxy
           isDefault: true
+        - orgId: 1
+          uid: bez23gzeayku8d
+          name: monitoring
+          type: yesoreyeram-infinity-datasource
+          typeName: Infinity
+          typeLogoUrl: public/plugins/yesoreyeram-infinity-datasource/img/icon.svg
+          access: proxy
+          url: http://monitor.chutes.svc.cluster.local.:8000
+          user: ''
+          database: ''
+          basicAuth: false
+          isDefault: false
+          jsonData:
+            global_queries: []
+          readOnly: false
 
   # Enable sidecar for dashboard discovery
   sidecar:

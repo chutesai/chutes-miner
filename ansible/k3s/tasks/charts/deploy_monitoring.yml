@@ -1,7 +1,13 @@
 ---
-- name: Monitoring setup
+- name: Deploy Monitoring Charts
   tags: monitoring
   block:
+
+    - name: Clean directory for fresh install
+      ansible.builtin.file:
+        path: /tmp/chutes-monitoring
+        state: absent
+
     - name: Create temporary directory for monitoring charts
       ansible.builtin.file:
         path: /tmp/chutes-monitoring
@@ -10,7 +16,7 @@
 
     - name: Copy monitoring charts from local directory
       ansible.builtin.copy:
-        src: "{{ role_path }}/../../../../charts/chutes-monitoring/"
+        src: "{{ playbook_dir }}/../../../charts/chutes-monitoring/"
         dest: /tmp/chutes-monitoring/
         mode: preserve
       register: copy_charts_result
@@ -21,6 +27,14 @@
         src: monitoring-values.yaml.j2
         dest: /tmp/monitoring-values.yaml
         mode: "0644"
+
+    # - name: Copy custom values
+    #   ansible.builtin.copy:
+    #     src: "{{ monitoring_chart_values }}"
+    #     dest: /tmp/custom-monitoring-values.yaml
+    #     mode: preserve
+    #   register: copy_values_result
+    #   changed_when: copy_values_result.changed
 
     - name: Install or upgrade Monitoring
       ansible.builtin.command: >

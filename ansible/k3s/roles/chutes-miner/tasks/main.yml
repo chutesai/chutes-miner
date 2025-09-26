@@ -1,4 +1,12 @@
 ---
 - name: Setup monitoring
-  ansible.builtin.include_tasks: setup_monitoring.yml
+  ansible.builtin.include_tasks: "{{ playbook_dir }}/../tasks/charts/deploy_monitoring.yml"
   tags: monitoring
+
+- name: Deploy miner charts
+  ansible.builtin.include_tasks: "{{ playbook_dir }}/../tasks/charts/deploy_miner.yml"
+  tags: miner-charts
+
+- name: Deploy miner credentials
+  ansible.builtin.include_tasks: "{{ playbook_dir }}/../tasks/k8s/deploy_miner_credentials.yml"
+  tags: miner-credentials

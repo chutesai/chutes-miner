@@ -6,6 +6,8 @@ metadata:
   labels:
     grafana_dashboard: "1"
 data:
+  chutes-monitoring.json: |
+{{ .Files.Get "dashboards/chutes-monitoring.json" | indent 4 }}
   http-tcp-monitoring.json: |
 {{ .Files.Get "dashboards/http-tcp-monitoring-dashboard.json" | indent 4 }}
   k8s-cluster.json: |

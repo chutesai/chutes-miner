@@ -83,7 +83,7 @@
             name: gepetto-code
             namespace: chutes
           data:
-            gepetto.py: "{{ lookup('file', 'files/gepetto.py') }}"
+            gepetto.py: "{{ lookup('file', 'files/gepetto-microk8s.py') }}"
 
     - name: Verify gepetto on k3s cluster
       when: inventory_hostname in groups['control']
@@ -97,7 +97,7 @@
             name: gepetto-code
             namespace: chutes
           data:
-            gepetto.py: "{{ lookup('file', 'files/gepetto.py') }}"
+            gepetto.py: "{{ lookup('file', 'files/gepetto-k3s.py') }}"
 
 - name: Verify miner secrets exist
   when: inventory_hostname == groups['control'][0]
@@ -111,14 +111,3 @@
         context: "{{ groups['control'][0] }}"
       register: host_secret_check
       failed_when: host_secret_check.resources | length == 0
-
-    # ToDo: Probably want to verify one ach GPU node for migration
-    # - name: Verify miner credentials exist in api server context
-    #   kubernetes.core.k8s_info:
-    #     api_version: v1
-    #     kind: Secret
-    #     name: miner-credentials
-    #     namespace: chutes
-    #     context: karmada-apiserver
-    #   register: api_secret_check
-    #   failed_when: api_secret_check.resources | length == 0

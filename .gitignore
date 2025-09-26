@@ -172,7 +172,7 @@ cython_debug/
 #.idea/
 
 # Ansible artifacts
-ansible/karmada/vars/chutes_nodes.yml
+ansible/**/vars/chutes_nodes.yml
 
 ## Lint Artifacts
 .ruff_cache

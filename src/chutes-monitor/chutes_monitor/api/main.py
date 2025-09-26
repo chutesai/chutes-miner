@@ -12,8 +12,9 @@ from fastapi.responses import ORJSONResponse
 from loguru import logger
 
 from chutes_monitor.api.cluster.router import router as cluster_router
+from chutes_monitor.api.monitoring.router import router as monitoring_router
 from chutes_common.redis import MonitoringRedisClient
-from chutes_common.constants import CLUSTER_ENDPOINT
+from chutes_common.constants import CLUSTER_ENDPOINT, MONITORING_ENDPOINT
 import chutes_common.schemas.orms  # noqa: F401
 import os
 
@@ -63,6 +64,7 @@ app = FastAPI(
 
 # Include routers
 app.include_router(cluster_router, prefix=CLUSTER_ENDPOINT, tags=["Clusters"])
+app.include_router(monitoring_router, prefix=MONITORING_ENDPOINT, tags=["Monitoring"])
 
 
 @app.get("/health")

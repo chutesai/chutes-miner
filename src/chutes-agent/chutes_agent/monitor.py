@@ -108,7 +108,7 @@ class ResourceMonitor:
                 await self._start_monitoring_tasks()
             except ServerNotFoundException:
                 logger.info("Server does not exist in remote inventory, stopping monitoring.")
-                self.stop()
+                await self.stop()
             except Exception as e:
                 logger.error(f"Failed to auto-start monitoring:\n{str(e)}")
         else:
@@ -307,7 +307,7 @@ class ResourceMonitor:
                     asyncio.create_task(self.watch_namespaced_deployments(namespace)),
                     asyncio.create_task(self.watch_namespaced_pods(namespace)),
                     asyncio.create_task(self.watch_namespaced_services(namespace)),
-                    asyncio.create_task(self.watch_namespaced_jobs(namespace)),
+                    asyncio.create_task(self.watch_namespaced_jobs(namespace))
                 ]
                 tasks += namespace_tasks
 
