@@ -92,6 +92,19 @@ jobs:
           echo "Previous versions:"
           cat "$PREVIOUS_VERSIONS_FILE"
 
+          # Check if published index exists and get published versions
+          PUBLISHED_VERSIONS_FILE=$(mktemp)
+          if curl -s -f "${{ env.REPO_URL }}/index.yaml" -o index.yaml 2>/dev/null; then
+            echo "Found existing chart index, checking published versions..."
+            # Extract published versions from index.yaml
+            yq e '.entries[] | .name + ":" + (.[] | select(.version) | .version)' index.yaml 2>/dev/null | sort -u > "$PUBLISHED_VERSIONS_FILE" || true
+            echo "Published versions:"
+            cat "$PUBLISHED_VERSIONS_FILE"
+          else
+            echo "No existing chart index found"
+            touch "$PUBLISHED_VERSIONS_FILE"
+          fi
+
           # Compare and validate
           while IFS=: read -r chart_name current_version; do
             # Skip empty lines
@@ -102,33 +115,53 @@ jobs:
             # Get previous version for this chart
             previous_version=$(grep "^${chart_name}:" "$PREVIOUS_VERSIONS_FILE" | cut -d: -f2 || echo "")
             
-            # Only process if version actually changed
-            if [ -n "$current_version" ] && [ "$current_version" != "$previous_version" ]; then
-              echo "✅ $chart_name: $previous_version → $current_version"
+            # Check if current version is already published
+            published_version=$(grep "^${chart_name}:${current_version}$" "$PUBLISHED_VERSIONS_FILE" || echo "")
+            
+            # Determine if we should process this chart
+            version_changed=$([ "$current_version" != "$previous_version" ] && echo "true" || echo "false")
+            version_not_published=$([ -z "$published_version" ] && echo "true" || echo "false")
+            
+            if [ "$version_changed" = "true" ] || [ "$version_not_published" = "true" ]; then
+              if [ "$version_changed" = "true" ] && [ "$version_not_published" = "true" ]; then
+                echo "✅ $chart_name: $previous_version → $current_version (new version, not yet published)"
+              elif [ "$version_changed" = "true" ]; then
+                echo "⚠️ $chart_name: $previous_version → $current_version (new version, but already published)"
+                continue # Skip if already published
+              else
+                echo "🔄 $chart_name: $current_version (unchanged version, but not published - likely failed previous build)"
+              fi
+              
               VERSION_CHANGES="${VERSION_CHANGES}${chart_name}: $current_version\n"
+              
+              # Determine final version for validation (append branch suffix for PRs)
+              final_version="$current_version"
+              if [ "${{ github.event_name }}" = "pull_request" ]; then
+                final_version="$current_version-$SANITIZED_BRANCH"
+              fi
               
               if [ "$IS_MAIN" = "true" ]; then
                 # For main branch or PRs targeting main, block pre-release versions
-                if [[ "$current_version" =~ -dev$|-alpha$|-beta$|-rc[0-9]*$ ]]; then
-                  INVALID_VERSIONS="${INVALID_VERSIONS}${chart_name}: $current_version\n"
+                if [[ "$final_version" =~ -dev$|-alpha$|-beta$|-rc[0-9]*$ ]]; then
+                  INVALID_VERSIONS="${INVALID_VERSIONS}${chart_name}: $final_version\n"
                 else
                   SHOULD_PUBLISH=true
                 fi
               else
                 # For PRs targeting non-main branches, allow only pre-release versions
-                if [[ ! "$current_version" =~ -dev$|-alpha$|-beta$|-rc[0-9]*$ ]]; then
-                  INVALID_VERSIONS="${INVALID_VERSIONS}${chart_name}: $current_version\n"
+                if [[ ! "$final_version" =~ -dev$|-alpha$|-beta$|-rc[0-9]*$ ]]; then
+                  INVALID_VERSIONS="${INVALID_VERSIONS}${chart_name}: $final_version\n"
                 else
                   SHOULD_PUBLISH=true
                 fi
               fi
             else
-              echo "ℹ️ $chart_name: No version change ($current_version)"
+              echo "ℹ️ $chart_name: $current_version (no change and already published)"
             fi
           done < "$CURRENT_VERSIONS_FILE"
 
           # Clean up temp files
-          rm -f "$CURRENT_VERSIONS_FILE" "$PREVIOUS_VERSIONS_FILE"
+          rm -f "$CURRENT_VERSIONS_FILE" "$PREVIOUS_VERSIONS_FILE" "$PUBLISHED_VERSIONS_FILE" index.yaml
 
           # Only check for invalid versions if there were actual changes
           if [ "$SHOULD_PUBLISH" = "true" ] && [ -n "$INVALID_VERSIONS" ]; then
