@@ -56,31 +56,31 @@ jobs:
           SANITIZED_BRANCH=$(echo "$BRANCH_NAME" | sed 's/\//-/g')
 
           # Initialize variables
-          CURRENT_VERSIONS=""
-          PREVIOUS_VERSIONS=""
           VERSION_CHANGES=""
           INVALID_VERSIONS=""
           SHOULD_PUBLISH=false
 
-          # Get current versions
+          # Get current versions - store in temp file for easier processing
+          CURRENT_VERSIONS_FILE=$(mktemp)
           for chart_dir in ${{ env.CHART_DIR }}/*/Chart.yaml; do
             if [ -f "$chart_dir" ]; then
               chart_name=$(basename "$(dirname "$chart_dir")")
               version=$(yq e '.version' "$chart_dir")
-              if [ -n "$version" ]; then
-                CURRENT_VERSIONS="${CURRENT_VERSIONS}${chart_name}:${version}\n"
+              if [ -n "$version" ] && [ "$version" != "null" ]; then
+                echo "${chart_name}:${version}" >> "$CURRENT_VERSIONS_FILE"
               fi
             fi
           done
 
-          # Get previous versions
+          # Get previous versions - store in temp file
+          PREVIOUS_VERSIONS_FILE=$(mktemp)
           git checkout "$BASE_REF" -- ${{ env.CHART_DIR }}/ || { echo "::error::Failed to checkout $BASE_REF"; exit 1; }
           for chart_dir in ${{ env.CHART_DIR }}/*/Chart.yaml; do
             if [ -f "$chart_dir" ]; then
               chart_name=$(basename "$(dirname "$chart_dir")")
               version=$(yq e '.version' "$chart_dir")
-              if [ -n "$version" ]; then
-                PREVIOUS_VERSIONS="${PREVIOUS_VERSIONS}${chart_name}:${version}\n"
+              if [ -n "$version" ] && [ "$version" != "null" ]; then
+                echo "${chart_name}:${version}" >> "$PREVIOUS_VERSIONS_FILE"
               fi
             fi
           done
@@ -88,18 +88,21 @@ jobs:
 
           # Debug output
           echo "Current versions:"
-          echo -e "$CURRENT_VERSIONS"
+          cat "$CURRENT_VERSIONS_FILE"
           echo "Previous versions:"
-          echo -e "$PREVIOUS_VERSIONS"
+          cat "$PREVIOUS_VERSIONS_FILE"
 
           # Compare and validate
           while IFS=: read -r chart_name current_version; do
-            # Skip empty or invalid lines
+            # Skip empty lines
             if [ -z "$chart_name" ] || [ -z "$current_version" ]; then
               continue
             fi
-            previous_version=$(echo -e "$PREVIOUS_VERSIONS" | grep "^$chart_name:" | cut -d: -f2 || echo "")
             
+            # Get previous version for this chart
+            previous_version=$(grep "^${chart_name}:" "$PREVIOUS_VERSIONS_FILE" | cut -d: -f2 || echo "")
+            
+            # Only process if version actually changed
             if [ -n "$current_version" ] && [ "$current_version" != "$previous_version" ]; then
               echo "✅ $chart_name: $previous_version → $current_version"
               VERSION_CHANGES="${VERSION_CHANGES}${chart_name}: $current_version\n"
@@ -119,11 +122,16 @@ jobs:
                   SHOULD_PUBLISH=true
                 fi
               fi
+            else
+              echo "ℹ️ $chart_name: No version change ($current_version)"
             fi
-          done <<< "$CURRENT_VERSIONS"
+          done < "$CURRENT_VERSIONS_FILE"
 
-          # Block merge/publish if invalid versions are detected
-          if [ -n "$INVALID_VERSIONS" ]; then
+          # Clean up temp files
+          rm -f "$CURRENT_VERSIONS_FILE" "$PREVIOUS_VERSIONS_FILE"
+
+          # Only check for invalid versions if there were actual changes
+          if [ "$SHOULD_PUBLISH" = "true" ] && [ -n "$INVALID_VERSIONS" ]; then
             if [ "$IS_MAIN" = "true" ]; then
               echo -e "🚫 Blocking operation on main: Invalid pre-release versions detected\n$INVALID_VERSIONS"
             else
@@ -131,6 +139,11 @@ jobs:
             fi
             echo "::error::Invalid versions detected:$INVALID_VERSIONS"
             exit 1
+          fi
+
+          # If no version changes, that's perfectly fine - nothing to publish
+          if [ "$SHOULD_PUBLISH" = "false" ]; then
+            echo "ℹ️ No chart version changes detected - skipping publish"
           fi
 
           # Output to GITHUB_OUTPUT
