@@ -69,3 +69,12 @@ agent:
 
 failedChuteCleanup:
   image: bitnami/kubectl:latest
+
+# Miner credentials - These are provided via Ansible deployment
+# These values are automatically injected during deployment and should not be set manually
+# as they are sensitive values
+minerCredentials:
+  # SS58 address for the miner - provided by Ansible from hotkey file
+  ss58Address: "REPLACE_WITH_ANSIBLE_SS58_ADDRESS"
+  # Secret seed for the miner (hex prefix removed) - provided by Ansible from hotkey file  
+  secretSeed: "REPLACE_WITH_ANSIBLE_SECRET_SEED"
