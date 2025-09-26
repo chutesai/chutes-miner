@@ -2,7 +2,10 @@ name: Ruff Check
 
 on:
   pull_request:
-    branches: [ main ]
+    branches:
+      - '**'
+    paths:
+      - 'src/**'
 
 jobs:
   ruff:

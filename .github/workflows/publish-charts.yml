@@ -43,14 +43,17 @@ jobs:
       - name: Check Chart.yaml changes and validate
         id: check
         run: |
-          # Determine base ref
+          # Determine base ref and branch context
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             BASE_REF="${{ github.base_ref }}"
             IS_MAIN="${{ github.base_ref == 'main' && 'true' || 'false' }}"
+            BRANCH_NAME="${{ github.head_ref }}"
           else
             BASE_REF="HEAD~1"
-            IS_MAIN="${{ github.ref == 'refs/heads/main' && 'true' || 'false' }}"
+            IS_MAIN="${{ github.ref_name == 'main' && 'true' || 'false' }}"
+            BRANCH_NAME="${{ github.ref_name }}"
           fi
+          SANITIZED_BRANCH=$(echo "$BRANCH_NAME" | sed 's/\//-/g')
 
           # Initialize variables
           CURRENT_VERSIONS=""
@@ -102,14 +105,14 @@ jobs:
               VERSION_CHANGES="${VERSION_CHANGES}${chart_name}: $current_version\n"
               
               if [ "$IS_MAIN" = "true" ]; then
-                # For main branch, block pre-release versions
+                # For main branch or PRs targeting main, block pre-release versions
                 if [[ "$current_version" =~ -dev$|-alpha$|-beta$|-rc[0-9]*$ ]]; then
                   INVALID_VERSIONS="${INVALID_VERSIONS}${chart_name}: $current_version\n"
                 else
                   SHOULD_PUBLISH=true
                 fi
               else
-                # For non-main branches, allow only pre-release versions
+                # For PRs targeting non-main branches, allow only pre-release versions
                 if [[ ! "$current_version" =~ -dev$|-alpha$|-beta$|-rc[0-9]*$ ]]; then
                   INVALID_VERSIONS="${INVALID_VERSIONS}${chart_name}: $current_version\n"
                 else
@@ -119,10 +122,10 @@ jobs:
             fi
           done <<< "$CURRENT_VERSIONS"
 
-          # Block publishing if invalid versions are detected
+          # Block merge/publish if invalid versions are detected
           if [ -n "$INVALID_VERSIONS" ]; then
             if [ "$IS_MAIN" = "true" ]; then
-              echo -e "🚫 Blocking merge to main: Invalid pre-release versions detected\n$INVALID_VERSIONS"
+              echo -e "🚫 Blocking operation on main: Invalid pre-release versions detected\n$INVALID_VERSIONS"
             else
               echo -e "🚫 Blocking publish from non-main branch: Production versions not allowed\n$INVALID_VERSIONS"
             fi
@@ -132,6 +135,8 @@ jobs:
 
           # Output to GITHUB_OUTPUT
           echo "should_publish=$SHOULD_PUBLISH" >> $GITHUB_OUTPUT
+          echo "is_main=$IS_MAIN" >> $GITHUB_OUTPUT
+          echo "sanitized_branch=$SANITIZED_BRANCH" >> $GITHUB_OUTPUT
           echo "version_changes<<EOF" >> $GITHUB_OUTPUT
           echo -e "$VERSION_CHANGES" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
@@ -150,6 +155,31 @@ jobs:
           # Copy existing charts
           [ -d existing-charts ] && cp -r existing-charts/* ${{ env.HELM_CHART_DIR }}/
 
+          # Cleanup dev charts for non-existent branches on push to main
+          if [ "${{ github.event_name }}" = "push" ] && [ "${{ steps.check.outputs.is_main }}" = "true" ]; then
+            echo "Checking for orphaned dev charts"
+            if [ -f "${{ env.HELM_CHART_DIR }}/index.yaml" ]; then
+              # Extract dev chart versions and their branch suffixes
+              DEV_CHARTS=$(yq e '.entries[] | select(.version | test("-dev-|-alpha-|-beta-|-rc[0-9]*-")) | .name + ":" + .version' "${{ env.HELM_CHART_DIR }}/index.yaml")
+              while IFS=: read -r chart_name chart_version; do
+                if [ -z "$chart_name" ] || [ -z "$chart_version" ]; then
+                  continue
+                fi
+                # Extract branch suffix (e.g., feature-branch from 0.0.1-dev-feature-branch)
+                BRANCH_SUFFIX=$(echo "$chart_version" | grep -oE '[^-]+$' || echo "")
+                if [ -n "$BRANCH_SUFFIX" ]; then
+                  # Check if branch exists using GitHub API
+                  RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+                    "https://api.github.com/repos/${{ github.repository }}/branches/$BRANCH_SUFFIX")
+                  if [ "$RESPONSE" != "200" ]; then
+                    echo "Removing orphaned dev chart: $chart_name-$chart_version"
+                    rm -f "${{ env.HELM_CHART_DIR }}/$chart_name-$chart_version.tgz" || true
+                  fi
+                fi
+              done <<< "$DEV_CHARTS"
+            fi
+          fi
+
           # Package changed charts
           NEW_CHARTS=0
           CHANGED_CHARTS=$(echo "${{ steps.check.outputs.version_changes }}" | grep -oE '^[a-zA-Z0-9-]+' | sort -u)
@@ -157,53 +187,16 @@ jobs:
           for chart_name in $CHANGED_CHARTS; do
             if [ -d "${{ env.CHART_DIR }}/$chart_name" ]; then
               chart_version=$(yq e '.version' "${{ env.CHART_DIR }}/$chart_name/Chart.yaml")
+              
+              # Append sanitized branch name to version for PRs
+              if [ "${{ github.event_name }}" = "pull_request" ]; then
+                chart_version="$chart_version-${{ steps.check.outputs.sanitized_branch }}"
+              fi
+
               if [ -f "${{ env.HELM_CHART_DIR }}/$chart_name-$chart_version.tgz" ]; then
                 echo "⚠️ $chart_name-$chart_version already exists, skipping"
                 continue
               fi
 
               helm lint "${{ env.CHART_DIR }}/$chart_name/"
-              helm package "${{ env.CHART_DIR }}/$chart_name" \
-                --destination "${{ env.HELM_CHART_DIR }}" \
-                --version "$chart_version"
-              NEW_CHARTS=$((NEW_CHARTS + 1))
-            fi
-          done
-
-          # Update index
-          cd ${{ env.HELM_CHART_DIR }}
-          if [ -f index.yaml ]; then
-            cp index.yaml index.yaml.backup
-            helm repo index . --url "${{ env.REPO_URL }}" --merge index.yaml.backup
-            rm index.yaml.backup
-          else
-            helm repo index . --url "${{ env.REPO_URL }}"
-          fi
-
-          echo "new_charts=$NEW_CHARTS" >> $GITHUB_OUTPUT
-      - name: Upload artifact
-        if: steps.check.outputs.should_publish == 'true'
-        uses: actions/upload-pages-artifact@v4
-        with:
-          path: ./charts-gh-pages
-      - name: Deploy to GitHub Pages
-        if: steps.check.outputs.should_publish == 'true'
-        uses: actions/deploy-pages@v4
-      - name: Comment PR with publish info
-        if: github.event_name == 'pull_request' && steps.check.outputs.should_publish == 'true'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: `## 🎉 Charts Published
-              **Changes:**${{ steps.check.outputs.version_changes }}
-              **Test Commands:**
-              \`\`\`bash
-              helm repo add chutes https://rayonlabs.github.io/chutes-miner
-              helm repo update
-              helm search repo chutes --versions
-              \`\`\`
-            });
+              helm package "${{ env.CHART_DIR }}/$chart_name"
