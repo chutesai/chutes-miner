@@ -1,3 +1,55 @@
 apiVersion: v1
-entries: {}
-generated: "$(date -u +%Y-%m-%dT%H:%M:%S.%fZ)"
+entries:
+  chutes-miner:
+  - apiVersion: v2
+    appVersion: 0.0.1
+    created: "2025-09-26T15:39:29.696846362Z"
+    description: Helm chart for chutes.ai miner
+    digest: a4cda88c3789a8de07b54a590ddbd3f4ef213e529b96301262bb6f9c21924722
+    kubeVersion: '>=1.19.0-0'
+    maintainers:
+    - email: jon@chutes.ai
+      name: Jon Durbin
+    - email: namoray@rayonlabs.ai
+      name: namoray
+    name: chutes-miner
+    type: application
+    urls:
+    - https://rayonlabs.github.io/chutes-miner/chutes-miner-0.0.1-publish-charts.tgz
+    version: 0.0.1-publish-charts
+  - apiVersion: v2
+    appVersion: 0.0.1
+    created: "2025-09-26T15:39:29.696371466Z"
+    description: Helm chart for chutes.ai miner
+    digest: 71d32ac60d20469b196afe86070d05029ab660345388e33e1a3d5b879af17a35
+    kubeVersion: '>=1.19.0-0'
+    maintainers:
+    - email: jon@chutes.ai
+      name: Jon Durbin
+    - email: namoray@rayonlabs.ai
+      name: namoray
+    name: chutes-miner
+    type: application
+    urls:
+    - https://rayonlabs.github.io/chutes-miner/chutes-miner-0.0.1-dev-publish-charts.tgz
+    version: 0.0.1-dev-publish-charts
+  chutes-monitoring:
+  - apiVersion: v2
+    appVersion: 1.16.0
+    created: "2025-09-26T15:39:29.708224744Z"
+    dependencies:
+    - condition: grafana.deploy
+      name: grafana
+      repository: https://grafana.github.io/helm-charts
+      version: 8.11.3
+    - name: prometheus
+      repository: https://prometheus-community.github.io/helm-charts
+      version: 27.19.0
+    description: A Helm chart for Kubernetes
+    digest: a738516702d2dcd591e0f85b8cc11f3ebffc06e20d216f3cbb2d121990826409
+    name: chutes-monitoring
+    type: application
+    urls:
+    - https://rayonlabs.github.io/chutes-miner/chutes-monitoring-0.2.0-dev-publish-charts.tgz
+    version: 0.2.0-dev-publish-charts
+generated: "2025-09-26T15:39:29.695474602Z"
