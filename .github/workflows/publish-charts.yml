@@ -134,26 +134,29 @@ jobs:
               
               VERSION_CHANGES="${VERSION_CHANGES}${chart_name}: $current_version\n"
               
-              # Determine final version for validation (append branch suffix for PRs)
-              final_version="$current_version"
+              # Always allow publishing for development/testing purposes
+              SHOULD_PUBLISH=true
+              
+              # Determine what version will actually be published
               if [ "${{ github.event_name }}" = "pull_request" ]; then
+                # For PRs, the final published version will have branch suffix
                 final_version="$current_version-$SANITIZED_BRANCH"
+              else
+                # For pushes to main, use the current version as-is
+                final_version="$current_version"
               fi
               
+              # Validation logic - this determines if workflow passes/fails (affects merge blocking)
               if [ "$IS_MAIN" = "true" ]; then
-                # For main branch or PRs targeting main, block pre-release versions
-                if [[ "$final_version" =~ -dev$|-alpha$|-beta$|-rc[0-9]*$ ]]; then
-                  INVALID_VERSIONS="${INVALID_VERSIONS}${chart_name}: $final_version\n"
-                else
-                  SHOULD_PUBLISH=true
+                # PRs targeting main: block merge if Chart.yaml has pre-release versions
+                if [[ "$current_version" =~ -dev$|-alpha$|-beta$|-rc[0-9]*$ ]]; then
+                  INVALID_VERSIONS="${INVALID_VERSIONS}${chart_name}: $current_version (pre-release versions not allowed to be merged to main)\n"
                 fi
+                # Note: Still publishes for testing, but workflow will fail to block merge
               else
-                # For PRs targeting non-main branches, allow only pre-release versions
-                if [[ ! "$final_version" =~ -dev$|-alpha$|-beta$|-rc[0-9]*$ ]]; then
-                  INVALID_VERSIONS="${INVALID_VERSIONS}${chart_name}: $final_version\n"
-                else
-                  SHOULD_PUBLISH=true
-                fi
+                # PRs targeting non-main branches: always allow (no validation needed)
+                # Charts are published with branch suffix for testing
+                echo "  → Will publish as: $final_version"
               fi
             else
               echo "ℹ️ $chart_name: $current_version (no change and already published)"
@@ -163,18 +166,15 @@ jobs:
           # Clean up temp files
           rm -f "$CURRENT_VERSIONS_FILE" "$PREVIOUS_VERSIONS_FILE" "$PUBLISHED_VERSIONS_FILE" index.yaml
 
-          # Only check for invalid versions if there were actual changes
-          if [ "$SHOULD_PUBLISH" = "true" ] && [ -n "$INVALID_VERSIONS" ]; then
-            if [ "$IS_MAIN" = "true" ]; then
-              echo -e "🚫 Blocking operation on main: Invalid pre-release versions detected\n$INVALID_VERSIONS"
-            else
-              echo -e "🚫 Blocking publish from non-main branch: Production versions not allowed\n$INVALID_VERSIONS"
-            fi
-            echo "::error::Invalid versions detected:$INVALID_VERSIONS"
-            exit 1
+          # Check for invalid versions (this will fail the workflow to block merges)
+          if [ -n "$INVALID_VERSIONS" ]; then
+            echo -e "🚫 Workflow failed: Invalid versions detected for merge to main:\n$INVALID_VERSIONS"
+            echo "::error::Invalid versions detected for merge: $INVALID_VERSIONS"
+            echo "Charts will still be published for testing, but merge is blocked."
+            # Note: Don't exit here - let charts publish first, then fail at the end
           fi
 
-          # If no version changes, that's perfectly fine - nothing to publish
+          # If no version changes and nothing to republish, that's fine
           if [ "$SHOULD_PUBLISH" = "false" ]; then
             echo "ℹ️ No chart version changes detected - skipping publish"
           fi
@@ -185,6 +185,9 @@ jobs:
           echo "sanitized_branch=$SANITIZED_BRANCH" >> $GITHUB_OUTPUT
           echo "version_changes<<EOF" >> $GITHUB_OUTPUT
           echo -e "$VERSION_CHANGES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          echo "invalid_versions<<EOF" >> $GITHUB_OUTPUT
+          echo -e "$INVALID_VERSIONS" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
       - name: Checkout existing charts
         if: steps.check.outputs.should_publish == 'true'
