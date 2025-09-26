@@ -32,7 +32,7 @@
         --kube-context {{ inventory_hostname }}
         --create-namespace
         -f /tmp/monitoring-values.yaml
-        {{ ('--version ' + monitoring_chart_version) if monitoring_chart_version is defined else '' }}
+        {{ ('--version ' + monitoring_charts_version) if monitoring_charts_version is defined else '' }}
       register: monitoring_deployment
       changed_when: monitoring_deployment.rc == 0
 

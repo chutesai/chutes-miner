@@ -23,7 +23,7 @@
     -f /tmp/chutes-miner-gpu.yaml
     --set-string minerCredentials.ss58Address="{{ miner_ss58_address }}"
     --set-string minerCredentials.secretSeed="{{ miner_secret_seed }}"
-    {{ ('--version ' + miner_gpu_chart_version) if miner_gpu_chart_version is defined else '' }}
+    {{ ('--version ' + miner_gpu_charts_version) if miner_gpu_charts_version is defined else '' }}
   register: miner_deployment
   changed_when: miner_deployment.rc == 0
   no_log: true
