@@ -36,7 +36,9 @@ class MonitoringRouter:
         """Setup all the monitoring routes"""
         self.router.add_api_route("/clusters", self.list_clusters, methods=["GET"])
         self.router.add_api_route("/clusters/details", self.get_cluster_detail, methods=["GET"])
-        self.router.add_api_route("/clusters/resources", self.get_cluster_resources, methods=["GET"])
+        self.router.add_api_route(
+            "/clusters/resources", self.get_cluster_resources, methods=["GET"]
+        )
         # self.router.add_api_route("/clusters_resources", self.get_cluster_resource_type, methods=["GET"])
         self.router.add_api_route("/overview", self.get_dashboard_overview, methods=["GET"])
 
@@ -67,7 +69,7 @@ class MonitoringRouter:
                     error_message=cluster_status.error_message,
                     is_healthy=cluster_status.is_healthy,
                     resource_counts=resource_counts,
-                    total_resources=total_resources
+                    total_resources=total_resources,
                 )
                 cluster_overviews.append(overview)
 
@@ -77,7 +79,12 @@ class MonitoringRouter:
             logger.error(f"Error listing clusters: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
-    async def get_cluster_detail(self, cluster_name: Optional[str] = Query(None, description="Optional cluster name; omit for all clusters")) -> ClusterDetailResponse:
+    async def get_cluster_detail(
+        self,
+        cluster_name: Optional[str] = Query(
+            None, description="Optional cluster name; omit for all clusters"
+        ),
+    ) -> ClusterDetailResponse:
         """Get detailed information about a specific cluster including all resources"""
         try:
             cluster_names = self.redis_client.get_all_cluster_names()
@@ -86,7 +93,7 @@ class MonitoringRouter:
                 if cluster_name not in cluster_names:
                     raise HTTPException(
                         status_code=status.HTTP_404_NOT_FOUND,
-                        detail=f"Cluster {cluster_name} not found"
+                        detail=f"Cluster {cluster_name} not found",
                     )
                 requested_clusters = [cluster_name]
             else:
@@ -96,9 +103,7 @@ class MonitoringRouter:
             for cluster in requested_clusters:
                 details.append(self._get_cluster_details(cluster))
 
-            response = ClusterDetailResponse(
-                clusters=details
-            )
+            response = ClusterDetailResponse(clusters=details)
 
             return response
 
@@ -107,26 +112,26 @@ class MonitoringRouter:
         except Exception as e:
             logger.error(f"Error getting cluster detail for {cluster_name}: {e}")
             raise HTTPException(status_code=500, detail=str(e))
-        
+
     async def _get_cluster_details(self, cluster_name):
         # Get cluster status
         cluster_status = await self.redis_client.get_cluster_status(cluster_name)
         if not cluster_status:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Cluster status for {cluster_name} not found"
+                detail=f"Cluster status for {cluster_name} not found",
             )
 
         # Get all resources for this cluster
         resources = await self._get_cluster_resources(cluster_name)
-        
+
         # Create resource summaries
         resource_summary = []
         for resource_type, resource_list in resources.items():
             summary = ResourceSummary(
                 resource_type=resource_type,
                 count=len(resource_list),
-                sample_data=resource_list[0] if resource_list else None
+                sample_data=resource_list[0] if resource_list else None,
             )
             resource_summary.append(summary)
 
@@ -137,15 +142,19 @@ class MonitoringRouter:
             error_message=cluster_status.error_message,
             is_healthy=cluster_status.is_healthy,
             resources=resources.to_dict(),
-            resource_summary=resource_summary
+            resource_summary=resource_summary,
         )
 
         return detail
 
     async def get_cluster_resources(
-            self, 
-            cluster_name: Optional[str] = Query(None, description="Optional cluster name; omit for all clusters"),
-            resource_type: Optional[str] = Query(None, description="Optional resource type to filter for")
+        self,
+        cluster_name: Optional[str] = Query(
+            None, description="Optional cluster name; omit for all clusters"
+        ),
+        resource_type: Optional[str] = Query(
+            None, description="Optional resource type to filter for"
+        ),
     ) -> ClusterResourcesResponse:
         """Get all resources for a cluster, grouped by type"""
         try:
@@ -155,7 +164,7 @@ class MonitoringRouter:
                 if cluster_name not in cluster_names:
                     raise HTTPException(
                         status_code=status.HTTP_404_NOT_FOUND,
-                        detail=f"Cluster {cluster_name} not found"
+                        detail=f"Cluster {cluster_name} not found",
                     )
                 requested_clusters = [cluster_name]
             else:
@@ -164,10 +173,10 @@ class MonitoringRouter:
             if resource_type:
                 try:
                     _resource_type = ResourceType(resource_type)
-                except:
+                except Exception:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"Invalid resource type supplied: {resource_type}"
+                        detail=f"Invalid resource type supplied: {resource_type}",
                     )
             else:
                 _resource_type = ResourceType.ALL
@@ -175,15 +184,13 @@ class MonitoringRouter:
             response_items: list[ClusterResourcesResponseItem] = []
             for cluster in requested_clusters:
                 resources = await self._get_cluster_resources(cluster, _resource_type)
-                response_items.append(ClusterResourcesResponseItem(
-                    cluster_name=cluster,
-                    resources=resources.to_dict(),
-                    count = resources.count
-                ))
+                response_items.append(
+                    ClusterResourcesResponseItem(
+                        cluster_name=cluster, resources=resources.to_dict(), count=resources.count
+                    )
+                )
 
-            response = ClusterResourcesResponse(
-                clusters=response_items
-            )
+            response = ClusterResourcesResponse(clusters=response_items)
 
             return response
 
@@ -192,16 +199,15 @@ class MonitoringRouter:
         except Exception as e:
             logger.error(f"Error getting resources for cluster {cluster_name}: {e}")
             raise HTTPException(status_code=500, detail=str(e))
-        
 
     async def get_dashboard_overview(self) -> DashboardOverview:
         """Get comprehensive dashboard overview with system-wide statistics"""
         try:
             cluster_overviews = await self.list_clusters()
-            
+
             # Calculate health summary
             health_summary = self._calculate_health_summary(cluster_overviews)
-            
+
             # Calculate total resources across all clusters
             total_resources = self._calculate_total_resources(cluster_overviews)
 
@@ -209,7 +215,7 @@ class MonitoringRouter:
                 health_summary=health_summary,
                 total_resources=total_resources,
                 cluster_overviews=cluster_overviews,
-                last_updated=datetime.now(timezone.utc)
+                last_updated=datetime.now(timezone.utc),
             )
 
             return overview
@@ -228,11 +234,15 @@ class MonitoringRouter:
                 resource_counts[resource_type.value] = len(resources)
         except Exception as e:
             logger.error(f"Error getting {resource_type} count for {cluster_name}: {e}")
-            raise ResourceRetreivalException(f"Failed to retrieve resource counts for {cluster_name}")
+            raise ResourceRetreivalException(
+                f"Failed to retrieve resource counts for {cluster_name}"
+            )
 
         return resource_counts
 
-    async def _get_cluster_resources(self, cluster_name: str, resource_type: ResourceType = ResourceType.ALL) -> ClusterResources:
+    async def _get_cluster_resources(
+        self, cluster_name: str, resource_type: ResourceType = ResourceType.ALL
+    ) -> ClusterResources:
         """Get all resources for a cluster, organized by type"""
 
         try:
@@ -270,13 +280,15 @@ class MonitoringRouter:
             unhealthy_clusters=unhealthy_clusters,
             starting_clusters=starting_clusters,
             error_clusters=error_clusters,
-            offline_clusters=offline_clusters
+            offline_clusters=offline_clusters,
         )
 
-    def _calculate_total_resources(self, cluster_overviews: List[ClusterOverview]) -> Dict[str, int]:
+    def _calculate_total_resources(
+        self, cluster_overviews: List[ClusterOverview]
+    ) -> Dict[str, int]:
         """Calculate total resources across all clusters"""
         total_resources = {}
-        
+
         for cluster in cluster_overviews:
             for resource_type, count in cluster.resource_counts.items():
                 total_resources[resource_type] = total_resources.get(resource_type, 0) + count

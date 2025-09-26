@@ -11,37 +11,34 @@ class KubernetesMultiClusterClientManager:
         self.multi_config = MultiClusterKubeConfig()
 
     def get_api_client(self, context_name) -> client.ApiClient:
-
         _client = None
         try:
-            _client =  self._get_client_for_context(context_name)
+            _client = self._get_client_for_context(context_name)
         except (KubeContextNotFound, KubeContextNotFound) as e:
             logger.error(f"Failed to get api client:\n{e}")
-            
+
         return _client
 
     def get_app_client(self, context_name) -> client.AppsV1Api:
-
         _client = None
         try:
             api_client = self._get_client_for_context(context_name)
             _client = client.AppsV1Api(api_client)
         except (KubeContextNotFound, KubeContextNotFound) as e:
             logger.error(f"Failed to get app client:\n{e}")
-            
+
         return _client
 
     def get_core_client(
         self, context_name: str, kubeconfig: Optional[KubeConfig] = None
     ) -> client.CoreV1Api:
-        
         _client = None
         try:
             api_client = self._get_client_for_context(context_name, kubeconfig)
             _client = client.CoreV1Api(api_client)
         except (KubeContextNotFound, KubeContextNotFound) as e:
             logger.error(f"Failed to get core client:\n{e}")
-            
+
         return _client
 
     def get_batch_client(self, context_name: str) -> client.BatchV1Api:
@@ -51,7 +48,7 @@ class KubernetesMultiClusterClientManager:
             _client = client.BatchV1Api(api_client)
         except (KubeContextNotFound, KubeContextNotFound) as e:
             logger.error(f"Failed to get batch client:\n{e}")
-            
+
         return _client
 
     @lru_cache(maxsize=10)
@@ -63,7 +60,9 @@ class KubernetesMultiClusterClientManager:
         _kubeconfig = kubeconfig if kubeconfig else self.multi_config.kubeconfig
 
         if not _kubeconfig:
-            raise KubeconfigNotFound(f"No kubeconfig currently loaded and no override kubeconfig provided")
+            raise KubeconfigNotFound(
+                "No kubeconfig currently loaded and no override kubeconfig provided"
+            )
 
         if context not in [c.name for c in _kubeconfig.contexts]:
             raise KubeContextNotFound(f"Context {context} does not exist in kubeconfig.")

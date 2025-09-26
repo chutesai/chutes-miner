@@ -307,7 +307,7 @@ class ResourceMonitor:
                     asyncio.create_task(self.watch_namespaced_deployments(namespace)),
                     asyncio.create_task(self.watch_namespaced_pods(namespace)),
                     asyncio.create_task(self.watch_namespaced_services(namespace)),
-                    asyncio.create_task(self.watch_namespaced_jobs(namespace))
+                    asyncio.create_task(self.watch_namespaced_jobs(namespace)),
                 ]
                 tasks += namespace_tasks
 
