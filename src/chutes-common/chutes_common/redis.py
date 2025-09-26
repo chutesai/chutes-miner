@@ -310,7 +310,9 @@ class MonitoringRedisClient:
 
             if keys:
                 self.redis.delete(*keys)
-                logger.info(f"Cleared {len(keys)} {resource_type.value} keys for cluster {cluster_name}")
+                logger.info(
+                    f"Cleared {len(keys)} {resource_type.value} keys for cluster {cluster_name}"
+                )
 
     # Health tracking methods
     async def update_cluster_status(self, status: ClusterStatus):

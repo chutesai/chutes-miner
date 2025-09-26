@@ -63,7 +63,6 @@ class ControlPlaneClient:
         headers["Content-Type"] = "application/json"
 
         try:
-
             async with self._session.post(url, data=payload, headers=headers) as response:
                 if response.status != 200:
                     if response.status == 409:
