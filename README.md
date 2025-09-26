@@ -226,8 +226,7 @@ all:
     controller_kubeconfig: ~/.kube/chutes.config # Path to the ansible controller kubeconfig file you want to use
     controller_kubectl_staging_dir: "~/.kube/chutes-staging"
 
-    ss58_address: "<SS58>"
-    secret_seed: "<SEED>"
+    hotkey_path: "~/.bittensor/wallets/[WALLET]/hotkeys/[HOTKEY]"
 
     chart_values: "~/chutes/values.yaml"
 
@@ -283,22 +282,10 @@ Here's an example using a throwaway key.  Suppose you created a hotkey as such:
 $ btcli wallet new_hotkey --wallet.name offline --wallet.hotkey test --wallet.path ~/.bittensor/wallets
 ...
 ```
-Print out the content of that hotkey, and optionally pipe to jq to pretty-print:
-```bash
-$ cat ~/.bittensor/wallets/offline/hotkeys/test | jq .
-{
-  "accountId": "0x5a30cd5517328838f69ed48531894d94e9f231dff241e1561260a8522a167731",
-  "publicKey": "0x5a30cd5517328838f69ed48531894d94e9f231dff241e1561260a8522a167731",
-  "privateKey": "0x69de0e5d7e66902d5b9da02091bb130aedf49d6c53a2fe67eeb914520e0ea70aa2176663f7b30c93d8826c702e9b22c35ab1a99afbdc02c35618c97e00edab3a",
-  "secretPhrase": "inform sell fitness extra kitten unit hood glass window law spider desk",
-  "secretSeed": "0xe031170f32b4cda05df2f3cf6bc8d76827b683bbce23d9fa960c0b3fc21641b8",
-  "ss58Address": "5E6xfU3oNU7y1a7pQwoc31fmUjwBZ2gKcNCw8EXsdtCQieUQ"
-}
-```
-Then set these values in your local inventory, i.e. `~/chutes/inventory.yml`
+
+Then set the path to the hotkey in your local inventory, i.e. `~/chutes/inventory.yml`.  Ansible will parse and the hotkey and provide values via environment so the hotkey is not exposed on nodes.
 ```yaml
-    ss58_address: "5E6xfU3oNU7y1a7pQwoc31fmUjwBZ2gKcNCw8EXsdtCQieUQ"
-    secret_seed: "e031170f32b4cda05df2f3cf6bc8d76827b683bbce23d9fa960c0b3fc21641b8"
+    hotkey_path: ~/bittensor/wallets/offline/hotkey/test
 ```
 
 ### 3. Chart Configuration
@@ -394,7 +381,7 @@ Now that all the configuration is setup, use ansible to setup your infrastructur
 Gepetto is the most important component as a miner.  It is responsible for selecting chutes to deploy, scale up, scale down, delete, etc.
 You'll want to thoroughly examine this code and make any changes that you think would gain you more total compute time.
 
-Once you are satisfied with the state of the `gepetto.py` file, you'll need to create a configmap object in kubernetes that stores your file (from inside the `chutes-miner` directory, from cloning repo):
+Once you are satisfied with the state of the `gepetto.py` file, you'll need to create a configmap object in kubernetes that stores your file (from inside the `src/chutes-miner/chutes_miner` directory in the repo):
 ```bash
 kubectl create configmap gepetto-code --context chutes-miner-cpu-0 --from-file=gepetto.py -n chutes
 ```
@@ -406,7 +393,7 @@ kubectl create configmap gepetto-code --from-file=gepetto.py -o yaml --dry-run=c
 
 You must also restart the gepetto deployment after you make changes, but this will only work AFTER you have completed the rest of the setup guide (no need to run when you initially setup your miner):
 ```
-kubectl rollout restart deployment/gepetto -n chutes
+kubectl rollout restart deployment/gepetto --context chutes-miner-cpu-0 -n chutes
 ```
 
 ### 6. Register
