@@ -21,9 +21,13 @@
     --kube-context {{ inventory_hostname }}
     --create-namespace
     -f /tmp/chutes-miner-gpu.yaml
+    --set-string minerCredentials.ss58Address="{{ miner_ss58_address }}"
+    --set-string minerCredentials.secretSeed="{{ miner_secret_seed }}"
+    {{ ('--version ' + miner_gpu_chart_version) if miner_gpu_chart_version is defined else '' }}
   register: miner_deployment
   changed_when: miner_deployment.rc == 0
+  no_log: true
 
-- name: Display Miner GPU deployment result
-  debug:
-    var: miner_deployment
+- name: Display deployment result
+  ansible.builtin.debug:
+    msg: "Miner GPU deployment on {{ inventory_hostname }}: {{ 'SUCCESS' if miner_deployment.rc == 0 else 'FAILED' }}"
