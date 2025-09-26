@@ -1,9 +1,9 @@
 ---
 apiVersion: v2
 name: chutes-monitoring
-description: A Helm chart for Kubernetes
+description: Chutes monitoring helm charts
 type: application
-version: 0.2.0
+version: 0.2.0-dev
 appVersion: 1.16.0
 
 maintainers:
