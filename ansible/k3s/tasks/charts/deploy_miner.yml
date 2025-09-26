@@ -1,21 +1,10 @@
-- name: Clean directory for fresh install
-  ansible.builtin.file:
-    path: /tmp/chutes-miner
-    state: absent
+- name: Add Chutes Helm repository
+  kubernetes.core.helm_repository:
+    name: chutes
+    repo_url: https://rayonlabs.github.io/chutes-miner
 
-- name: Create temporary directory for miner charts
-  ansible.builtin.file:
-    path: /tmp/chutes-miner
-    state: directory
-    mode: "0755"
-
-- name: Copy miner charts from local directory
-  ansible.builtin.copy:
-    src: "{{ playbook_dir }}/../../../charts/chutes-miner/"
-    dest: /tmp/chutes-miner/
-    mode: preserve
-  register: copy_charts_result
-  changed_when: copy_charts_result.changed
+- name: Update Helm repositories
+  shell: helm repo update
 
 - name: Copy custom values
   ansible.builtin.copy:
@@ -27,14 +16,18 @@
 
 - name: Install or upgrade Miner charts
   ansible.builtin.command: >
-    helm upgrade --install chutes /tmp/chutes-miner
+    helm upgrade --install chutes chutes/chutes-miner
     --namespace chutes
     --kube-context {{ inventory_hostname }}
     --create-namespace
     -f /tmp/chutes-miner.yaml
+    --set-string minerCredentials.ss58Address="{{ miner_ss58_address }}"
+    --set-string minerCredentials.secretSeed="{{ miner_secret_seed }}"
+    {{ ('--version ' + miner_charts_version) if miner_charts_version is defined else '' }}
   register: miner_deployment
   changed_when: miner_deployment.rc == 0
+  no_log: true
 
-- name: Display Miner deployment result
-  debug:
-    var: miner_deployment
+- name: Display deployment result
+  ansible.builtin.debug:
+    msg: "Miner deployment on {{ inventory_hostname }}: {{ 'SUCCESS' if miner_deployment.rc == 0 else 'FAILED' }}"

@@ -3,24 +3,13 @@
   tags: monitoring
   block:
 
-    - name: Clean directory for fresh install
-      ansible.builtin.file:
-        path: /tmp/chutes-monitoring
-        state: absent
+    - name: Add Chutes Helm repository
+      kubernetes.core.helm_repository:
+        name: chutes
+        repo_url: https://rayonlabs.github.io/chutes-miner
 
-    - name: Create temporary directory for monitoring charts
-      ansible.builtin.file:
-        path: /tmp/chutes-monitoring
-        state: directory
-        mode: "0755"
-
-    - name: Copy monitoring charts from local directory
-      ansible.builtin.copy:
-        src: "{{ playbook_dir }}/../../../charts/chutes-monitoring/"
-        dest: /tmp/chutes-monitoring/
-        mode: preserve
-      register: copy_charts_result
-      changed_when: copy_charts_result.changed
+    - name: Update Helm repositories
+      shell: helm repo update
 
     - name: Generate Monitoring Host Helm values
       ansible.builtin.template:
@@ -38,11 +27,12 @@
 
     - name: Install or upgrade Monitoring
       ansible.builtin.command: >
-        helm upgrade --install monitoring /tmp/chutes-monitoring
+        helm upgrade --install monitoring chutes/chutes-monitoring
         --namespace {{ monitoring_namespace }}
         --kube-context {{ inventory_hostname }}
         --create-namespace
         -f /tmp/monitoring-values.yaml
+        {{ ('--version ' + monitoring_charts_version) if monitoring_charts_version is defined else '' }}
       register: monitoring_deployment
       changed_when: monitoring_deployment.rc == 0
 

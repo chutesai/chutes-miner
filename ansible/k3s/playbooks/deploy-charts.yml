@@ -1,4 +1,16 @@
 ---
+- name: Parse credentials for charts
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  run_once: true
+  tags:
+    - always
+  tasks:
+    - name: Parse and distribute credentials
+      ansible.builtin.include_tasks:
+        file: "{{ playbook_dir }}/../tasks/charts/parse_credentials.yml"
+
 - name: Deploy Monitoring Charts
   hosts: control
   become: true
@@ -26,6 +38,8 @@
 - name: Deploy Miner GPU Charts
   hosts: workers
   become: true
+  strategy: free  # Allow workers to run independently without waiting
+  serial: "{{ batch_size | default('100%') }}"  # Control batch size if needed
   tags:
     - miner-gpu-charts
   tasks:

@@ -87,8 +87,6 @@ The migration process transforms your infrastructure from MicroK8s to K3s while 
 # CLI execution location
 run_cli_locally: false  # Set to true to run chutes-miner commands from Ansible controller
 
-# Hotkey configuration
-hotkey_path: ~/.bittensor/wallets/chutes-test/hotkeys/chutes-test # Path to hotkey on controller
 remote_hotkey_path: /etc/chutes-miner/hotkey.json # Path on host if running CLI remotely
 copy_hotkey_to_ansible_host: false # If running CLI from ansible hosts, set to true to copy hotkey automatically
 
@@ -119,14 +117,10 @@ all:
   children:
     control: # New control node for K3s.  This MUST be a new node, can not reuse existing microk8s node
       hosts:
-        chutes-miner-cpu-0:
-          ansible_host: 192.0.2.1 # Public IP of the new control node for K3s
+        ...
     workers: # Existing GPU nodes from microk8s inventory go in this group
       hosts:
-        chutes-miner-gpu-0:
-          ansible_host: 192.0.2.2 # Public IP of miner node GPU 0
-        chutes-miner-gpu-1: 
-          ansible_host: 192.0.2.3 # Public IP of miner node GPU 1
+        ...
     microk8s:  # Existing MicroK8s control plane (chutes-miner-cpu-0) from your microk8s inventory
       hosts:
         chutes-miner-control-0: # Note the naming convention (cpu-0 -> control-0).
@@ -249,7 +243,7 @@ ansible chutes-miner-gpu-0 -b -m file -a "path=/etc/ansible state=absent recurse
 ### Remote Execution (Default)
 
 - `chutes-miner` commands run on ansible hosts for the microk8s and control groups
-- Requires `chutes-miner-cli` installed on each node
+- Requires `chutes-miner-cli` installed on each control node
 - Hotkey copied to remote nodes if `copy_hotkey_to_ansible_host: true`
     - If the hotkey already exists on the node you can simply update the `remote_hotkey_path` instead of using ansible to copy the hotkey over
 
@@ -323,9 +317,8 @@ The migration playbook automatically configures kubectl access and cluster manag
 - Kubeconfigs stored in `~/.kube/chutes/` directory
 - Each cluster gets its own config file: `~/.kube/chutes/<hostname>`
 - Configs are merged into `~/.kube/config` for easy access
-- Karmada API server config: `~/.kube/chutes/karmada-apiserver`
 
-**On Target Hosts:**
+**On Control Node Host:**
 - User kubeconfig: `~/.kube/config` (for ansible_user, user and root)
 - Auto-completion enabled for kubectl and k3s commands
 
