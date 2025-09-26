@@ -27,7 +27,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0 # Full history to ensure base ref availability
-          
+
       - name: Fetch base branch for PRs
         if: github.event_name == 'pull_request'
         run: |
@@ -88,7 +88,10 @@ jobs:
               fi
             fi
           done
+          
+          # Clean restore to current branch state
           git checkout HEAD -- ${{ env.CHART_DIR }}/
+          git clean -fd ${{ env.CHART_DIR }}/  # Remove any untracked files
 
           # Debug output
           echo "Current versions:"
