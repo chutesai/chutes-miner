@@ -50,8 +50,9 @@ The migration process transforms your infrastructure from MicroK8s to K3s while 
 
 ### Process Overview
 
-1. **Sets up the K3s control plane** on designated control node
+1. **Sets up the K3s control plane** on new k3s control node
 2. **Migrates worker nodes** from MicroK8s to K3s in a controlled manner
+    - This is a serial process. If a node fails it will stop the entire migration so you can resolve it. This way you are only migrating one node at a time and your score should be impacted in any significant way.
 3. **Preserves node metadata** (GPU types, costs) during migration
 4. **Handles failure scenarios** with migration markers to prevent re-processing
 
