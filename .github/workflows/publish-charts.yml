@@ -101,12 +101,6 @@ jobs:
           
           # Restore any stashed changes
           git stash pop || true
-          
-          # Debug: verify we're in the right state
-          echo "Current branch/commit after restore:"
-          git log --oneline -1
-          echo "Sample chart files:"
-          find ${{ env.CHART_DIR }}/ -name "*.yaml" | grep -E "(prometheus|monitoring)" | head -5
 
           # Debug output
           echo "Current versions:"
@@ -273,10 +267,6 @@ jobs:
 
               echo "📦 Packaging $chart_name version $chart_version..."
               
-              # Debug: Check what files exist in the chart directory
-              echo "Files in charts/$chart_name/templates/:"
-              ls -la "charts/$chart_name/templates/" || echo "Templates directory not found"
-              
               helm lint "${{ env.CHART_DIR }}/$chart_name/"
               helm package "${{ env.CHART_DIR }}/$chart_name" -d "${{ env.HELM_CHART_DIR }}" --version "$chart_version"
               
@@ -307,7 +297,7 @@ jobs:
           publish_dir: ${{ env.HELM_CHART_DIR }}
           publish_branch: gh-pages
           force_orphan: false
-          
+
       - name: Fail workflow if invalid versions for merge
         if: steps.check.outputs.should_publish == 'true'
         run: |
