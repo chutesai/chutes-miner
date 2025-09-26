@@ -23,6 +23,7 @@ jobs:
       id-token: write
       pull-requests: write
     steps:
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
@@ -76,9 +77,15 @@ jobs:
             fi
           done
 
-          # Get previous versions - store in temp file
+          # Get previous versions using a more reliable git approach
           PREVIOUS_VERSIONS_FILE=$(mktemp)
-          git checkout "$BASE_REF" -- ${{ env.CHART_DIR }}/ || { echo "::error::Failed to checkout $BASE_REF"; exit 1; }
+          
+          # Stash any uncommitted changes
+          git stash push -u -m "workflow-temp-stash" || true
+          
+          # Checkout base branch cleanly
+          git checkout "$BASE_REF" || { echo "::error::Failed to checkout $BASE_REF"; exit 1; }
+          
           for chart_dir in ${{ env.CHART_DIR }}/*/Chart.yaml; do
             if [ -f "$chart_dir" ]; then
               chart_name=$(basename "$(dirname "$chart_dir")")
@@ -89,10 +96,17 @@ jobs:
             fi
           done
           
-          # Clean restore to current branch state
-          git checkout HEAD -- ${{ env.CHART_DIR }}/
-          git clean -fd ${{ env.CHART_DIR }}/  # Remove any untracked files
-          git status --porcelain ${{ env.CHART_DIR }}/ # Debug: show any remaining changes
+          # Return to original commit/branch
+          git checkout ${{ github.sha }} || git checkout HEAD
+          
+          # Restore any stashed changes
+          git stash pop || true
+          
+          # Debug: verify we're in the right state
+          echo "Current branch/commit after restore:"
+          git log --oneline -1
+          echo "Sample chart files:"
+          find ${{ env.CHART_DIR }}/ -name "*.yaml" | grep -E "(prometheus|monitoring)" | head -5
 
           # Debug output
           echo "Current versions:"
@@ -204,7 +218,7 @@ jobs:
         with:
           ref: gh-pages
           path: existing-charts
-          
+
       - name: Package and publish charts
         if: steps.check.outputs.should_publish == 'true'
         id: package
@@ -293,7 +307,7 @@ jobs:
           publish_dir: ${{ env.HELM_CHART_DIR }}
           publish_branch: gh-pages
           force_orphan: false
-
+          
       - name: Fail workflow if invalid versions for merge
         if: steps.check.outputs.should_publish == 'true'
         run: |
