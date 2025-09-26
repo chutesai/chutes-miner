@@ -1388,46 +1388,62 @@ class MultiClusterK8sOperator(K8sOperator):
         context = self._redis.get_resource_cluster(
             resource_name=name, resource_type=ResourceType.DEPLOYMENT, namespace=namespace
         )
-        client = self._manager.get_app_client(context)
 
-        try:
-            client.delete_namespaced_deployment(
-                name=name,
-                namespace=namespace,
-            )
-        except ApiException as e:
-            if e.status == 404:
-                # Not found, remove from redis
-                self._redis.delete_resource(name, context, ResourceType.DEPLOYMENT, namespace)
-                logger.warning(
-                    f"Attempted to delete deployment {name}, but appears to have disappeared.  Removed from redis cache."
+        if context:
+            client = self._manager.get_app_client(context)
+
+            try:
+                client.delete_namespaced_deployment(
+                    name=name,
+                    namespace=namespace,
                 )
-            else:
-                raise
+            except ApiException as e:
+                if e.status == 404:
+                    # Not found, remove from redis
+                    self._redis.delete_resource(name, context, ResourceType.DEPLOYMENT, namespace)
+                    logger.warning(
+                        f"Attempted to delete deployment {name}, but appears to have disappeared.  Removed from redis cache."
+                    )
+                else:
+                    raise
+        else:
+            logger.warning(
+                f"Attempted to delete deployment {name}, but deployment not found."
+            )
 
     def _deploy_service(self, service, server_name, namespace=settings.namespace):
         client = self._manager.get_core_client(server_name)
         return client.create_namespaced_service(namespace=namespace, body=service)
 
     def _delete_service(self, name, namespace=settings.namespace):
+        
+
         context = self._redis.get_resource_cluster(
             resource_name=name, resource_type=ResourceType.SERVICE, namespace=namespace
         )
-        client = self._manager.get_core_client(context)
-        try:
-            client.delete_namespaced_service(
-                name=name,
-                namespace=namespace,
-            )
-        except ApiException as e:
-            if e.status == 404:
-                # Not found, remove from redis
-                self._redis.delete_resource(name, context, ResourceType.SERVICE, namespace)
-                logger.warning(
-                    f"Attempted to delete service {name}, but appears to have disappeared.  Removed from redis cache."
+
+        if context:
+            client = self._manager.get_core_client(context)
+
+            try:
+                client.delete_namespaced_service(
+                    name=name,
+                    namespace=namespace,
                 )
-            else:
-                raise
+            except ApiException as e:
+                if e.status == 404:
+                    # Not found, remove from redis
+                    self._redis.delete_resource(name, context, ResourceType.SERVICE, namespace)
+                    logger.warning(
+                        f"Attempted to delete service {name}, but appears to have disappeared.  Removed from redis cache."
+                    )
+                else:
+                    raise
+        else:
+            logger.warning(
+                f"Attempted to delete service {name}, but service not found."
+            )
+
 
     def delete_config_map(self, name, namespace=settings.namespace):
         # Create CM on all clusters
