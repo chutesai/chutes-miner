@@ -92,6 +92,7 @@ jobs:
           # Clean restore to current branch state
           git checkout HEAD -- ${{ env.CHART_DIR }}/
           git clean -fd ${{ env.CHART_DIR }}/  # Remove any untracked files
+          git status --porcelain ${{ env.CHART_DIR }}/ # Debug: show any remaining changes
 
           # Debug output
           echo "Current versions:"
@@ -203,7 +204,7 @@ jobs:
         with:
           ref: gh-pages
           path: existing-charts
-
+          
       - name: Package and publish charts
         if: steps.check.outputs.should_publish == 'true'
         id: package
@@ -257,6 +258,11 @@ jobs:
               fi
 
               echo "📦 Packaging $chart_name version $chart_version..."
+              
+              # Debug: Check what files exist in the chart directory
+              echo "Files in charts/$chart_name/templates/:"
+              ls -la "charts/$chart_name/templates/" || echo "Templates directory not found"
+              
               helm lint "${{ env.CHART_DIR }}/$chart_name/"
               helm package "${{ env.CHART_DIR }}/$chart_name" -d "${{ env.HELM_CHART_DIR }}" --version "$chart_version"
               
