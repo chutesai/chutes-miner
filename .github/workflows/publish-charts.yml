@@ -27,19 +27,23 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0 # Full history to ensure base ref availability
+          
       - name: Fetch base branch for PRs
         if: github.event_name == 'pull_request'
         run: |
           git fetch origin ${{ github.base_ref }}:${{ github.base_ref }}
+
       - name: Setup Helm
         uses: azure/setup-helm@v4
         with:
           version: v3.14.0
+
       - name: Install yq
         run: |
           wget https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64 -O /usr/local/bin/yq
           chmod +x /usr/local/bin/yq
           yq --version
+
       - name: Check Chart.yaml changes and validate
         id: check
         run: |
@@ -189,12 +193,14 @@ jobs:
           echo "invalid_versions<<EOF" >> $GITHUB_OUTPUT
           echo -e "$INVALID_VERSIONS" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
+
       - name: Checkout existing charts
         if: steps.check.outputs.should_publish == 'true'
         uses: actions/checkout@v4
         with:
           ref: gh-pages
           path: existing-charts
+
       - name: Package and publish charts
         if: steps.check.outputs.should_publish == 'true'
         id: package
@@ -247,5 +253,44 @@ jobs:
                 continue
               fi
 
+              echo "📦 Packaging $chart_name version $chart_version..."
               helm lint "${{ env.CHART_DIR }}/$chart_name/"
-              helm package "${{ env.CHART_DIR }}/$chart_name"
+              helm package "${{ env.CHART_DIR }}/$chart_name" -d "${{ env.HELM_CHART_DIR }}" --version "$chart_version"
+              
+              echo "✅ Packaged $chart_name-$chart_version.tgz"
+              NEW_CHARTS=$((NEW_CHARTS + 1))
+            else
+              echo "❌ Chart directory not found: ${{ env.CHART_DIR }}/$chart_name"
+            fi
+          done
+
+          # Generate/update repository index
+          if [ "$NEW_CHARTS" -gt 0 ]; then
+            helm repo index "${{ env.HELM_CHART_DIR }}" --url "${{ env.REPO_URL }}"
+            echo "📋 Updated repository index with $NEW_CHARTS new chart(s)"
+          else
+            echo "ℹ️ No new charts to package"
+          fi
+
+          # Output for later steps
+          echo "new_charts=$NEW_CHARTS" >> $GITHUB_OUTPUT
+          echo "chart_dir=${{ env.HELM_CHART_DIR }}" >> $GITHUB_OUTPUT
+
+      - name: Deploy to GitHub Pages
+        if: steps.package.outputs.new_charts > 0
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ${{ env.HELM_CHART_DIR }}
+          publish_branch: gh-pages
+          force_orphan: false
+
+      - name: Fail workflow if invalid versions for merge
+        if: steps.check.outputs.should_publish == 'true'
+        run: |
+          # This step runs after publishing, and fails the workflow if there were invalid versions
+          # This allows charts to be published for testing while still blocking the merge
+          if [ -n "${{ steps.check.outputs.invalid_versions }}" ]; then
+            echo "::error::Failing workflow to block merge due to invalid versions"
+            exit 1
+          fi
