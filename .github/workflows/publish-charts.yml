@@ -293,7 +293,7 @@ jobs:
         if: steps.package.outputs.new_charts > 0
         uses: peaceiris/actions-gh-pages@v3
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          personal_token: ${{ secrets.WORKFLOW_TOKEN }} 
           publish_dir: ${{ env.HELM_CHART_DIR }}
           publish_branch: gh-pages
           force_orphan: false
