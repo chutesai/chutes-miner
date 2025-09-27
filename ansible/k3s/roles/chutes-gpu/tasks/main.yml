@@ -7,6 +7,10 @@
   ansible.builtin.include_tasks: setup_monitoring.yml
   tags: monitoring
 
+- name: Parse and distribute credentials
+  ansible.builtin.include_tasks: "{{ playbook_dir }}/../tasks/charts/parse_credentials.yml"
+  tags: miner-credentials
+
 - name: Deploy miner gpu charts
   ansible.builtin.include_tasks: "{{ playbook_dir }}/../tasks/charts/deploy_miner_gpu.yml"
   tags: miner-gpu-charts
