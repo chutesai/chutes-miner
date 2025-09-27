@@ -1,5 +1,6 @@
 import json
 import asyncio
+from typing import Optional
 import aiohttp
 import typer
 from rich.console import Console
@@ -235,7 +236,7 @@ def add_node(
     hourly_cost: float = typer.Option(..., help="Hourly cost, used in optimizing autoscaling"),
     gpu_short_ref: str = typer.Option(..., help="GPU short reference"),
     hotkey: str = typer.Option(..., help="Path to the hotkey file for your miner"),
-    agent_api: str = typer.Option(..., help="Agent API base URL"),
+    agent_api: Optional[str] = typer.Option(None, help="Agent API base URL (K3s Only)"),
     miner_api: str = typer.Option("http://127.0.0.1:32000", help="Miner API base URL"),
 ):
     """
