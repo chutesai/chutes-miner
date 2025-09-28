@@ -6,7 +6,7 @@
     - name: Add Chutes Helm repository
       kubernetes.core.helm_repository:
         name: chutes
-        repo_url: https://rayonlabs.github.io/chutes-miner
+        repo_url: https://chutesai.github.io/chutes-miner
 
     - name: Update Helm repositories
       shell: helm repo update
