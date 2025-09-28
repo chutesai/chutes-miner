@@ -184,7 +184,7 @@ The node migration is a serial process, meaning only one node at a time is migra
 
 1. Remove the microk8s group from the ansible inventory
 2. Clean up the old microk8s control node.
-3. Deploy the standard or your customized gepetto code to the new cluster once all nodes have been migrated over.  See the [docs](../../README.md#4-update-gepetto-with-your-optimized-strategy) for how to update the gepetto code config map.
+3. Deploy the standard or your customized gepetto code to the new cluster once all nodes have been migrated over.  See the [docs](../../README.md#5-update-gepetto-with-your-optimized-strategy) for how to update the gepetto code config map.
 
 ### Complete Migration
 
