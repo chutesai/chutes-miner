@@ -237,12 +237,7 @@ all:
 
 In most cases the default values will work fine.  Values are explained in detail in the [Chart Configuration](#3-chart-configuration) section. If you find you need to customize and chart values just update your local values file, i.e. `~/chutes/values.yaml`
 
-At a bare minimum you need to configure the URL for the central monitor on the control node.
-
 ```yaml
-monitor:
-  externalUrl: "http://1.0.0.0:32001" # Set to the public IP of cpu-0
-
 cache:
   overrides:
 # Add any per-node cache size (in GB) overrides here, e.g.:

@@ -17,7 +17,8 @@ To ensure the highest probability of success, you should provision your servers 
 - [4. Bootstrap the Nodes](#4-bootstrap-the-nodes)
   - [Bootstrap](#bootstrap)
 - [To Add a New Node, After the Fact](#to-add-a-new-node-after-the-fact)
-- [To Update Charts](#to-update-charts)
+- [Update Charts](#update-charts)
+- [Restart K8s Resources](#restart-k8s-resources)
 
 ### Networking note before starting!!!
 
@@ -110,7 +111,7 @@ Then, use the `site.yml` playbook to add the new node:
 ansible-playbook -i ~/chutes/inventory.yml playbooks/site.yml --tags add-nodes
 ```
 
-## To update charts
+## Update charts
 
 If you need to update charts for any reason, you can just use the `deploy-charts` playbook
 
@@ -124,4 +125,11 @@ To update specific charts
 ansible-playbook -i ~/chutes/inventory.yml playbooks/deploy-charts.yml --tags miner-charts
 ansible-playbook -i ~/chutes/inventory.yml playbooks/deploy-charts.yml --tags miner-gpu-charts
 ansible-playbook -i ~/chutes/inventory.yml playbooks/deploy-charts.yml --tags monitoring-charts
+```
+
+## Restart K8s Resources
+To restart deployments and daemonsets across all clusters:
+
+```
+ansible-playbook -i ~/chutes/inventory.yml playbooks/restart-k8s.yml
 ```

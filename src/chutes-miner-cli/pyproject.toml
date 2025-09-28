@@ -4,7 +4,7 @@ version = "0.2.0"
 description = "Chutes miner CLI"
 readme = "README.md"
 license = "MIT"
-authors = [ "Jon Durbin <jon@jondurbin.com>" ]
+authors = ["Jon Durbin <jon@jondurbin.com>", "Kyle Widmann <kyle@chutes.ai>" ]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
