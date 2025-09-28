@@ -146,7 +146,6 @@ auditExporter:
 monitor:
   image: parachutes/chutes-monitor:k3s-latest
   imagePullPolicy: Always
-  externalUrl: "http://<REPLACE_ME>:32001"
   resources:
     requests:
       cpu: "250m"

@@ -76,8 +76,12 @@ spec:
             {{ else }}
             - name: MONITORING_NAMESPACE
               value: "monitoring"
+            - name: NODE_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
             - name: MONITOR_API
-              value: "{{ .Values.monitor.externalUrl }}"
+              value: "http://$(NODE_IP):32001"
             {{- end }}
           ports:
             - name: http
