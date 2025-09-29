@@ -3,24 +3,6 @@ entries:
   chutes-miner:
   - apiVersion: v2
     appVersion: 0.0.1
-    created: "2025-09-29T15:16:23.631927682Z"
-    description: Helm chart for chutes.ai miner
-    digest: c8b8af58743409dd9d249d955dc15dba3663beb699c4d2ef77845dc8dd05f507
-    kubeVersion: '>=1.19.0-0'
-    maintainers:
-    - email: jon@chutes.ai
-      name: Jon Durbin
-    - email: namoray@rayonlabs.ai
-      name: namoray
-    - email: kyle@chutes.ai
-      name: Kyle Widmann
-    name: chutes-miner
-    type: application
-    urls:
-    - https://chutesai.github.io/chutes-miner/chutes-miner-0.1.0.tgz
-    version: 0.2.0-k3s-tee
-  - apiVersion: v2
-    appVersion: 0.0.1
     created: "2025-09-29T15:16:23.632600961Z"
     description: Helm chart for chutes.ai miner
     digest: 857b542b7e13bbd7066ea88b8ebb8bbe65c815bfb8eba9dc55e59477235e48e9
@@ -126,24 +108,6 @@ entries:
     - https://chutesai.github.io/chutes-miner/chutes-miner-0.0.1-dev-publish-charts.tgz
     version: 0.0.1-dev-publish-charts
   chutes-miner-gpu:
-  - apiVersion: v2
-    appVersion: 0.1.0
-    created: "2025-09-29T15:16:23.635121501Z"
-    description: Helm chart for chutes.ai GPU nodes
-    digest: ec5fcd5d65098012944a5c82d82756771ae604099f09424ba449b8356ef5c0da
-    kubeVersion: '>=1.19.0-0'
-    maintainers:
-    - email: jon@chutes.ai
-      name: Jon Durbin
-    - email: namoray@rayonlabs.ai
-      name: namoray
-    - email: kyle@chutes.ai
-      name: Kyle Widmann
-    name: chutes-miner-gpu
-    type: application
-    urls:
-    - https://chutesai.github.io/chutes-miner/chutes-miner-gpu-0.1.0.tgz
-    version: 0.2.0-k3s-tee
   - apiVersion: v2
     appVersion: 0.1.0
     created: "2025-09-29T15:16:23.636102343Z"
@@ -253,29 +217,6 @@ entries:
     - https://chutesai.github.io/chutes-miner/chutes-miner-gpu-0.1.0-dev-k3s-deploy-charts.tgz
     version: 0.1.0-dev-k3s-deploy-charts
   chutes-monitoring:
-  - apiVersion: v2
-    appVersion: 1.16.0
-    created: "2025-09-29T15:16:23.686039264Z"
-    dependencies:
-    - condition: grafana.deploy
-      name: grafana
-      repository: https://grafana.github.io/helm-charts
-      version: 8.11.3
-    - name: prometheus
-      repository: https://prometheus-community.github.io/helm-charts
-      version: 27.19.0
-    description: Chutes monitoring helm charts
-    digest: f65d18e0975ca743f959e7344a7590530af812eb9ae3602bd6821bfd54f40714
-    maintainers:
-    - email: jon@chutes.ai
-      name: Jon Durbin
-    - email: kyle@chutes.ai
-      name: Kyle Widmann
-    name: chutes-monitoring
-    type: application
-    urls:
-    - https://chutesai.github.io/chutes-miner/chutes-monitoring-0.1.0.tgz
-    version: 0.2.0-k3s-tee
   - apiVersion: v2
     appVersion: 1.16.0
     created: "2025-09-29T15:16:23.698174745Z"
