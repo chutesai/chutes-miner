@@ -87,7 +87,7 @@ spec:
               readOnly: false
           livenessProbe:
             httpGet:
-              path: /health
+              path: /monitor/health
               port: http
             initialDelaySeconds: 30  # Wait before first check
             periodSeconds: 10        # Check every 10 seconds
@@ -95,7 +95,7 @@ spec:
             failureThreshold: 3      # Fail after 3 consecutive failures
           readinessProbe:
             httpGet:
-              path: /health
+              path: /monitor/health
               port: http
             initialDelaySeconds: 10  # Start sooner for readiness
             periodSeconds: 5         # Check more frequently
