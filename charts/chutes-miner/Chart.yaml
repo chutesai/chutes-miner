@@ -1,7 +1,7 @@
 apiVersion: v2
 name: chutes-miner
 description: Helm chart for chutes.ai miner
-version: 0.2.0
+version: 0.1.0
 appVersion: "0.0.1"
 type: application
 maintainers:
