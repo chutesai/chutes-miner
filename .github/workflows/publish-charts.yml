@@ -218,7 +218,7 @@ jobs:
         id: package
         run: |
           # Cleanup dev charts for non-existent branches on push to main
-          if [ "${{ github.event_name }}" = "push" ] && [ "${{ steps.check.outputs.is_main }}" = "true" ]; then
+          if [ "${{ steps.check.outputs.is_main }}" = "true" ] && ([ "${{ github.event_name }}" = "push" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]); then
             echo "Checking for orphaned dev charts"
             if [ -f "${{ env.HELM_CHART_DIR }}/index.yaml" ]; then
               # Extract dev chart versions that have branch suffixes
