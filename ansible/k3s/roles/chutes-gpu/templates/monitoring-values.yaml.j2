@@ -1,0 +1,17 @@
+grafana:
+  deploy: true
+
+prometheus:
+  fullnameOverride: prometheus
+  
+  server:
+    fullnameOverride: prometheus-server
+    service:
+      type: NodePort
+      nodePort: 30090
+
+  networkPolicy:
+    enabled: false
+  
+  createSecret: true
+  

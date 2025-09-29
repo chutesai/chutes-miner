@@ -1,0 +1,309 @@
+name: Publish Helm Charts
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'charts/**'
+  push:
+    branches:
+      - main
+    paths:
+      - 'charts/**'
+  workflow_dispatch:
+env:
+  CHART_DIR: charts
+  HELM_CHART_DIR: charts-gh-pages
+  REPO_URL: "https://chutesai.github.io/chutes-miner"
+jobs:
+  check-and-publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+      pull-requests: write
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Full history to ensure base ref availability
+
+      - name: Fetch base branch for PRs
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch origin ${{ github.base_ref }}:${{ github.base_ref }}
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.14.0
+
+      - name: Install yq
+        run: |
+          wget https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64 -O /usr/local/bin/yq
+          chmod +x /usr/local/bin/yq
+          yq --version
+
+      - name: Check Chart.yaml changes and validate
+        id: check
+        run: |
+          # Determine base ref and branch context
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_REF="${{ github.base_ref }}"
+            IS_MAIN="${{ github.base_ref == 'main' && 'true' || 'false' }}"
+            BRANCH_NAME="${{ github.head_ref }}"
+          else
+            BASE_REF="HEAD~1"
+            IS_MAIN="${{ github.ref_name == 'main' && 'true' || 'false' }}"
+            BRANCH_NAME="${{ github.ref_name }}"
+          fi
+          SANITIZED_BRANCH=$(echo "$BRANCH_NAME" | sed 's/\//-/g')
+
+          # Initialize variables
+          VERSION_CHANGES=""
+          INVALID_VERSIONS=""
+          SHOULD_PUBLISH=false
+
+          # Get current versions - store in temp file for easier processing
+          CURRENT_VERSIONS_FILE=$(mktemp)
+          for chart_dir in ${{ env.CHART_DIR }}/*/Chart.yaml; do
+            if [ -f "$chart_dir" ]; then
+              chart_name=$(basename "$(dirname "$chart_dir")")
+              version=$(yq e '.version' "$chart_dir")
+              if [ -n "$version" ] && [ "$version" != "null" ]; then
+                echo "${chart_name}:${version}" >> "$CURRENT_VERSIONS_FILE"
+              fi
+            fi
+          done
+
+          # Get previous versions using a more reliable git approach
+          PREVIOUS_VERSIONS_FILE=$(mktemp)
+          
+          # Stash any uncommitted changes
+          git stash push -u -m "workflow-temp-stash" || true
+          
+          # Checkout base branch cleanly
+          git checkout "$BASE_REF" || { echo "::error::Failed to checkout $BASE_REF"; exit 1; }
+          
+          for chart_dir in ${{ env.CHART_DIR }}/*/Chart.yaml; do
+            if [ -f "$chart_dir" ]; then
+              chart_name=$(basename "$(dirname "$chart_dir")")
+              version=$(yq e '.version' "$chart_dir")
+              if [ -n "$version" ] && [ "$version" != "null" ]; then
+                echo "${chart_name}:${version}" >> "$PREVIOUS_VERSIONS_FILE"
+              fi
+            fi
+          done
+          
+          # Return to original commit/branch
+          git checkout ${{ github.sha }} || git checkout HEAD
+          
+          # Restore any stashed changes
+          git stash pop || true
+
+          # Debug output
+          echo "Current versions:"
+          cat "$CURRENT_VERSIONS_FILE"
+          echo "Previous versions:"
+          cat "$PREVIOUS_VERSIONS_FILE"
+
+          # Check if published index exists and get published versions
+          PUBLISHED_VERSIONS_FILE=$(mktemp)
+          if curl -s -f "${{ env.REPO_URL }}/index.yaml" -o index.yaml 2>/dev/null; then
+            echo "Found existing chart index, checking published versions..."
+            # Extract published versions from index.yaml
+            yq e '.entries[] | .name + ":" + (.[] | select(.version) | .version)' index.yaml 2>/dev/null | sort -u > "$PUBLISHED_VERSIONS_FILE" || true
+            echo "Published versions:"
+            cat "$PUBLISHED_VERSIONS_FILE"
+          else
+            echo "No existing chart index found"
+            touch "$PUBLISHED_VERSIONS_FILE"
+          fi
+
+          # Compare and validate
+          while IFS=: read -r chart_name current_version; do
+            # Skip empty lines
+            if [ -z "$chart_name" ] || [ -z "$current_version" ]; then
+              continue
+            fi
+            
+            # Get previous version for this chart
+            previous_version=$(grep "^${chart_name}:" "$PREVIOUS_VERSIONS_FILE" | cut -d: -f2 || echo "")
+            
+            # Check if current version is already published
+            published_version=$(grep "^${chart_name}:${current_version}$" "$PUBLISHED_VERSIONS_FILE" || echo "")
+            
+            # Determine if we should process this chart
+            version_changed=$([ "$current_version" != "$previous_version" ] && echo "true" || echo "false")
+            version_not_published=$([ -z "$published_version" ] && echo "true" || echo "false")
+            
+            if [ "$version_changed" = "true" ] || [ "$version_not_published" = "true" ]; then
+              if [ "$version_changed" = "true" ] && [ "$version_not_published" = "true" ]; then
+                echo "✅ $chart_name: $previous_version → $current_version (new version, not yet published)"
+              elif [ "$version_changed" = "true" ]; then
+                echo "⚠️ $chart_name: $previous_version → $current_version (new version, but already published)"
+                continue # Skip if already published
+              else
+                echo "🔄 $chart_name: $current_version (unchanged version, but not published - likely failed previous build)"
+              fi
+              
+              VERSION_CHANGES="${VERSION_CHANGES}${chart_name}: $current_version\n"
+              
+              # Always allow publishing for development/testing purposes
+              SHOULD_PUBLISH=true
+              
+              # Determine what version will actually be published
+              if [ "${{ github.event_name }}" = "pull_request" ]; then
+                # For PRs, the final published version will have branch suffix
+                final_version="$current_version-$SANITIZED_BRANCH"
+              else
+                # For pushes to main, use the current version as-is
+                final_version="$current_version"
+              fi
+              
+              # Validation logic - this determines if workflow passes/fails (affects merge blocking)
+              if [ "$IS_MAIN" = "true" ]; then
+                # PRs targeting main: block merge if Chart.yaml has pre-release versions
+                if [[ "$current_version" =~ -dev$|-alpha$|-beta$|-rc[0-9]*$ ]]; then
+                  INVALID_VERSIONS="${INVALID_VERSIONS}${chart_name}: $current_version (pre-release versions not allowed to be merged to main)\n"
+                fi
+                # Note: Still publishes for testing, but workflow will fail to block merge
+              else
+                # PRs targeting non-main branches: always allow (no validation needed)
+                # Charts are published with branch suffix for testing
+                echo "  → Will publish as: $final_version"
+              fi
+            else
+              echo "ℹ️ $chart_name: $current_version (no change and already published)"
+            fi
+          done < "$CURRENT_VERSIONS_FILE"
+
+          # Clean up temp files
+          rm -f "$CURRENT_VERSIONS_FILE" "$PREVIOUS_VERSIONS_FILE" "$PUBLISHED_VERSIONS_FILE" index.yaml
+
+          # Check for invalid versions (this will fail the workflow to block merges)
+          if [ -n "$INVALID_VERSIONS" ]; then
+            echo -e "🚫 Workflow failed: Invalid versions detected for merge to main:\n$INVALID_VERSIONS"
+            echo "::error::Invalid versions detected for merge: $INVALID_VERSIONS"
+            echo "Charts will still be published for testing, but merge is blocked."
+            # Note: Don't exit here - let charts publish first, then fail at the end
+          fi
+
+          # If no version changes and nothing to republish, that's fine
+          if [ "$SHOULD_PUBLISH" = "false" ]; then
+            echo "ℹ️ No chart version changes detected - skipping publish"
+          fi
+
+          # Output to GITHUB_OUTPUT
+          echo "should_publish=$SHOULD_PUBLISH" >> $GITHUB_OUTPUT
+          echo "is_main=$IS_MAIN" >> $GITHUB_OUTPUT
+          echo "sanitized_branch=$SANITIZED_BRANCH" >> $GITHUB_OUTPUT
+          echo "version_changes<<EOF" >> $GITHUB_OUTPUT
+          echo -e "$VERSION_CHANGES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          echo "invalid_versions<<EOF" >> $GITHUB_OUTPUT
+          echo -e "$INVALID_VERSIONS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Checkout existing charts
+        if: steps.check.outputs.should_publish == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: existing-charts
+
+      - name: Package and publish charts
+        if: steps.check.outputs.should_publish == 'true'
+        id: package
+        run: |
+          mkdir -p ${{ env.HELM_CHART_DIR }}
+
+          # Copy existing charts
+          [ -d existing-charts ] && cp -r existing-charts/* ${{ env.HELM_CHART_DIR }}/
+
+          # Cleanup dev charts for non-existent branches on push to main
+          if [ "${{ github.event_name }}" = "push" ] && [ "${{ steps.check.outputs.is_main }}" = "true" ]; then
+            echo "Checking for orphaned dev charts"
+            if [ -f "${{ env.HELM_CHART_DIR }}/index.yaml" ]; then
+              # Extract dev chart versions and their branch suffixes
+              DEV_CHARTS=$(yq e '.entries[] | select(.version | test("-dev-|-alpha-|-beta-|-rc[0-9]*-")) | .name + ":" + .version' "${{ env.HELM_CHART_DIR }}/index.yaml")
+              while IFS=: read -r chart_name chart_version; do
+                if [ -z "$chart_name" ] || [ -z "$chart_version" ]; then
+                  continue
+                fi
+                # Extract branch suffix (e.g., feature-branch from 0.0.1-dev-feature-branch)
+                BRANCH_SUFFIX=$(echo "$chart_version" | grep -oE '[^-]+$' || echo "")
+                if [ -n "$BRANCH_SUFFIX" ]; then
+                  # Check if branch exists using GitHub API
+                  RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+                    "https://api.github.com/repos/${{ github.repository }}/branches/$BRANCH_SUFFIX")
+                  if [ "$RESPONSE" != "200" ]; then
+                    echo "Removing orphaned dev chart: $chart_name-$chart_version"
+                    rm -f "${{ env.HELM_CHART_DIR }}/$chart_name-$chart_version.tgz" || true
+                  fi
+                fi
+              done <<< "$DEV_CHARTS"
+            fi
+          fi
+
+          # Package changed charts
+          NEW_CHARTS=0
+          CHANGED_CHARTS=$(echo "${{ steps.check.outputs.version_changes }}" | grep -oE '^[a-zA-Z0-9-]+' | sort -u)
+
+          for chart_name in $CHANGED_CHARTS; do
+            if [ -d "${{ env.CHART_DIR }}/$chart_name" ]; then
+              chart_version=$(yq e '.version' "${{ env.CHART_DIR }}/$chart_name/Chart.yaml")
+              
+              # Append sanitized branch name to version for PRs
+              if [ "${{ github.event_name }}" = "pull_request" ]; then
+                chart_version="$chart_version-${{ steps.check.outputs.sanitized_branch }}"
+              fi
+
+              if [ -f "${{ env.HELM_CHART_DIR }}/$chart_name-$chart_version.tgz" ]; then
+                echo "⚠️ $chart_name-$chart_version already exists, skipping"
+                continue
+              fi
+
+              echo "📦 Packaging $chart_name version $chart_version..."
+              
+              helm lint "${{ env.CHART_DIR }}/$chart_name/"
+              helm package "${{ env.CHART_DIR }}/$chart_name" -d "${{ env.HELM_CHART_DIR }}" --version "$chart_version"
+              
+              echo "✅ Packaged $chart_name-$chart_version.tgz"
+              NEW_CHARTS=$((NEW_CHARTS + 1))
+            else
+              echo "❌ Chart directory not found: ${{ env.CHART_DIR }}/$chart_name"
+            fi
+          done
+
+          # Generate/update repository index
+          if [ "$NEW_CHARTS" -gt 0 ]; then
+            helm repo index "${{ env.HELM_CHART_DIR }}" --url "${{ env.REPO_URL }}"
+            echo "📋 Updated repository index with $NEW_CHARTS new chart(s)"
+          else
+            echo "ℹ️ No new charts to package"
+          fi
+
+          # Output for later steps
+          echo "new_charts=$NEW_CHARTS" >> $GITHUB_OUTPUT
+          echo "chart_dir=${{ env.HELM_CHART_DIR }}" >> $GITHUB_OUTPUT
+
+      - name: Deploy to GitHub Pages
+        if: steps.package.outputs.new_charts > 0
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          personal_token: ${{ secrets.WORKFLOW_TOKEN }} 
+          publish_dir: ${{ env.HELM_CHART_DIR }}
+          publish_branch: gh-pages
+          force_orphan: false
+
+      - name: Fail workflow if invalid versions for merge
+        if: steps.check.outputs.should_publish == 'true'
+        run: |
+          # This step runs after publishing, and fails the workflow if there were invalid versions
+          # This allows charts to be published for testing while still blocking the merge
+          if [ -n "${{ steps.check.outputs.invalid_versions }}" ]; then
+            echo "::error::Failing workflow to block merge due to invalid versions"
+            exit 1
+          fi

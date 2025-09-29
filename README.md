@@ -6,33 +6,51 @@ We've tried to automate the bulk of the process via ansible, helm/kubernetes, so
 
 ## 📋 Table of Contents
 
+- [Chutes Miner](#chutes-miner)
 - [TL;DR](#%EF%B8%8F-tldr)
-- [Component Overview](#-component-overview)
-   - [Provisioning/Management Tools](#%EF%B8%8F-provisioningmanagement-tools)
-     - [Ansible](#-ansible)
-     - [Wireguard](#-wireguard)
-     - [Kubernetes](#%EF%B8%8F-kubernetes)
-   - [Miner Components](#-miner-components)
-     - [Postgres](#-postgres)
-     - [Redis](#-redis)
-     - [GraVal Bootstrap](#-graval-bootstrap)
-     - [Regstry Proxy](#-registry-proxy)
-     - [API](#-api)
-     - [Gepetto](#%EF%B8%8F-gepetto)
-- [Getting Started](#-getting-started)
-   - [Use Ansible to Provision Servers](#1-use-ansible-to-provision-servers)
-   - [Configure Prerequisites](#2-configure-prerequisites)
-   - [Configure Your Environment](#3-configure-your-environment)
-   - [Update Gepetto with Your Optimized Strategy](#4-update-gepetto-with-your-optimized-strategy)
-   - [Deploy the Miner within Your Kubernetes Cluster](#5-deploy-the-miner-within-your-kubernetes-cluster)
-   - [Register](#6-register)
-- [Adding to your miner inventory](#-adding-servers)
+- [Component Overview](#%EF%B8%8F-component-overview)
+  - [Provisioning/Management Tools](#%EF%B8%8F-provisioningmanagement-tools)
+    - [Ansible](#%EF%B8%8F-ansible)
+    - [Kubernetes](#%EF%B8%8F-kubernetes)
+  - [Miner Components](#%EF%B8%8F-miner-components)
+    - [Postgres](#%EF%B8%8F-postgres)
+    - [Redis](#%EF%B8%8F-redis)
+    - [GraVal Bootstrap](#%EF%B8%8F-graval-bootstrap)
+    - [Registry Proxy](#%EF%B8%8F-registry-proxy)
+    - [API](#%EF%B8%8F-api)
+    - [Gepetto](#%EF%B8%8F-gepetto)
+- [Getting Started](#%EF%B8%8F-getting-started)
+  - [1. Use Ansible to Provision Servers](#1-use-ansible-to-provision-servers)
+    - [Important RAM Note](#important-ram-note)
+    - [Important Storage Note](#important-storage-note)
+    - [Important Networking Note](#important-networking-note)
+  - [2. Configure Prerequisites](#2-configure-prerequisites)
+    - [Local Configuration](#local-configuration)
+    - [Define Your Inventory](#define-your-inventory)
+    - [Set Your Values](#set-your-values)
+    - [Kubernetes CLI](#kubernetes-cli)
+    - [Dockerhub Login](#dockerhub-login)
+    - [Miner Credentials](#miner-credentials)
+  - [3. Chart Configuration](#3-chart-configuration)
+    - [Chutes Miner](#chutes-miner)
+    - [Chutes Miner GPU](#chutes-miner-gpu)
+  - [4. Setup Your Infrastructure](#4-setup-your-infrastructure)
+  - [5. Update Gepetto with Your Optimized Strategy](#5-update-gepetto-with-your-optimized-strategy)
+  - [6. Register](#6-register)
+  - [7. Add Your GPU Nodes to Inventory](#7-add-your-gpu-nodes-to-inventory)
+- [Adding Servers](#%EF%B8%8F-adding-servers)
+- [Cluster Management Utilities](#%EF%B8%8F-cluster-management-utilities)
+  - [ktx (Kube Context Switcher)](#ktx-kube-context-switcher)
+  - [kns (Kube Namespace Switcher)](#kns-kube-namespace-switcher)
+  - [Grafana](#grafana)
+- [Troubleshooting](#troubleshooting)
+  - [Postgres](#postgres)
 
 ## ⛏️ TL;DR
 
 The goal of mining on chutes is to provide as much compute as possible, optimizing for cold start times (running new applications or applications that have been preempted). Everything is automated with kubernetes, and coordinated by the `gepetto.py` script to optimize for cost efficiency and maximize your share of compute.
 
-Incentives are based on total compute time (including bounties give from being first to provide inference on code app).
+Incentives are based on total compute time (including bounties given from being first to provide inference on code app).
 
 You should probably run a wide variety of GPUs, from very cheap (a10, a5000, t4, etc.) to very powerful (8x h100 nodes).
 
@@ -51,20 +69,10 @@ There are many nuances and requirements that are quite difficult to setup manual
 
 *More information on using the ansible scripts in subsequent sections.*
 
-#### 🔒 Wireguard
-
-Wireguard is a fast, secure VPN service that is created by ansible provisioning, which allows your nodes to communicate when they are not all on the same internal network.
-
-It is often the case that you'll want CPU instances on one provider (AWS, Google, etc.), and GPU instances on another (Latitude, Massed Compute, etc.), and you may have several providers for each due to inventory.
-
-By installing Wireguard, your kubernetes cluster can span any number of providers without issue.
-
-*__this is installed and configured automatically by ansible scripts__*
-
 #### ☸️ Kubernetes
 
-The entirety of the chutes miner must run within a [kubernetes](https://kubernetes.io/)  While not strictly necessary, we recommend using microk8s (which is all handled automatically from the ansible scripts).
-If you choose to not use microk8s, you must also modify or not use the provided ansible scripts.
+The entirety of the chutes miner must run within a [kubernetes](https://kubernetes.io/). While not strictly necessary, we recommend using k3s (which is all handled automatically from the ansible scripts).
+If you choose to not use k3s, you must also modify or not use the provided ansible scripts.
 
 *__this is installed and configured automatically by ansible scripts__*
 
@@ -74,7 +82,7 @@ If you choose to not use microk8s, you must also modify or not use the provided 
 
 #### 🐘 Postgres
 
-We make heavy use of SQLAlchemy/postgres throughout chutes.  All servers, GPUs, deployments, etc., are tracked in postgresql which is deployed as a statefulset with a persistent volume claim within your kubernetes cluster.
+We make heavy use of SQLAlchemy/postgres throughout chutes.  All servers, GPUs, deployments, etc., are tracked in postgresql which is deployed with a host volume within your kubernetes cluster.
 
 *__this is installed and configured automatically when deploying via helm charts__*
 
@@ -142,7 +150,7 @@ It is very important to have as much RAM (or very close to it) per GPU as VRAM. 
 
 #### Important storage note!
 
-Some providers mount the primary storage in inconvient ways, e.g. latitude.sh when using raid 1 mounts the volume on `/home`, hyperstack mounts under `/ephemeral`, etc.  Before running the ansible scripts, be sure to login to your servers and check how the storage is allocated.  If you want storage space for huggingface cache, images, etc., you'll want to be sure as much as possible is allocated under `/var/snap`.
+Some providers mount the primary storage in inconvenient ways, e.g. latitude.sh when using raid 1 mounts the volume on `/home`, hyperstack mounts under `/ephemeral`, etc.  Before running the ansible scripts, be sure to login to your servers and check how the storage is allocated.  If you want storage space for huggingface cache, images, etc., you'll want to be sure as much as possible is allocated under `/var/snap`.
 You can do this with a simple bind mount, e.g. if the main storage is under `/home`, run:
 ```bash
 rsync -azv /var/snap/ /home/snap/
@@ -157,75 +165,139 @@ Before starting, you must either disable all layers of firewalls (if you like to
 - allow the kubernetes ephemeral port range on all of your GPU nodes, since the ports for chute deployments will be random, in that range, and need public accessibility - the default port range is 30000-32767
 - allow access to the various nodePort values in your API from whatever machine you are managing/running chutes-miner add-node/etc., or just make it public (particularly import is the API node port, which defaults to 32000)
 
-The primary CPU node, which the other nodes connect to as the wireguard primary, needs to have IP forwarding enabled -- if your node is in GCP, for example, there's a checkbox you need to enable for IP forwarding.
-
-You'll need one non-GPU server (8 cores, 64gb ram minimum) responsible for running postgres, redis, gepetto, and API components (not chutes), and __*ALL*__ of the GPU servers 😄 (just kidding of course, you can use as many or as few as you wish)
+You'll need one non-GPU server (4 cores, 32gb ram minimum) responsible for running karmada, postgres, redis, gepetto, and API components (not chutes), and __*ALL*__ of the GPU servers 😄 (just kidding of course, you can use as many or as few as you wish)
 
 [The list of supported GPUs can be found here](https://github.com/rayonlabs/chutes-api/blob/main/api/gpu.py)
 
-Head over to the [ansible](ansible/README.md) documentation for steps on setting up your bare metal instances.  Be sure to update inventory.yml
+
+To setup your miner follow the [prerequisite](#2-configure-prerequisites) steps below, then head over the [ansible](ansible/k3s/README.md) document for setting up your infratructure.
 
 ### 2. Configure prerequisites
 
+#### Local Configuration
+
+Keep your local configuration separate from the repository.  This ensures updates don't cause conflicts when pulling the latest code.
+
+1. Ansible configuration
+```bash 
+mkdir ~/chutes
+touch ~/chutes/inventory.yml
+```
+Copy the default configuration from `ansible/k3s/inventory.yml` and put it in this file to update the placeholder values.
+
+2. Chart configuration
+```bash
+mkdir ~/chutes
+touch ~/chutes/values.yaml
+```
+
+### Define your inventory
+
+Using your favorite text editor (vim of course), edit your local inventory.yml to suite your needs.
+
+For example:
+```yaml
+
+all:
+  hosts:
+    # This would be the main node, which runs postgres, redis, gepetto, etc.
+    control:
+      hosts:
+        chutes-miner-cpu-0:
+          ansible_host: 1.0.0.0
+    workers:
+      hosts:
+        chutes-miner-gpu-0:
+          ansible_host: 1.0.0.1
+        chutes-miner-gpu-1:
+          ansible_host: 1.0.0.2
+          ansible_user: different_user
+          ansible_ssh_private_key_file: ~/.ssh/other_key.pem
+  vars:
+    ansible_user: ubuntu
+    ansible_ssh_private_key_file: ~/.ssh/key.pem
+    ssh_keys:
+      - "ssh-rsa AAAAB... user@domain.com"
+    # The username you want to use to login to those machines (and your public key will be added to).
+    user: billybob
+
+    # Local kubectl setup
+    setup_local_kubeconfig: false # Set to true to setup kubeconfig on the ansible controller
+    controller_kubeconfig: ~/.kube/chutes.config # Path to the ansible controller kubeconfig file you want to use
+    controller_kubectl_staging_dir: "~/.kube/chutes-staging"
+
+    hotkey_path: "~/.bittensor/wallets/[WALLET]/hotkeys/[HOTKEY]"
+
+    chart_values: "~/chutes/values.yaml"
+
+    grafana_password: <REPLACE_ME>
+```
+
+### Set your values
+
+In most cases the default values will work fine.  Values are explained in detail in the [Chart Configuration](#3-chart-configuration) section. If you find you need to customize and chart values just update your local values file, i.e. `~/chutes/values.yaml`
+
+```yaml
+cache:
+  overrides:
+# Add any per-node cache size (in GB) overrides here, e.g.:
+#    chutes-miner-gpu-0: 1000
+#    chutes-miner-gpu-1: 1500
+```
+
+
+#### Kubernetes CLI
+
 The easiest way to interact with kubernetes would be from within the primary node, but you can alternatively set it up on your local machine or other server.  To do so:
 - install [kubectl](https://kubernetes.io/docs/reference/kubectl/)
-- copy the the kubernetes configuration from the CPU primary via `microk8s config` and put it on your workstation at `~/.kube/config`
-- replace the IP address of the cluster with the public IP address of the primary node
-- since the IP will not match the cert, you will need to specify `--insecure-skip-tls-verify` when running any kubectl commands from this server (not necessary when done on primary node)
+- Set the `setup_local_kubeconfig` flag in `ansible/k3s/inventory.yml` to `true`
+    - Optionally you can update the kubeconfig file/dir to use as well
+    ```yaml
+    controller_kubeconfig: ~/.kube/chutes.config
+    controller_kubectl_staging_dir: "~/.kube/chutes-staging"
+    ```
 
-If you plan to use the primary node, you should alias `kubectl` and `helm`:
-```bash
-echo 'alias kubectl="microk8s kubectl"' >> .bashrc
-echo 'alias helm="microk8s helm"' >> .bashrc
-```
 
-You'll need to setup a few things manually:
+#### Dockerhub login
+
 - Create a docker hub login to avoid getting rate-limited on pulling public images (you may not need this at all, but it can't hurt):
   - Head over to https://hub.docker.com/ and sign up, generate a new personal access token for public read-only access, then create the secret:
-```
-kubectl create secret docker-registry regcred --docker-server=docker.io --docker-username=[repalce with your username] --docker-password=[replace with your access token] --docker-email=[replace with your email]
-```
-- Create the miner credentials
-  - You'll need to find the ss58Address and secretSeed from the hotkey file you'll be using for mining, e.g. `cat ~/.bittensor/wallets/default/hotkeys/hotkey`
-```
-kubectl create secret generic miner-credentials \
-  --from-literal=ss58=[replace with ss58Address value] \
-  --from-literal=seed=[replace with secretSeed value, removing '0x' prefix] \
-  -n chutes
+
+```bash
+# Create secret for the plane context
+kubectl create secret docker-registry regcred --context chutes-miner-cpu-0 --docker-server=docker.io --docker-username=[replace with your username] --docker-password=[replace with your access token] --docker-email=[replace with your email]
 ```
 
-#### Full secret creation example
+#### Miner credentials
+
+In order to authenticate with the valiadtor you need to supply the miner credentials via a k8s secret.  This secret can be automatically created by ansible but you need the wallet first.
 
 Here's an example using a throwaway key.  Suppose you created a hotkey as such:
 ```bash
 $ btcli wallet new_hotkey --wallet.name offline --wallet.hotkey test --wallet.path ~/.bittensor/wallets
 ...
 ```
-Print out the content of that hotkey, and optionally pipe to jq to pretty-print:
-```bash
-$ cat ~/.bittensor/wallets/offline/hotkeys/test | jq .
-{
-  "accountId": "0x5a30cd5517328838f69ed48531894d94e9f231dff241e1561260a8522a167731",
-  "publicKey": "0x5a30cd5517328838f69ed48531894d94e9f231dff241e1561260a8522a167731",
-  "privateKey": "0x69de0e5d7e66902d5b9da02091bb130aedf49d6c53a2fe67eeb914520e0ea70aa2176663f7b30c93d8826c702e9b22c35ab1a99afbdc02c35618c97e00edab3a",
-  "secretPhrase": "inform sell fitness extra kitten unit hood glass window law spider desk",
-  "secretSeed": "0xe031170f32b4cda05df2f3cf6bc8d76827b683bbce23d9fa960c0b3fc21641b8",
-  "ss58Address": "5E6xfU3oNU7y1a7pQwoc31fmUjwBZ2gKcNCw8EXsdtCQieUQ"
-}
-```
-To create the secret from this key, the command would be:
-```bash
-kubectl create secret generic miner-credentials \
-  --from-literal=ss58=5E6xfU3oNU7y1a7pQwoc31fmUjwBZ2gKcNCw8EXsdtCQieUQ \
-  --from-literal=seed=e031170f32b4cda05df2f3cf6bc8d76827b683bbce23d9fa960c0b3fc21641b8 \
-  -n chutes
+
+Then set the path to the hotkey in your local inventory, i.e. `~/chutes/inventory.yml`.  Ansible will parse and the hotkey and provide values via environment so the hotkey is not exposed on nodes.
+```yaml
+    hotkey_path: ~/bittensor/wallets/offline/hotkey/test
 ```
 
-### 3. Configure your environment
+### 3. Chart Configuration
 
-Be sure to thoroughly examine [values](charts/values.yaml) and update according to your particular environment.
+The chutes components are split into separate sets of charts to support standalone clusters.
+
+The [chutes-miner](charts/chutes-miner/) charts contain the templates for the chutes miner API and associated components.
+
+The [chutes-miner-gpu](charts/chutes-miner-gpu/) charts contain the templates for the chutes miner components specifically used by GPU nodes.
+
+The [chutes-monitoring](charts/chutes-monitoring/) charts contain templates for the monitoring components, including metric federation from member clusters to the central karmada prometheus instance.  The monitoring charts and values are automatically generated and deployed by ansible.
+
+Be sure to thoroughly examine the values for each set of charts and update according to your particular environment.  Apply any overrides to your custom values file (`~/chutes/values.yaml`) as described in [Section 2](#2-configure-prerequisites)
 
 Primary sections to update:
+
+### Chutes Miner
 
 #### a. validators
 
@@ -283,44 +355,40 @@ minerApi:
 
 Feel free to adjust redis/postgres/etc. as you wish, but probably not necessary.
 
-### 4. Update gepetto with your optimized strategy
+#### e. multiCluster
+
+This flag exists to allow backwards compatibility with the old microk8s setup.  If you have not migrated and need to update using the new charts set this flag to false in your values.
+
+### Chutes Miner GPU
+
+The default values should be fine here.
+
+#### a. multiCluster
+
+This flag exists to allow backwards compatibility with the old microk8s setup.  If you have not migrated and need to update using the new charts set this flag to false in your values.
+
+### 4. Setup your infrastructure
+
+Now that all the configuration is setup, use ansible to setup your infrastructure using the [guide](ansible/k3s/README.md). Once you have your nodes deployed come back here to finish setup.
+
+### 5. Update gepetto with your optimized strategy
 
 Gepetto is the most important component as a miner.  It is responsible for selecting chutes to deploy, scale up, scale down, delete, etc.
 You'll want to thoroughly examine this code and make any changes that you think would gain you more total compute time.
 
-Once you are satisfied with the state of the `gepetto.py` file, you'll need to create a configmap object in kubernetes that stores your file (from inside the `chutes-miner` directory, from cloning repo):
+Once you are satisfied with the state of the `gepetto.py` file, you'll need to create a configmap object in kubernetes that stores your file (from inside the `src/chutes-miner/chutes_miner` directory in the repo):
 ```bash
-kubectl create configmap gepetto-code --from-file=gepetto.py -n chutes
+kubectl create configmap gepetto-code --context chutes-miner-cpu-0 --from-file=gepetto.py -n chutes
 ```
 
 Any time you wish to make further changes to gepetto, you need to re-create the configmap:
 ```bash
-kubectl create configmap gepetto-code --from-file=gepetto.py -o yaml --dry-run=client | kubectl apply -n chutes -f -
+kubectl create configmap gepetto-code --from-file=gepetto.py -o yaml --dry-run=client | kubectl apply --context chutes-miner-cpu-0 -n chutes -f -
 ```
 
 You must also restart the gepetto deployment after you make changes, but this will only work AFTER you have completed the rest of the setup guide (no need to run when you initially setup your miner):
 ```
-kubectl rollout restart deployment/gepetto -n chutes
-```
-
-### 5. Deploy the miner within your kubernetes cluster
-
-First, and __*exactly one time*__, you'll want to generate passwords for postgres and redis - __*never run this more than once or things will break!*__
-Execute this from the `charts` directory:
-```bash
-helm template . --set createPasswords=true -s templates/one-time-passwords.yaml | kubectl apply -n chutes -f -
-```
-
-Once the secrets are created, you can run this any time to generate your deployment charts, from within the `charts` directory:
-```bash
-helm template . -f values.yaml > miner-charts.yaml
-```
-
-Any time you change `values.yaml`, you will want to re-run the template command to get the updated charts!
-
-Then, you will deploy the chutes components with:
-```bash
-kubectl apply -f miner-charts.yaml -n chutes
+kubectl rollout restart deployment/gepetto --context chutes-miner-cpu-0 -n chutes
 ```
 
 ### 6. Register
@@ -342,6 +410,8 @@ Make sure you install `chutes-miner-cli` package (you can do this on the CPU nod
 pip install chutes-miner-cli
 ```
 
+**__This is installed automatically on the control node__**
+
 Run this for each GPU node in your inventory:
 ```bash
 chutes-miner add-node \
@@ -350,6 +420,7 @@ chutes-miner add-node \
   --hourly-cost [HOURLY COST] \
   --gpu-short-ref [GPU SHORT IDENTIFIER] \
   --hotkey [~/.bittensor/wallets/[COLDKEY]/hotkeys/[HOTKEY] \
+  --agent-api http://[NODE_IP]:32000 \
   --miner-api http://[MINER API SERVER IP]:[MINER API PORT]
 ```
 
@@ -358,12 +429,66 @@ chutes-miner add-node \
 - `--hourly-cost` is how much you are paying hourly per GPU on this server; part of the optimization strategy in gepetto is to minimize cost when selecting servers to deploy chutes on
 - `--gpu-short-ref` is a short identifier string for the type of GPU on the server, e.g. `a6000`, `l40s`, `h100_sxm`, etc.  The list of supported GPUs can be found [here](https://github.com/rayonlabs/chutes-api/blob/main/api/gpu.py)
 - `--hotkey` is the path to the hotkey file you registered with, used to sign requests to be able to manage inventory on your system via the miner API
+- `--agent-api` is the URL for the agent running on the GPU node.  This is just the public IP of the node on port 32000.
 - `--miner-api` is the base URL to your miner API service, which will be http://[non-GPU node IP]:[minerAPI port, default 32000], i.e. find the public/external IP address of your CPU-only node, and whatever port you configured for the API service (which is 32000 if you didn't change the default).
-
-You can add additional GPU nodes at any time by simply updating inventory.yaml and rerunning the `site.yaml` and `join-cluster.yaml` playbooks: [ansible readme](/ansible/README.md#to-add-a-new-node-after-the-fact)
 
 ## ➕ Adding servers
 
-To expand your miner's inventory, you should bootstrap them with the ansible scripts, specifically the site and join-cluster bits.  Info for the ansible portions [here](/ansible/README.md#to-add-a-new-node-after-the-fact)
+You can add additional GPU nodes at any time by simply updating inventory.yaml and running the `site.yaml` playbook with the tag `add-nodes`: [ansible readme](/ansible/karmada/README.md#to-add-a-new-node-after-the-fact)
 
-Then, run the `chutes-miner add-node ...` command above.
+This will ensure only the new node is configured, and the necessary monitoring/kubectl configuration is updated for the control plane.
+
+Once you have run ansible to setup the node, run the `chutes-miner add-node ...` command above.
+
+## 🔧 Cluster Management Utilities
+
+The playbook installs additional utilities to simplify multi-cluster operations:
+
+**ktx (Kube Context Switcher):**
+![Terminal Demo](./assets/gifs/ktx.gif)
+- Installed on control nodes from: `https://raw.githubusercontent.com/blendle/kns/master/bin/ktx`
+- Quickly switch between kubernetes contexts
+- Usage: `ktx` to list and select contexts interactively
+
+**kns (Kube Namespace Switcher):**
+![Terminal Demo](./assets/gifs/kns.gif)
+- Installed on all nodes from: `https://raw.githubusercontent.com/blendle/kns/master/bin/kns`
+- Quickly switch between kubernetes namespaces
+- Usage: `kns` to list and select namespaces interactively
+- Requires `fzf` (automatically installed)
+
+### Available Contexts After Migration
+
+```bash
+# List available contexts
+kubectl config get-contexts
+
+# Contexts available:
+# - chutes-miner-cpu-0 (control plane K3s cluster)
+# - chutes-miner-gpu-X (Chutes GPU cluster contexts)
+```
+
+**Grafana**
+
+Because nodes run as standalone clusters Grafana provides a default dashboard for visibility.  But you can always build out your own dashboards.
+
+You can access grafana via nodePort or kubefwd if using local kubectl:
+1. Navigate to http://[CONTROL_NODE_IP]:30080
+2. Use kubefwd
+    1. Forward the grafana service
+        ```bash
+        kubectl port-forward svc/monitoring-grafana -n monitoring 8080:80
+        ```
+    2. Navagate to http://localhost:8080
+
+
+![Grafana Demo](./assets/screenshots/grafana.png)
+
+## Troubleshooting
+
+### Postgres
+
+
+| Issue | Symptoms | Solution |
+|-------|----------|----------|
+| **Authentication/Password** | Pods reporting authnetication failure to postgres | 1. The charts automatically check for an existing secret for the PG password.  If it does not exist it is created.<br>2. If postgres was previously deployed on this node, or the secret was manually deleted clear the postgres data volume from the host at `/var/snap/postgres-data` |

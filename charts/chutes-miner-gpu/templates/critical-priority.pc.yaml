@@ -1,0 +1,7 @@
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: critical-priority
+value: 1000000  # High priority (system-critical pods use 2000000)
+globalDefault: false
+description: "Priority class for critical pods that must stay running."

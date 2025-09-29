@@ -56,6 +56,7 @@ coverage.xml
 .pytest_cache/
 cover/
 __pycache__
+local
 
 # Translations
 *.mo
@@ -170,5 +171,8 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
+# Ansible artifacts
+ansible/**/vars/chutes_nodes.yml
 
-Dockerfile
+## Lint Artifacts
+.ruff_cache

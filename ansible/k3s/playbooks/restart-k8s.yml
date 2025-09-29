@@ -1,0 +1,36 @@
+---
+- name: Restart Control Node
+  hosts: control
+  become: true
+  tags:
+    - restart-control
+  environment:
+    KUBECONFIG: /root/.kube/config
+  tasks:
+    - name: Restart Control resources
+      ansible.builtin.include_tasks: 
+        file: "{{ playbook_dir }}/../tasks/k8s/restart-deployments.yml"
+        apply:
+          tags: restart-control
+
+- name: Restart GPU Node
+  hosts: workers
+  become: true
+  strategy: free  # Allow workers to run independently without waiting
+  serial: "{{ batch_size | default('100%') }}"  # Control batch size if needed
+  tags:
+    - restart-gpu
+  environment:
+    KUBECONFIG: /root/.kube/config
+  tasks:
+    - name: Restart GPU deployments
+      ansible.builtin.include_tasks: 
+        file: "{{ playbook_dir }}/../tasks/k8s/restart-deployments.yml"
+        apply:
+          tags: restart-gpu
+
+    - name: Restart GPU daemonsets
+      ansible.builtin.include_tasks: 
+        file: "{{ playbook_dir }}/../tasks/k8s/restart-daemonsets.yml"
+        apply:
+          tags: restart-gpu

@@ -1,0 +1,33 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: failed-chute-cleanup
+spec:
+  schedule: "* * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: chutes
+          {{- if not .Values.multiCluster}}
+          nodeSelector:
+            node.kubernetes.io/microk8s-controlplane: microk8s-controlplane
+          {{- end }}
+          containers:
+          - name: cleanup
+            image: {{ .Values.failedChuteCleanup.image }}
+            imagePullPolicy: Always
+            command: ["/bin/sh", "-c"]
+            args:
+            - |
+              kubectl delete pods --field-selector=status.phase=Failed -l chutes/chute=true -n chutes;
+              for svc in $(kubectl get svc -n chutes -l chutes/chute=true -o jsonpath='{.items[*].metadata.name}'); do
+                deployment_id=$(kubectl get svc ${svc} -n chutes -o jsonpath='{.spec.selector.chutes/deployment-id}');
+                if [ -n "$deployment_id" ] && ! kubectl get job -n chutes -l chutes/deployment-id=${deployment_id} -o jsonpath='{.items[*].metadata.name}' | grep -q .; then
+                  kubectl delete svc ${svc} -n chutes;
+                fi
+              done
+          restartPolicy: OnFailure

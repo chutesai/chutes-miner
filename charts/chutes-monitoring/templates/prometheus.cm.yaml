@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-scrape-configs
+  namespace: "{{ .Release.namespace }}"
+data:
+{{- if .Values.prometheus.federation.enabled }}
+{{- $federationTemplate := .Files.Get "files/scrape-configs/metrics-federation.yaml" }}
+  federation.yaml: |
+{{ tpl $federationTemplate . | indent 4 }}
+{{- end }}

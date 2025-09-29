@@ -1,0 +1,90 @@
+---
+grafana:
+  # Admin credentials
+  adminUser: chutes
+  adminPassword: "{{ grafana_password }}"
+
+  service:
+    type: NodePort
+    nodePort: 30080
+
+  plugins:
+    - yesoreyeram-infinity-datasource
+
+  # Data sources configuration
+  datasources:
+    datasources.yaml:
+      apiVersion: 1
+      datasources:
+        - name: Prometheus
+          type: prometheus
+          url: http://prometheus 
+          access: proxy
+          isDefault: true
+        - orgId: 1
+          uid: bez23gzeayku8d
+          name: monitoring
+          type: yesoreyeram-infinity-datasource
+          typeName: Infinity
+          typeLogoUrl: public/plugins/yesoreyeram-infinity-datasource/img/icon.svg
+          access: proxy
+          url: http://monitor.chutes.svc.cluster.local.:8000
+          user: ''
+          database: ''
+          basicAuth: false
+          isDefault: false
+          jsonData:
+            global_queries: []
+          readOnly: false
+
+  # Enable sidecar for dashboard discovery
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      searchNamespace: ALL
+
+  # Configure Grafana dashboard providers
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+        - name: default
+          orgId: 1
+          folder: ''
+          type: file
+          disableDeletion: false
+          editable: true
+          options:
+            path: /var/lib/grafana/dashboards/default
+
+  dashboardsConfigMaps:
+    default: grafana-dashboards
+  
+prometheus:
+  fullnameOverride: prometheus
+  
+  server:
+    fullnameOverride: prometheus-server
+    service:
+      type: ClusterIP
+    extraConfigmapMounts:
+      - name: prometheus-scrape-configs
+        mountPath: /etc/prometheus/custom_scrape_configs
+        configMap: prometheus-scrape-configs
+
+  scrapeConfigFiles:
+    - /etc/prometheus/custom_scrape_configs/federation.yaml
+
+  federation:
+    enabled: true
+    scrapeInterval: '15s'
+    matchSelectors:
+    - '{job="kubernetes-pods"}'
+    - '{job="kubernetes-nodes-cadvisor"}'
+    - '{job="node-exporter"}'
+    clusters:
+{% for host in groups['workers'] %}
+    - endpoint: {{ hostvars[host]['ansible_host'] }}:30090
+      name: {{ host }}
+{% endfor %}

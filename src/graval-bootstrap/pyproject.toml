@@ -1,0 +1,28 @@
+[tool.poetry]
+name = "graval-bootstrap"
+version = "0.2.6"
+description = "chutes.ai miner -- graval bootstrapper"
+authors = ["Jon Durbin <jon@jondurbin.com>", "namoray <namoray@rayonlabs.ai>"]
+license = "MIT"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = ">=3.10,<3.13"
+fastapi = "^0.115.5"
+uvicorn = "^0.32.0"
+substrate-interface = "^1.7.11"
+py-bip39-bindings = "^0.1.11"
+graval = "0.2.6"
+aiohttp = "^3.12.0"
+
+[tool.poetry.group.dev.dependencies]
+ruff = "^0.12.2"
+wheel = "^0.45.1"
+pytest = "^8.4.1"
+
+[tool.poetry.scripts]
+graval-bootstrap = "graval_bootstrap.bootstrap:main"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

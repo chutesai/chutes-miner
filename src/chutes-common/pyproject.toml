@@ -1,0 +1,23 @@
+[tool.poetry]
+name = "chutes-common"
+version = "0.1.0"
+description = "Common library for Chutes Miner"
+authors = ["Kyle Widmann <kyle.widmann@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = ">=3.12,<4.0"
+orjson = "^3.10.18"
+loguru = "^0.7.3"
+fastapi = "^0.115.4"
+SQLAlchemy = "^2.0.36"
+substrate-interface = "^1.7.11"
+pydantic-settings = "^2.10.1"
+redis = "^5.2.0"
+py-bip39-bindings = "^0.1.11"
+kubernetes-asyncio = "^32.3.2"
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"

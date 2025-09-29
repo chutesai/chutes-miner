@@ -1,0 +1,51 @@
+---
+- name: Deploy Monitoring Charts
+  tags: monitoring
+  block:
+
+    - name: Add Chutes Helm repository
+      kubernetes.core.helm_repository:
+        name: chutes
+        repo_url: https://chutesai.github.io/chutes-miner
+
+    - name: Update Helm repositories
+      shell: helm repo update
+
+    - name: Generate Monitoring Host Helm values
+      ansible.builtin.template:
+        src: monitoring-values.yaml.j2
+        dest: /tmp/monitoring-values.yaml
+        mode: "0644"
+
+    # - name: Copy custom values
+    #   ansible.builtin.copy:
+    #     src: "{{ monitoring_chart_values }}"
+    #     dest: /tmp/custom-monitoring-values.yaml
+    #     mode: preserve
+    #   register: copy_values_result
+    #   changed_when: copy_values_result.changed
+
+    - name: Install or upgrade Monitoring
+      ansible.builtin.command: >
+        helm upgrade --install monitoring chutes/chutes-monitoring
+        --namespace {{ monitoring_namespace }}
+        --kube-context {{ inventory_hostname }}
+        --create-namespace
+        -f /tmp/monitoring-values.yaml
+        {{ ('--version ' + monitoring_charts_version) if monitoring_charts_version is defined else '' }}
+      register: monitoring_deployment
+      changed_when: monitoring_deployment.rc == 0
+
+    - name: Wait for Monitoring components to be ready on host
+      ansible.builtin.command: >
+        kubectl -n {{ monitoring_namespace }} wait --for=condition=Ready pod
+        --selector="app.kubernetes.io/component=server,app.kubernetes.io/name=prometheus" --timeout=30s
+      register: monitoring_wait
+      changed_when: false
+      retries: 5
+      delay: 30
+      until: monitoring_wait.rc == 0
+      when:
+        - monitoring_deployment is defined
+        - monitoring_deployment.rc is defined
+        - monitoring_deployment.rc == 0

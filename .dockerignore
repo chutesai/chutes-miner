@@ -1,0 +1,9 @@
+.git
+.pytest_cache
+.ruff_cache
+.venv
+.vscode
+**/__pycache__
+ansible
+charts
+docker

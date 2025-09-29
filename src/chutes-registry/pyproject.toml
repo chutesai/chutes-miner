@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "chutes-registry"
+version = "0.1.0"
+description = "Local registry for Chutes Miner nodes"
+authors = ["Kyle Widmann <kyle.widmann@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = ">=3.12,<4.0"
+chutes-common = {path = "../chutes-common", develop = true}
+fastapi = "^0.115.4"
+uvicorn = "^0.32.0"
+click = ">8.1.0,<8.2.0"
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"

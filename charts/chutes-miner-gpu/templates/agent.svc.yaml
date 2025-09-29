@@ -1,0 +1,18 @@
+{{ if .Values.multiCluster }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent
+  labels:
+    {{- include "agent.labels" . | nindent 4 }}
+spec:
+  type: NodePort
+  ports:
+    - port: {{ .Values.agent.service.port }}
+      targetPort: {{ .Values.agent.service.targetPort }}
+      protocol: TCP
+      nodePort: {{ .Values.agent.service.nodePort }}
+      name: http
+  selector:
+    {{- include "agent.labels" . | nindent 4 }}
+{{- end }}
