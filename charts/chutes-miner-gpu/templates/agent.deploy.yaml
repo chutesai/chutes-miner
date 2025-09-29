@@ -22,8 +22,8 @@ spec:
         effect: "NoSchedule"
       serviceAccountName: agent
       securityContext:
-        fsGroup: 1000  # This will make mounted volumes owned by group 1000
-        runAsUser: 1000  # Ensure we run as user 1000
+        fsGroup: 1000
+        runAsUser: 1000
         runAsGroup: 1000
       {{- with .Values.agent.nodeSelector }}
       nodeSelector:
@@ -85,6 +85,22 @@ spec:
             - name: chutes-agent-state
               mountPath: /app/state
               readOnly: false
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30  # Wait before first check
+            periodSeconds: 10        # Check every 10 seconds
+            timeoutSeconds: 5        # Timeout for each check
+            failureThreshold: 3      # Fail after 3 consecutive failures
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10  # Start sooner for readiness
+            periodSeconds: 5         # Check more frequently
+            timeoutSeconds: 3        # Shorter timeout
+            failureThreshold: 3      # Fail after 3 consecutive failures
       volumes:
         - name: chutes-agent-state
           hostPath:
