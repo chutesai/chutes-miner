@@ -8,7 +8,7 @@
   tags: k3s-node
 
 - name: Setup k3s kubectl
-  ansible.builtin.include_tasks: setup_kubectl.yml
+  ansible.builtin.include_tasks: "{{ playbook_dir }}/../tasks/k8s/setup_kubectl.yml"
   tags: k3s-kubectl
 
 - name: Setup namespaces
