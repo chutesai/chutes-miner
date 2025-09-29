@@ -35,6 +35,10 @@ process_chart() {
     echo "Patching resources for $RELEASE_NAME with Helm ownership metadata..."
     while read -r kind name; do
         if [ -n "$kind" ] && [ -n "$name" ]; then
+            if [ $kind = "PriorityClass" ]; then
+                continue
+            fi
+            
             echo "Patching $kind/$name..."
             
             # Add annotations
@@ -49,7 +53,7 @@ process_chart() {
                 "app.kubernetes.io/managed-by=Helm" \
                 --namespace="$NAMESPACE" \
                 --overwrite
-            
+
             echo "  ✓ Done"
         fi
     done <<< "$RESOURCES"
