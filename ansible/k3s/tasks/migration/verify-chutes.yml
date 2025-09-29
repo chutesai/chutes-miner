@@ -84,6 +84,14 @@
             namespace: chutes
           data:
             gepetto.py: "{{ lookup('file', 'files/gepetto-microk8s.py') }}"
+      register: microk8s_configmap_result
+
+    - name: Restart gepetto deployment on micorK8s cluster
+      when: 
+        - inventory_hostname in groups['microk8s']
+        - microk8s_configmap_result.changed
+      ansible.builtin.shell: kubectl rollout restart deployment/gepetto -n chutes --context=default
+    
 
     - name: Verify gepetto on k3s cluster
       when: inventory_hostname in groups['control']
@@ -98,6 +106,13 @@
             namespace: chutes
           data:
             gepetto.py: "{{ lookup('file', 'files/gepetto-k3s.py') }}"
+      register: k3s_configmap_result
+
+    - name: Restart gepetto deployment on k3s cluster
+      when: 
+        - inventory_hostname in groups['control']
+        - k3s_configmap_result.changed
+      ansible.builtin.shell: kubectl rollout restart deployment/gepetto -n chutes --context={{ inventory_hostname }}
 
 - name: Verify miner secrets exist
   when: inventory_hostname == groups['control'][0]
