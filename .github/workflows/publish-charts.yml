@@ -211,39 +211,61 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: gh-pages
-          path: existing-charts
+          path: ${{ env.HELM_CHART_DIR }}
 
       - name: Package and publish charts
         if: steps.check.outputs.should_publish == 'true'
         id: package
         run: |
-          mkdir -p ${{ env.HELM_CHART_DIR }}
-
-          # Copy existing charts
-          [ -d existing-charts ] && cp -r existing-charts/* ${{ env.HELM_CHART_DIR }}/
-
           # Cleanup dev charts for non-existent branches on push to main
           if [ "${{ github.event_name }}" = "push" ] && [ "${{ steps.check.outputs.is_main }}" = "true" ]; then
             echo "Checking for orphaned dev charts"
             if [ -f "${{ env.HELM_CHART_DIR }}/index.yaml" ]; then
-              # Extract dev chart versions and their branch suffixes
-              DEV_CHARTS=$(yq e '.entries[] | .[] | select(.version | test("-dev-|-alpha-|-beta-|-rc[0-9]*-")) | .name + ":" + .version' "${{ env.HELM_CHART_DIR }}/index.yaml")
-              while IFS=: read -r chart_name chart_version; do
-                if [ -z "$chart_name" ] || [ -z "$chart_version" ]; then
-                  continue
-                fi
-                # Extract branch suffix (e.g., feature-branch from 0.0.1-dev-feature-branch)
-                BRANCH_SUFFIX=$(echo "$chart_version" | grep -oE '[^-]+$' || echo "")
-                if [ -n "$BRANCH_SUFFIX" ]; then
-                  # Check if branch exists using GitHub API
-                  RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-                    "https://api.github.com/repos/${{ github.repository }}/branches/$BRANCH_SUFFIX")
-                  if [ "$RESPONSE" != "200" ]; then
-                    echo "Removing orphaned dev chart: $chart_name-$chart_version"
-                    rm -f "${{ env.HELM_CHART_DIR }}/$chart_name-$chart_version.tgz" || true
+              # Extract dev chart versions that have branch suffixes
+              # Pattern: base_version-prerelease-branch_name
+              # Examples: 0.1.0-dev-my-feature, 0.2.0-alpha-testing, 0.3.0-rc1-hotfix
+              DEV_CHARTS=$(yq e '.entries[] | .[] | select(.version | test("-dev-|-alpha-|-beta-|-rc[0-9]+-")) | .name + ":" + .version' "${{ env.HELM_CHART_DIR }}/index.yaml")
+              
+              if [ -n "$DEV_CHARTS" ]; then
+                echo "Found dev charts with branch suffixes to check:"
+                echo "$DEV_CHARTS"
+                
+                while IFS=: read -r chart_name chart_version; do
+                  if [ -z "$chart_name" ] || [ -z "$chart_version" ]; then
+                    continue
                   fi
-                fi
-              done <<< "$DEV_CHARTS"
+                  
+                  # Extract branch suffix - everything after the prerelease identifier
+                  BRANCH_SUFFIX=""
+                  
+                  if [[ "$chart_version" =~ -dev-(.+)$ ]]; then
+                    BRANCH_SUFFIX="${BASH_REMATCH[1]}"
+                  elif [[ "$chart_version" =~ -alpha-(.+)$ ]]; then
+                    BRANCH_SUFFIX="${BASH_REMATCH[1]}"
+                  elif [[ "$chart_version" =~ -beta-(.+)$ ]]; then
+                    BRANCH_SUFFIX="${BASH_REMATCH[1]}"
+                  elif [[ "$chart_version" =~ -rc[0-9]+-(.+)$ ]]; then
+                    BRANCH_SUFFIX="${BASH_REMATCH[1]}"
+                  fi
+                  
+                  if [ -n "$BRANCH_SUFFIX" ]; then
+                    echo "Checking if branch '$BRANCH_SUFFIX' exists for chart $chart_name-$chart_version..."
+                    RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+                      "https://api.github.com/repos/${{ github.repository }}/branches/$BRANCH_SUFFIX")
+                    if [ "$RESPONSE" != "200" ]; then
+                      echo "Branch '$BRANCH_SUFFIX' does not exist (HTTP $RESPONSE)"
+                      echo "Removing orphaned dev chart: $chart_name-$chart_version.tgz"
+                      rm -f "${{ env.HELM_CHART_DIR }}/$chart_name-$chart_version.tgz" || true
+                    else
+                      echo "Branch '$BRANCH_SUFFIX' exists, keeping chart"
+                    fi
+                  else
+                    echo "Could not extract branch suffix from $chart_version, skipping"
+                  fi
+                done <<< "$DEV_CHARTS"
+              else
+                echo "No dev charts with branch suffixes found"
+              fi
             fi
           fi
 
@@ -255,9 +277,19 @@ jobs:
             if [ -d "${{ env.CHART_DIR }}/$chart_name" ]; then
               chart_version=$(yq e '.version' "${{ env.CHART_DIR }}/$chart_name/Chart.yaml")
               
-              # Append sanitized branch name to version for PRs
+              # Append sanitized branch name to version for PRs - ONLY for pre-release versions
               if [ "${{ github.event_name }}" = "pull_request" ]; then
-                chart_version="$chart_version-${{ steps.check.outputs.sanitized_branch }}"
+                # Check if version contains a pre-release identifier
+                if [[ "$chart_version" =~ -dev$|-alpha$|-beta$|-rc[0-9]+$ ]]; then
+                  # It's a pre-release version, append branch suffix
+                  chart_version="$chart_version-${{ steps.check.outputs.sanitized_branch }}"
+                  echo "📋 Pre-release version detected, publishing as: $chart_version"
+                else
+                  # Not a pre-release version - this should fail validation (handled elsewhere)
+                  echo "⚠️ Warning: Version $chart_version is not a pre-release version but is in a PR"
+                  echo "This chart will NOT be published (pre-release suffix required for PRs)"
+                  continue
+                fi
               fi
 
               if [ -f "${{ env.HELM_CHART_DIR }}/$chart_name-$chart_version.tgz" ]; then
@@ -277,13 +309,14 @@ jobs:
             fi
           done
 
-          # Generate/update repository index
-          if [ "$NEW_CHARTS" -gt 0 ]; then
-            helm repo index "${{ env.HELM_CHART_DIR }}" --url "${{ env.REPO_URL }}"
-            echo "📋 Updated repository index with $NEW_CHARTS new chart(s)"
-          else
-            echo "ℹ️ No new charts to package"
-          fi
+          # Generate/update repository index (always, not just when NEW_CHARTS > 0)
+          echo "Generating repository index..."
+          helm repo index "${{ env.HELM_CHART_DIR }}" --url "${{ env.REPO_URL }}"
+          echo "📋 Updated repository index"
+          
+          # List what will be published
+          echo "Contents to be published:"
+          ls -la "${{ env.HELM_CHART_DIR }}"
 
           # Output for later steps
           echo "new_charts=$NEW_CHARTS" >> $GITHUB_OUTPUT
