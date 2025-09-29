@@ -68,7 +68,7 @@ agent:
   affinity: {}
 
 failedChuteCleanup:
-  image: bitnami/kubectl:latest
+  image: bitnamilegacy/kubectl:latest
 
 # Miner credentials - These are provided via Ansible deployment
 # These values are automatically injected during deployment and should not be set manually
