@@ -10,6 +10,12 @@ on:
     paths:
       - 'charts/**'
   workflow_dispatch:
+    inputs:
+      force_publish:
+        description: 'Force publish all charts (bypasses version checks)'
+        required: false
+        type: boolean
+        default: false
 env:
   CHART_DIR: charts
   HELM_CHART_DIR: charts-gh-pages
@@ -48,6 +54,33 @@ jobs:
       - name: Check Chart.yaml changes and validate
         id: check
         run: |
+          # Check if this is a forced manual publish
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.force_publish }}" = "true" ]; then
+            echo "🚀 Force publish mode enabled - publishing all charts"
+            
+            VERSION_CHANGES=""
+            for chart_dir in ${{ env.CHART_DIR }}/*/Chart.yaml; do
+              if [ -f "$chart_dir" ]; then
+                chart_name=$(basename "$(dirname "$chart_dir")")
+                version=$(yq e '.version' "$chart_dir")
+                if [ -n "$version" ] && [ "$version" != "null" ]; then
+                  echo "✅ Will publish $chart_name: $version"
+                  VERSION_CHANGES="${VERSION_CHANGES}${chart_name}: $version\n"
+                fi
+              fi
+            done
+            
+            echo "should_publish=true" >> $GITHUB_OUTPUT
+            echo "is_main=true" >> $GITHUB_OUTPUT
+            echo "sanitized_branch=main" >> $GITHUB_OUTPUT
+            echo "version_changes<<EOF" >> $GITHUB_OUTPUT
+            echo -e "$VERSION_CHANGES" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+            echo "invalid_versions=" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Normal workflow logic continues below...
           # Determine base ref and branch context
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             BASE_REF="${{ github.base_ref }}"
@@ -255,7 +288,7 @@ jobs:
             if [ -d "${{ env.CHART_DIR }}/$chart_name" ]; then
               chart_version=$(yq e '.version' "${{ env.CHART_DIR }}/$chart_name/Chart.yaml")
               
-              # Append sanitized branch name to version for PRs
+              # Don't append branch suffix for forced manual publish
               if [ "${{ github.event_name }}" = "pull_request" ]; then
                 chart_version="$chart_version-${{ steps.check.outputs.sanitized_branch }}"
               fi
@@ -299,10 +332,11 @@ jobs:
           force_orphan: false
 
       - name: Fail workflow if invalid versions for merge
-        if: steps.check.outputs.should_publish == 'true'
+        if: steps.check.outputs.should_publish == 'true' && github.event_name != 'workflow_dispatch'
         run: |
           # This step runs after publishing, and fails the workflow if there were invalid versions
           # This allows charts to be published for testing while still blocking the merge
+          # Skip this check for manual workflow_dispatch runs
           if [ -n "${{ steps.check.outputs.invalid_versions }}" ]; then
             echo "::error::Failing workflow to block merge due to invalid versions"
             exit 1
