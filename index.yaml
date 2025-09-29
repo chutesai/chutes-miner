@@ -3,7 +3,7 @@ entries:
   chutes-miner:
   - apiVersion: v2
     appVersion: 0.0.1
-    created: "2025-09-29T20:10:25.042881054Z"
+    created: "2025-09-29T20:26:40.784512941Z"
     description: Helm chart for chutes.ai miner
     digest: 857b542b7e13bbd7066ea88b8ebb8bbe65c815bfb8eba9dc55e59477235e48e9
     kubeVersion: '>=1.19.0-0'
@@ -21,7 +21,7 @@ entries:
     version: 0.2.0-k3s-tee
   - apiVersion: v2
     appVersion: 0.0.1
-    created: "2025-09-29T20:10:25.042202316Z"
+    created: "2025-09-29T20:26:40.783803442Z"
     description: Helm chart for chutes.ai miner
     digest: 82c975387efa1d9b900aa6c1987484d75c0c2c7467668aca8c946f46ed4bfc9b
     kubeVersion: '>=1.19.0-0'
@@ -39,7 +39,7 @@ entries:
     version: 0.1.0
   - apiVersion: v2
     appVersion: 0.0.1
-    created: "2025-09-29T20:10:25.041220711Z"
+    created: "2025-09-29T20:26:40.782221612Z"
     description: Helm chart for chutes.ai miner
     digest: d36daa45f8a82f088dce02c40190a5c65e8cb263b0beb2e75bec2aeef20406db
     kubeVersion: '>=1.19.0-0'
@@ -57,7 +57,7 @@ entries:
     version: 0.1.0-main
   - apiVersion: v2
     appVersion: 0.0.1
-    created: "2025-09-29T20:10:25.04000586Z"
+    created: "2025-09-29T20:26:40.781560103Z"
     description: Helm chart for chutes.ai miner
     digest: f7709bc1df105f20f6f29fa42e212d6cf26d1085145b530764f669514b66667c
     kubeVersion: '>=1.19.0-0'
@@ -75,7 +75,7 @@ entries:
     version: 0.1.0-k3s-tee
   - apiVersion: v2
     appVersion: 0.0.1
-    created: "2025-09-29T20:10:25.039329105Z"
+    created: "2025-09-29T20:26:40.780881652Z"
     description: Helm chart for chutes.ai miner
     digest: 5e7366b4fe0380b70d39bbbe24156106adbca2d7f0d8f1f8113d5e93c8fe819c
     kubeVersion: '>=1.19.0-0'
@@ -93,7 +93,7 @@ entries:
     version: 0.1.0-dev-k3s-tee
   - apiVersion: v2
     appVersion: 0.0.1
-    created: "2025-09-29T20:10:25.038284864Z"
+    created: "2025-09-29T20:26:40.780171181Z"
     description: Helm chart for chutes.ai miner
     digest: c6295311cef92d1b7c416aec37f1e6aebacd297ae4c76c101886c39f6ebfe0a6
     kubeVersion: '>=1.19.0-0'
@@ -111,7 +111,7 @@ entries:
     version: 0.1.0-dev-k3s-deploy-charts
   - apiVersion: v2
     appVersion: 0.0.1
-    created: "2025-09-29T20:10:25.037600164Z"
+    created: "2025-09-29T20:26:40.779491347Z"
     description: Helm chart for chutes.ai miner
     digest: a3696ee5313e7f9cf3d6bf98de184270fb8f96ec42718c51a2f2a7966c453291
     kubeVersion: '>=1.19.0-0'
@@ -129,7 +129,7 @@ entries:
     version: 0.1.0-agent-update
   - apiVersion: v2
     appVersion: 0.0.1
-    created: "2025-09-29T20:10:25.036905746Z"
+    created: "2025-09-29T20:26:40.778725603Z"
     description: Helm chart for chutes.ai miner
     digest: 71d32ac60d20469b196afe86070d05029ab660345388e33e1a3d5b879af17a35
     kubeVersion: '>=1.19.0-0'
@@ -146,7 +146,7 @@ entries:
   chutes-miner-gpu:
   - apiVersion: v2
     appVersion: 0.1.0
-    created: "2025-09-29T20:10:25.047671107Z"
+    created: "2025-09-29T20:26:40.79066474Z"
     description: Helm chart for chutes.ai GPU nodes
     digest: 2a2106560575718a09575fbf074d31704679a056d70fe57cbbb88ce77bec303f
     kubeVersion: '>=1.19.0-0'
@@ -164,7 +164,7 @@ entries:
     version: 0.2.0-k3s-tee
   - apiVersion: v2
     appVersion: 0.1.0
-    created: "2025-09-29T20:10:25.047193144Z"
+    created: "2025-09-29T20:26:40.790009563Z"
     description: Helm chart for chutes.ai GPU nodes
     digest: 1f813db3cfeb32bb30cbf552f7e28fa15c557d73cac06ab421151e36d3576004
     kubeVersion: '>=1.19.0-0'
@@ -182,7 +182,25 @@ entries:
     version: 0.1.2-agent-update
   - apiVersion: v2
     appVersion: 0.1.0
-    created: "2025-09-29T20:10:25.046710261Z"
+    created: "2025-09-29T20:26:40.788832032Z"
+    description: Helm chart for chutes.ai GPU nodes
+    digest: 48fbb3aea08b5a2a0000c3bbda53728ed31f07870fb2f013474d1502e80ce20b
+    kubeVersion: '>=1.19.0-0'
+    maintainers:
+    - email: jon@chutes.ai
+      name: Jon Durbin
+    - email: namoray@rayonlabs.ai
+      name: namoray
+    - email: kyle@chutes.ai
+      name: Kyle Widmann
+    name: chutes-miner-gpu
+    type: application
+    urls:
+    - https://chutesai.github.io/chutes-miner/chutes-miner-gpu-0.1.1.tgz
+    version: 0.1.1
+  - apiVersion: v2
+    appVersion: 0.1.0
+    created: "2025-09-29T20:26:40.788325403Z"
     description: Helm chart for chutes.ai GPU nodes
     digest: 04d2a1e7eb87729125f8d9ffd567c69ac3a4c21e7305a399b0328a93f36f9a94
     kubeVersion: '>=1.19.0-0'
@@ -200,7 +218,7 @@ entries:
     version: 0.1.1-k3s-tee
   - apiVersion: v2
     appVersion: 0.1.0
-    created: "2025-09-29T20:10:25.046246535Z"
+    created: "2025-09-29T20:26:40.78786465Z"
     description: Helm chart for chutes.ai GPU nodes
     digest: e138ccd3ba7fa53e65d554fd4b64bbea2a5550d7eddf7c1b5c5b2bab5bdcf829
     kubeVersion: '>=1.19.0-0'
@@ -218,7 +236,7 @@ entries:
     version: 0.1.1-agent-update
   - apiVersion: v2
     appVersion: 0.1.0
-    created: "2025-09-29T20:10:25.045755858Z"
+    created: "2025-09-29T20:26:40.787365565Z"
     description: Helm chart for chutes.ai GPU nodes
     digest: f89b098aa1b33a464755492a2ea34df7c80dfead02e02065faf4d653614e51a6
     kubeVersion: '>=1.19.0-0'
@@ -236,7 +254,7 @@ entries:
     version: 0.1.0
   - apiVersion: v2
     appVersion: 0.1.0
-    created: "2025-09-29T20:10:25.045290608Z"
+    created: "2025-09-29T20:26:40.786904972Z"
     description: Helm chart for chutes.ai GPU nodes
     digest: 6b55ab97f7691a122909ed2a9c3a663a66233a87db6a912070fa5b9014b13d2d
     kubeVersion: '>=1.19.0-0'
@@ -254,7 +272,7 @@ entries:
     version: 0.1.0-main
   - apiVersion: v2
     appVersion: 0.1.0
-    created: "2025-09-29T20:10:25.044798929Z"
+    created: "2025-09-29T20:26:40.786441143Z"
     description: Helm chart for chutes.ai GPU nodes
     digest: 250f8e0a45a1769d0637430ddab484ea1bf9489f815ab433df987578fbd02bd5
     kubeVersion: '>=1.19.0-0'
@@ -272,7 +290,7 @@ entries:
     version: 0.1.0-k3s-tee
   - apiVersion: v2
     appVersion: 0.1.0
-    created: "2025-09-29T20:10:25.044338428Z"
+    created: "2025-09-29T20:26:40.785962677Z"
     description: Helm chart for chutes.ai GPU nodes
     digest: 81476e875de2c1802bd206e1eb59f9f29204d36e08225086810cca53937e3440
     kubeVersion: '>=1.19.0-0'
@@ -290,7 +308,7 @@ entries:
     version: 0.1.0-dev-k3s-tee
   - apiVersion: v2
     appVersion: 0.1.0
-    created: "2025-09-29T20:10:25.043854213Z"
+    created: "2025-09-29T20:26:40.785486585Z"
     description: Helm chart for chutes.ai GPU nodes
     digest: 284d22c193b5b856361b1fd1681e91beceb690312d6148923e6ca57efc16a0bf
     kubeVersion: '>=1.19.0-0'
@@ -308,7 +326,7 @@ entries:
     version: 0.1.0-dev-k3s-deploy-charts
   - apiVersion: v2
     appVersion: 0.1.0
-    created: "2025-09-29T20:10:25.043380438Z"
+    created: "2025-09-29T20:26:40.78499277Z"
     description: Helm chart for chutes.ai GPU nodes
     digest: a4bdaa1347bbfb56d177030d9e401959cbfa69febe014d952ed549daf9ff9eb3
     kubeVersion: '>=1.19.0-0'
@@ -327,7 +345,7 @@ entries:
   chutes-monitoring:
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-09-29T20:10:25.119523644Z"
+    created: "2025-09-29T20:26:40.855902382Z"
     dependencies:
     - condition: grafana.deploy
       name: grafana
@@ -350,7 +368,7 @@ entries:
     version: 0.2.0-k3s-tee
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-09-29T20:10:25.108879892Z"
+    created: "2025-09-29T20:26:40.845477335Z"
     dependencies:
     - condition: grafana.deploy
       name: grafana
@@ -373,7 +391,7 @@ entries:
     version: 0.1.0
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-09-29T20:10:25.091366768Z"
+    created: "2025-09-29T20:26:40.834779982Z"
     dependencies:
     - condition: grafana.deploy
       name: grafana
@@ -396,7 +414,7 @@ entries:
     version: 0.1.0-main
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-09-29T20:10:25.080665926Z"
+    created: "2025-09-29T20:26:40.823679483Z"
     dependencies:
     - condition: grafana.deploy
       name: grafana
@@ -419,7 +437,7 @@ entries:
     version: 0.1.0-k3s-tee
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-09-29T20:10:25.070094096Z"
+    created: "2025-09-29T20:26:40.812325954Z"
     dependencies:
     - condition: grafana.deploy
       name: grafana
@@ -442,7 +460,7 @@ entries:
     version: 0.1.0-dev-k3s-tee
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-09-29T20:10:25.059444232Z"
+    created: "2025-09-29T20:26:40.801746764Z"
     dependencies:
     - condition: grafana.deploy
       name: grafana
@@ -463,4 +481,4 @@ entries:
     urls:
     - https://chutesai.github.io/chutes-miner/chutes-monitoring-0.1.0-agent-update.tgz
     version: 0.1.0-agent-update
-generated: "2025-09-29T20:10:25.036066547Z"
+generated: "2025-09-29T20:26:40.777845194Z"
