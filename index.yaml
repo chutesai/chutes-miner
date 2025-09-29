@@ -3,7 +3,25 @@ entries:
   chutes-miner:
   - apiVersion: v2
     appVersion: 0.0.1
-    created: "2025-09-29T02:27:23.151342048Z"
+    created: "2025-09-29T03:14:00.802710516Z"
+    description: Helm chart for chutes.ai miner
+    digest: f7709bc1df105f20f6f29fa42e212d6cf26d1085145b530764f669514b66667c
+    kubeVersion: '>=1.19.0-0'
+    maintainers:
+    - email: jon@chutes.ai
+      name: Jon Durbin
+    - email: namoray@rayonlabs.ai
+      name: namoray
+    - email: kyle@chutes.ai
+      name: Kyle Widmann
+    name: chutes-miner
+    type: application
+    urls:
+    - https://chutesai.github.io/chutes-miner/chutes-miner-0.1.0-k3s-tee.tgz
+    version: 0.1.0-k3s-tee
+  - apiVersion: v2
+    appVersion: 0.0.1
+    created: "2025-09-29T03:14:00.801452791Z"
     description: Helm chart for chutes.ai miner
     digest: 5e7366b4fe0380b70d39bbbe24156106adbca2d7f0d8f1f8113d5e93c8fe819c
     kubeVersion: '>=1.19.0-0'
@@ -21,7 +39,7 @@ entries:
     version: 0.1.0-dev-k3s-tee
   - apiVersion: v2
     appVersion: 0.0.1
-    created: "2025-09-29T02:27:23.150651167Z"
+    created: "2025-09-29T03:14:00.800186329Z"
     description: Helm chart for chutes.ai miner
     digest: c6295311cef92d1b7c416aec37f1e6aebacd297ae4c76c101886c39f6ebfe0a6
     kubeVersion: '>=1.19.0-0'
@@ -39,7 +57,7 @@ entries:
     version: 0.1.0-dev-k3s-deploy-charts
   - apiVersion: v2
     appVersion: 0.0.1
-    created: "2025-09-29T02:27:23.1499202Z"
+    created: "2025-09-29T03:14:00.798745241Z"
     description: Helm chart for chutes.ai miner
     digest: 71d32ac60d20469b196afe86070d05029ab660345388e33e1a3d5b879af17a35
     kubeVersion: '>=1.19.0-0'
@@ -56,7 +74,25 @@ entries:
   chutes-miner-gpu:
   - apiVersion: v2
     appVersion: 0.1.0
-    created: "2025-09-29T02:27:23.15232175Z"
+    created: "2025-09-29T03:14:00.805562099Z"
+    description: Helm chart for chutes.ai GPU nodes
+    digest: 250f8e0a45a1769d0637430ddab484ea1bf9489f815ab433df987578fbd02bd5
+    kubeVersion: '>=1.19.0-0'
+    maintainers:
+    - email: jon@chutes.ai
+      name: Jon Durbin
+    - email: namoray@rayonlabs.ai
+      name: namoray
+    - email: kyle@chutes.ai
+      name: Kyle Widmann
+    name: chutes-miner-gpu
+    type: application
+    urls:
+    - https://chutesai.github.io/chutes-miner/chutes-miner-gpu-0.1.0-k3s-tee.tgz
+    version: 0.1.0-k3s-tee
+  - apiVersion: v2
+    appVersion: 0.1.0
+    created: "2025-09-29T03:14:00.805016808Z"
     description: Helm chart for chutes.ai GPU nodes
     digest: 81476e875de2c1802bd206e1eb59f9f29204d36e08225086810cca53937e3440
     kubeVersion: '>=1.19.0-0'
@@ -74,7 +110,7 @@ entries:
     version: 0.1.0-dev-k3s-tee
   - apiVersion: v2
     appVersion: 0.1.0
-    created: "2025-09-29T02:27:23.151837465Z"
+    created: "2025-09-29T03:14:00.803474637Z"
     description: Helm chart for chutes.ai GPU nodes
     digest: 284d22c193b5b856361b1fd1681e91beceb690312d6148923e6ca57efc16a0bf
     kubeVersion: '>=1.19.0-0'
@@ -93,7 +129,30 @@ entries:
   chutes-monitoring:
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-09-29T02:27:23.164094347Z"
+    created: "2025-09-29T03:14:00.835754299Z"
+    dependencies:
+    - condition: grafana.deploy
+      name: grafana
+      repository: https://grafana.github.io/helm-charts
+      version: 8.11.3
+    - name: prometheus
+      repository: https://prometheus-community.github.io/helm-charts
+      version: 27.19.0
+    description: Chutes monitoring helm charts
+    digest: f368ec54804b7155e68eb31075d1f42c0cdb5b7b6bf1e290ea344d830295b680
+    maintainers:
+    - email: jon@chutes.ai
+      name: Jon Durbin
+    - email: kyle@chutes.ai
+      name: Kyle Widmann
+    name: chutes-monitoring
+    type: application
+    urls:
+    - https://chutesai.github.io/chutes-miner/chutes-monitoring-0.1.0-k3s-tee.tgz
+    version: 0.1.0-k3s-tee
+  - apiVersion: v2
+    appVersion: 1.16.0
+    created: "2025-09-29T03:14:00.822606285Z"
     dependencies:
     - condition: grafana.deploy
       name: grafana
@@ -114,4 +173,4 @@ entries:
     urls:
     - https://chutesai.github.io/chutes-miner/chutes-monitoring-0.1.0-dev-k3s-tee.tgz
     version: 0.1.0-dev-k3s-tee
-generated: "2025-09-29T02:27:23.149093475Z"
+generated: "2025-09-29T03:14:00.797235814Z"
