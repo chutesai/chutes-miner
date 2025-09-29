@@ -161,6 +161,6 @@ auditExporter:
     kubernetes.io/hostname: chutes-miner-cpu-0
 
 failedChuteCleanup:
-  image: bitnami/kubectl:latest
+  image: bitnamilegacy/kubectl:latest
   nodeSelector:
     kubernetes.io/hostname: chutes-miner-cpu-0
