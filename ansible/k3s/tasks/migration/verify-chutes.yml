@@ -90,7 +90,7 @@
       when: 
         - inventory_hostname in groups['microk8s']
         - microk8s_configmap_result.changed
-      ansible.builtin.shell: kubectl rollout restart deployment/gepetto -n chutes --context=default
+      ansible.builtin.shell: microk8s kubectl rollout restart deployment/gepetto -n chutes --context=default
     
 
     - name: Verify gepetto on k3s cluster

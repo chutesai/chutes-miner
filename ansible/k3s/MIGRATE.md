@@ -166,6 +166,8 @@ ansible-playbook -i ~/chutes/inventory.yml playbooks/migrate.yml --tags migrate-
 
 ### 2.3 Node Migration
 
+**IMPORTANT**: Before starting the node migration, verify gepetto on the microk8s control plane restarted succesfully to ensure it has the modified code.
+
 ```bash
 ansible-playbook -i ~/chutes/inventory.yml playbooks/migrate.yml --tags migrate-nodes
 ```
@@ -348,6 +350,5 @@ kubectl config get-contexts
 
 # Typical contexts available:
 # - chutes-miner-cpu-0 (control plane K3s cluster)
-# - karmada-apiserver (Karmada API server)
 # - chutes-miner-gpu-X (Chutes GPU cluster contexts)
 ```
