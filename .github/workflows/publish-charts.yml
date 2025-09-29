@@ -227,7 +227,7 @@ jobs:
             echo "Checking for orphaned dev charts"
             if [ -f "${{ env.HELM_CHART_DIR }}/index.yaml" ]; then
               # Extract dev chart versions and their branch suffixes
-              DEV_CHARTS=$(yq e '.entries[] | select(.version | test("-dev-|-alpha-|-beta-|-rc[0-9]*-")) | .name + ":" + .version' "${{ env.HELM_CHART_DIR }}/index.yaml")
+              DEV_CHARTS=$(yq e '.entries[] | .[] | select(.version | test("-dev-|-alpha-|-beta-|-rc[0-9]*-")) | .name + ":" + .version' "${{ env.HELM_CHART_DIR }}/index.yaml")
               while IFS=: read -r chart_name chart_version; do
                 if [ -z "$chart_name" ] || [ -z "$chart_version" ]; then
                   continue
