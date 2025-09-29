@@ -260,7 +260,7 @@ jobs:
                 chart_version="$chart_version-${{ steps.check.outputs.sanitized_branch }}"
               fi
 
-              if [ "${{ github.event_name }}" != "pull_request" ] && [ -f "${{ env.HELM_CHART_DIR }}/$chart_name-$chart_version.tgz" ]; then
+              if [ -f "${{ env.HELM_CHART_DIR }}/$chart_name-$chart_version.tgz" ]; then
                 echo "⚠️ $chart_name-$chart_version already exists, skipping"
                 continue
               fi
