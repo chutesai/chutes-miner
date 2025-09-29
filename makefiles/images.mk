@@ -4,8 +4,17 @@ tag:
 tag:
 	@images=$$(find docker -maxdepth 1 -type d ! -path docker | sort); \
 	image_names=$$(echo $$images | xargs -n1 basename | tr '\n' ' '); \
-	echo "Tagging images for: $$image_names"; \
+	filtered_images=""; \
+	filtered_names=""; \
 	for image_dir in $$images; do \
+		pkg_name=$$(basename $$image_dir); \
+		if echo "$(TARGET_NAMES)" | grep -w -q "$$pkg_name"; then \
+			filtered_images="$$filtered_images $$image_dir"; \
+			filtered_names="$$filtered_names $$pkg_name"; \
+		fi; \
+	done; \
+	echo "Tagging images for:$$filtered_names"; \
+	for image_dir in $$filtered_images; do \
 		pkg_name=$$(basename $$image_dir); \
 		if [ -f "src/$$pkg_name/VERSION" ]; then \
 			pkg_version=$$(head "src/$$pkg_name/VERSION"); \
@@ -64,8 +73,17 @@ push:
 push:
 	@images=$$(find docker -maxdepth 1 -type d ! -path docker | sort); \
 	image_names=$$(echo $$images | xargs -n1 basename | tr '\n' ' '); \
-	echo "Pushing images for: $$image_names"; \
+	filtered_images=""; \
+	filtered_names=""; \
 	for image_dir in $$images; do \
+		pkg_name=$$(basename $$image_dir); \
+		if echo "$(TARGET_NAMES)" | grep -w -q "$$pkg_name"; then \
+			filtered_images="$$filtered_images $$image_dir"; \
+			filtered_names="$$filtered_names $$pkg_name"; \
+		fi; \
+	done; \
+	echo "Pushing images for:$$filtered_names"; \
+	for image_dir in $$filtered_images; do \
 		pkg_name=$$(basename $$image_dir); \
 		if [ -f "src/$$pkg_name/VERSION" ]; then \
 			pkg_version=$$(head "src/$$pkg_name/VERSION"); \

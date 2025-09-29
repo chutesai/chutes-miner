@@ -206,6 +206,17 @@ class ResourceMonitor:
                 self.state = MonitoringState.STOPPED
                 # Don't retry on cancellation
                 raise
+            except ApiException as e:
+                if e.status == 503:
+                    logger.error(f"K8s API unavailble: {e}")
+                    self.status.error_message = f"K8s API unavailable."
+                else:
+                    logger.error(f"Unexpected exception from K8s API:\n{e}")
+                    self.status.error_message = f"Unexpected exception from K8s API."
+                    
+                self.state = MonitoringState.ERROR
+                raise
+
             except Exception as e:
                 logger.error(f"Restart attempt failed: {e}")
                 # Set error state but let tenacity handle retries

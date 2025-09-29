@@ -10,8 +10,8 @@ build: ##@development Build the docker images for all packages or specific TARGE
 build: args ?= --network=host --build-arg BUILDKIT_INLINE_CACHE=1
 build:
 	@echo "Building images for: $(TARGET_NAMES)"
-	@for target in $(TARGETS); do \
-		pkg_name=$$(basename $$target); \
+	@for pkg_name in $(TARGET_NAMES); do \
+		target="src/$$pkg_name"; \
 		pkg_version=$$(if [ -f "$$target/VERSION" ]; then head $$target/VERSION; else echo "dev"; fi); \
 		if [ -d "docker/$$pkg_name" ]; then \
 			if [ -f "docker/$$pkg_name/Dockerfile" ]; then \

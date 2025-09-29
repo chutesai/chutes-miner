@@ -199,7 +199,7 @@ For example:
 ```yaml
 
 all:
-  hosts:
+  children:
     # This would be the main node, which runs postgres, redis, gepetto, etc.
     control:
       hosts:

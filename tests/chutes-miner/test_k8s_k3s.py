@@ -433,7 +433,7 @@ async def test_get_deployed_chutes(
 async def test_delete_code_success(mock_redis_client, mock_k8s_core_client):
     """Test successful deletion of code configmap."""
 
-    mock_redis_client.get_resource_cluster.return_value = "test-cluster"
+    mock_redis_client.get_all_cluster_names.return_value = ["test-cluster"]
 
     # Call the function
     await k8s.delete_code("test-chute-id", "1.0.0")
@@ -445,8 +445,10 @@ async def test_delete_code_success(mock_redis_client, mock_k8s_core_client):
 
 
 @pytest.mark.asyncio
-async def test_delete_code_not_found(mock_k8s_core_client):
+async def test_delete_code_not_found(mock_redis_client, mock_k8s_core_client):
     """Test handling of 404 error when deleting configmap."""
+    mock_redis_client.get_all_cluster_names.return_value = ["test-cluster"] 
+
     # Setup mock to raise ApiException with 404
     error = ApiException(status=404)
     mock_k8s_core_client.delete_namespaced_config_map.side_effect = error
@@ -459,8 +461,10 @@ async def test_delete_code_not_found(mock_k8s_core_client):
 
 
 @pytest.mark.asyncio
-async def test_delete_code_other_error(mock_k8s_core_client):
+async def test_delete_code_other_error(mock_redis_client, mock_k8s_core_client):
     """Test handling of non-404 error when deleting configmap."""
+    mock_redis_client.get_all_cluster_names.return_value = ["test-cluster"] 
+
     # Setup mock to raise ApiException with 500
     error = ApiException(status=500)
     mock_k8s_core_client.delete_namespaced_config_map.side_effect = error
