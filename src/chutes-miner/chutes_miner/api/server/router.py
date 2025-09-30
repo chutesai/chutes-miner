@@ -68,7 +68,7 @@ async def create_server(
         server_kubeconfig = await get_server_kubeconfig(server_args.agent_api)
         if not server_kubeconfig.get_context(server_args.name):
             raise HTTPException(
-                status_Code=status.HTTP_400_BAD_REQUEST,
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Kubeconfig from {server_args.agent_api} expected to contain context for {server_args.name}, instead found {', '.join(ctx.name for ctx in server_kubeconfig.contexts)}",
             )
 
