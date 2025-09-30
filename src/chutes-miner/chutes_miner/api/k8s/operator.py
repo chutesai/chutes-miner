@@ -314,8 +314,13 @@ class K8sOperator(abc.ABC):
         raise NotImplementedError()
 
     async def _extract_node_info(self, node: V1Node):
-        if not node.status.capacity or not node.status.capacity.get("nvidia.com/gpu"):
-            logger.warning(f"Node has no GPU capacity: {node.metadata.name=}")
+        try:
+            gpu_capacity = node.status.capacity.get("nvidia.com/gpu")
+            if gpu_capacity is None or gpu_capacity == "0":
+                logger.warning(f"Node has no GPU capacity: {node.metadata.name=}")
+                return None
+        except AttributeError:
+            logger.warning(f"Node has invalid status or capacity: {node.metadata.name=}")
             return None
 
         gpu_count = int(node.status.capacity["nvidia.com/gpu"])
