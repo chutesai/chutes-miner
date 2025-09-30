@@ -219,14 +219,6 @@
     - name: Copy kubeconfig to ansible controller
       when: control_kubeconfig_exists.stat.exists
       block:
-        - name: Ensure kubectl staging directory exists on ansible controller
-          ansible.builtin.file:
-            path: "{{ controller_kubectl_staging_dir | default('~/.kube') }}"
-            state: directory
-            mode: "0750"
-          delegate_to: localhost
-          become: false
-          run_once: true
 
         - name: Fetch merged kubeconfig from control node
           ansible.builtin.fetch:

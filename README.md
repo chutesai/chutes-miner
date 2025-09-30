@@ -138,9 +138,9 @@ This is the main thing to optimize as a miner!
 
 ## 🚀 Getting Started
 
-### 1. Use ansible to provision servers
+### 1. Server Setup
 
-The first thing you'll want to do is provision your servers/kubernetes.
+Sections 2 and 3 walk through configuration and using ansible to provision your servers/kubernetes.
 
 ALL servers must be bare metal/VM, meaning it will not work on Runpod, Vast, etc., and we do not currently support shared or dynamic IPs - the IPs must be unique, static, and provide a 1:1 port mapping.
 
@@ -165,12 +165,10 @@ Before starting, you must either disable all layers of firewalls (if you like to
 - allow the kubernetes ephemeral port range on all of your GPU nodes, since the ports for chute deployments will be random, in that range, and need public accessibility - the default port range is 30000-32767
 - allow access to the various nodePort values in your API from whatever machine you are managing/running chutes-miner add-node/etc., or just make it public (particularly import is the API node port, which defaults to 32000)
 
-You'll need one non-GPU server (4 cores, 32gb ram minimum) responsible for running karmada, postgres, redis, gepetto, and API components (not chutes), and __*ALL*__ of the GPU servers 😄 (just kidding of course, you can use as many or as few as you wish)
+You'll need one non-GPU server (4 cores, 32gb ram minimum) responsible for running k3s, postgres, redis, gepetto, and API components (not chutes), and __*ALL*__ of the GPU servers 😄 (just kidding of course, you can use as many or as few as you wish)
 
 [The list of supported GPUs can be found here](https://github.com/rayonlabs/chutes-api/blob/main/api/gpu.py)
 
-
-To setup your miner follow the [prerequisite](#2-configure-prerequisites) steps below, then head over the [ansible](ansible/k3s/README.md) document for setting up your infratructure.
 
 ### 2. Configure prerequisites
 
@@ -224,7 +222,6 @@ all:
     # Local kubectl setup
     setup_local_kubeconfig: false # Set to true to setup kubeconfig on the ansible controller
     controller_kubeconfig: ~/.kube/chutes.config # Path to the ansible controller kubeconfig file you want to use
-    controller_kubectl_staging_dir: "~/.kube/chutes-staging"
 
     hotkey_path: "~/.bittensor/wallets/[WALLET]/hotkeys/[HOTKEY]"
 
@@ -254,7 +251,6 @@ The easiest way to interact with kubernetes would be from within the primary nod
     - Optionally you can update the kubeconfig file/dir to use as well
     ```yaml
     controller_kubeconfig: ~/.kube/chutes.config
-    controller_kubectl_staging_dir: "~/.kube/chutes-staging"
     ```
 
 
