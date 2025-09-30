@@ -292,7 +292,8 @@ class MultiClusterKubeConfig:
             # Try to get existing event loop to determine context
             asyncio.get_running_loop()
             # In an event loop already, kick off load
-            asyncio.create_task(self._load_async())
+            task = asyncio.create_task(self._load_async())
+            asyncio.gather(task)
         except RuntimeError:
             # No event loop running - we can use asyncio.run()
             asyncio.run(self._load_async())
