@@ -25,17 +25,20 @@ cd ..
 ```
 
 Update gepetto:
-**NOTE** This assumes you are storing gepetto in the same `~/chutes` directory as the values and inventory.  If not just adjust the `--from-file` path.
+
+Be sure to update gepetto imports to use the new code structure.  If you have customn gepetto and intend to use the `K8sOperator` instead of the methods exposed via the `chutes_miner.api.k8s` module just use `K8sOperator()` directly as this class is a singleton and instantiates the correct concrete class based on the cluster.
+
+**NOTE** This assumes you are storing gepetto in the same `~/chutes` directory alongside the values and inventory.  If not just adjust the `--from-file` path.
 ```bash
 kubectl create configmap gepetto-code --from-file=$HOME/chutes/gepetto.py -o yaml --dry-run=client | kubectl apply -n chutes -f -
 ```
 
 Deploy `chutes-miner` charts for control node components
 ```bash
-helm upgrade --install chutes charts/chutes-miner -f values ~/chutes/values.yaml
+helm upgrade --install chutes charts/chutes-miner -f ~/chutes/values.yaml
 ```
 
 Deploy `chutes-miner-gpu` charts for control node components
 ```bash
-helm upgrade --install chutes-gpu charts/chutes-miner-gpu -f values ~/chutes/values.yaml
+helm upgrade --install chutes-gpu charts/chutes-miner-gpu -f ~/chutes/values.yaml
 ```
