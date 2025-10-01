@@ -131,13 +131,6 @@
             state: directory
             mode: "0750"
 
-        - name: Backup existing merged kubeconfig if it exists
-          ansible.builtin.copy:
-            src: "~{{ control_node_users[0] }}/.kube/config"
-            dest: "{{ temp_staging_dir }}/existing_config_backup.yaml"
-            remote_src: true
-          ignore_errors: true
-
         - name: Read kubeconfigs from nodes with k3s installed
           ansible.builtin.slurp:
             src: /etc/rancher/k3s/k3s.yaml
@@ -169,13 +162,13 @@
           loop: "{{ kubeconfig_contents.results }}"
           when: not item.failed | default(false)
 
-        - name: Update default namespace in collected kubeconfigs
-          ansible.builtin.replace:
-            path: "{{ temp_staging_dir }}/{{ hostvars[item.item]['inventory_hostname'] }}.yaml"
-            regexp: "namespace: default"
-            replace: "namespace: chutes"
+        - name: Set namespace in collected kubeconfigs
+          ansible.builtin.shell: |
+            kubectl --kubeconfig="{{ temp_staging_dir }}/{{ hostvars[item.item]['inventory_hostname'] }}.yaml" \
+              config set-context --current --namespace=chutes
           loop: "{{ kubeconfig_contents.results }}"
           when: not item.failed | default(false)
+          changed_when: true
 
         - name: Copy kubeconfig merge script to control node
           ansible.builtin.copy:
