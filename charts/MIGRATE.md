@@ -25,16 +25,17 @@ cd ..
 ```
 
 Update gepetto:
+**NOTE** This assumes you are storing gepetto in the same `~/chutes` directory as the values and inventory.  If not just adjust the `--from-file` path.
 ```bash
 kubectl create configmap gepetto-code --from-file=$HOME/chutes/gepetto.py -o yaml --dry-run=client | kubectl apply -n chutes -f -
 ```
 
 Deploy `chutes-miner` charts for control node components
 ```bash
-helm upgrade --insall chutes charts/chutes-miner -f values ~/chutes/values.yaml
+helm upgrade --install chutes charts/chutes-miner -f values ~/chutes/values.yaml
 ```
 
 Deploy `chutes-miner-gpu` charts for control node components
 ```bash
-helm upgrade --insall chutes-gpu charts/chutes-miner-gpu -f values ~/chutes/values.yaml
+helm upgrade --install chutes-gpu charts/chutes-miner-gpu -f values ~/chutes/values.yaml
 ```
