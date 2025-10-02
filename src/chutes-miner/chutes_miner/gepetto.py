@@ -452,7 +452,9 @@ class Gepetto:
                     # Adjust chute_value for private chutes, which have a much different compute_units value of
                     # number of seconds * compute multiplier * 16.
                     if not chute_info["preemptible"]:
-                        compute_units = 60 * chute_info["compute_multiplier"] * 16
+                        compute_units = (
+                            60 * 60 * chute_info["compute_multiplier"] * 16
+                        )  # metrics here are for last hour.
                         chute_value = compute_units / (
                             potential_server.hourly_cost * chute.gpu_count
                         )
