@@ -553,6 +553,12 @@ class K8sOperator(abc.ABC):
         raise NotImplementedError()
 
     @abc.abstractmethod
+    def _deploy_job_for_deployment(
+        self, job: V1Job, server_name: Optional[str] = None, namespace=settings.namespace
+    ):
+        raise NotImplementedError()
+
+    @abc.abstractmethod
     def _deploy_job(
         self, job: V1Job, server_name: Optional[str] = None, namespace=settings.namespace
     ):
@@ -1030,7 +1036,7 @@ class K8sOperator(abc.ABC):
         )
 
         try:
-            created_job = self._deploy_job(job, server_name=server.name)
+            created_job = self._deploy_job_for_deployment(job, server_name=server.name)
         except Exception:
             raise DeploymentFailure(
                 f"Failed to create job for {chute.chute_id=} and {deployment_id=}"
@@ -1258,6 +1264,11 @@ class SingleClusterK8sOperator(K8sOperator):
             name=name,
             namespace=namespace,
         )
+
+    def _deploy_job_for_deployment(
+        self, job: V1Job, server_name: Optional[str] = None, namespace=settings.namespace
+    ):
+        return self._deploy_job(job, server_name, namespace)
 
     def _deploy_job(self, job, server_name=None, namespace=settings.namespace):
         return k8s_batch_client().create_namespaced_job(namespace=namespace, body=job)
@@ -1491,13 +1502,16 @@ class MultiClusterK8sOperator(K8sOperator):
             except ApiException as e:
                 if e.status != 409:
                     raise
-
-    def _deploy_job(self, job, server_name, namespace=settings.namespace):
-        client = self._manager.get_batch_client(server_name)
-        created_job = client.create_namespaced_job(namespace=namespace, body=job)
+    
+    def _deploy_job_for_deployment(self, job, server_name, namespace=settings.namespace):
+        created_job = self._deploy_job(job, server_name, namespace)
         deployment_id=job.metadata.labels["chutes/deployment-id"]
         self._wait_for_deployment(f"chutes/deployment-id={deployment_id}", timeout_seconds=15)
         return created_job
+
+    def _deploy_job(self, job, server_name, namespace=settings.namespace):
+        client = self._manager.get_batch_client(server_name)
+        return client.create_namespaced_job(namespace=namespace, body=job)
 
     def _delete_job(self, name, namespace=settings.namespace):
         context = self._redis.get_resource_cluster(
