@@ -233,14 +233,6 @@
           changed_when: false
           run_once: true
 
-        - name: Remove existing local kubeconfig
-          ansible.builtin.file:
-            path: "{{ controller_kubeconfig | default('~/.kube/config') }}"
-            state: absent
-          delegate_to: localhost
-          become: false
-          run_once: true
-
         - name: Fetch merged kubeconfig from control node
           ansible.builtin.fetch:
             src: "{{ control_kubeconfig_source }}"
