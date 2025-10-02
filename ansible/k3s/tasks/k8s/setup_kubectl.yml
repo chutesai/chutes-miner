@@ -191,10 +191,30 @@
   when: setup_local_kubeconfig | default(false)
   vars:
     control_node: "{{ groups['control'][0] }}"
-    control_kubeconfig_source: "~{{ hostvars[control_node]['ansible_user'] }}/.kube/config"
+    control_node_user: "{{ hostvars[control_node]['ansible_user'] }}"
   delegate_to: "{{ control_node }}"
   run_once: true
   block:
+
+    - name: Set kubeconfig source path
+      ansible.builtin.shell: |
+        HOME_DIR=$(getent passwd "{{ control_node_user }}" | cut -d: -f6)
+        echo "${HOME_DIR}/.kube/config"
+      register: control_kubeconfig_lookup
+      changed_when: false
+
+    - name: Set kubeconfig source variable
+      ansible.builtin.set_fact:
+        control_kubeconfig_source: "{{ control_kubeconfig_lookup.stdout }}"
+
+    - name: debug
+      ansible.builtin.debug:
+        msg: "{{ control_kubeconfig_source }}"
+
+    - name: debug
+      ansible.builtin.shell: |
+        echo hostname
+
     - name: Check if merged kubeconfig exists on control node
       ansible.builtin.stat:
         path: "{{ control_kubeconfig_source }}"
