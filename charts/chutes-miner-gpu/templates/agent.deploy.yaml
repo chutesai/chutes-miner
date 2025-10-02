@@ -16,10 +16,6 @@ spec:
         {{- include "agent.labels" . | nindent 8 }}
     spec:
       priorityClassName: critical-pod-priority
-      tolerations:
-      - key: "node.kubernetes.io/disk-pressure"
-        operator: "Exists"
-        effect: "NoSchedule"
       serviceAccountName: agent
       securityContext:
         fsGroup: 1000
