@@ -1537,7 +1537,6 @@ class Gepetto:
             deployment, k8s_dep = await k8s.deploy_chute(
                 chute.chute_id,
                 target_server.server_id,
-                deployment_id,
                 token=launch_token["token"] if launch_token else None,
                 config_id=launch_token["config_id"] if launch_token else None,
                 disk_gb=disk_gb,
