@@ -79,7 +79,7 @@
         - name: Install NVIDIA driver packages
           ansible.builtin.apt:
             name:
-              - nvidia-open
+              - nvidia-open-{{ nvidia_version }}
               - nvidia-fabricmanager-{{ nvidia_version }}
             state: present
           register: driver_install

@@ -7,7 +7,7 @@ import aiohttp
 import asyncio
 import hashlib
 from chutes_miner.api.k8s.operator import K8sOperator
-from chutes_miner.api.server.util import stop_server_monitoring
+from chutes_miner.api.server.util import clear_server_cache, stop_server_monitoring
 import orjson as json
 import traceback
 import semver
@@ -951,7 +951,15 @@ class Gepetto:
             if server:
                 # If this is a standalone server, we need to stop monitoring from the agent
                 if server.agent_api:
-                    await stop_server_monitoring(server.agent_api)
+                    try:
+                        await stop_server_monitoring(server.agent_api)
+                    except aiohttp.ConnectionTimeoutError:
+                        logger.warning(f"Timed out trying to stop monitoring for cluster {server.name}. Manually clearing cache.")
+                        # Since the clustTimed out trying to stop monitoring for cluster {server.name}t available we need to manually clear the cac. Manually clearing cache.he
+                        await clear_server_cache(server.name)
+                    except Exception as e:
+                        logger.error(f"Unexpected error encountered trying to stop monitoring for {server.name}.\n{e}")
+
 
                 await asyncio.gather(
                     *[self.gpu_deleted({"gpu_id": gpu.gpu_id}) for gpu in server.gpus]
@@ -1537,7 +1545,6 @@ class Gepetto:
             deployment, k8s_dep = await k8s.deploy_chute(
                 chute.chute_id,
                 target_server.server_id,
-                deployment_id,
                 token=launch_token["token"] if launch_token else None,
                 config_id=launch_token["config_id"] if launch_token else None,
                 disk_gb=disk_gb,

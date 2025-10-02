@@ -2,6 +2,11 @@
 - name: Reset node
   hosts: all
   become: true
+  vars:
+    users:
+      - "root"
+      - "{{ ansible_user }}"
+      - "{{ user }}"
   tasks:
     - name: Run K3s Uninstall script [server]
       ansible.builtin.command:
@@ -12,6 +17,8 @@
       ansible.builtin.file:
         path: ~{{ ansible_user }}/.kube/config
         state: absent
+      loop: "{{ users }}"
+
 
     - name: Remove k3s install script
       ansible.builtin.file:

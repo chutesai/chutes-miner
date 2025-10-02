@@ -10,6 +10,6 @@ k3s_server_config_yaml: |-
   disable:
     - traefik
     - servicelb
-  node-ip: {{ ansible_host }}
+  node-ip: {{ node_ip }}
   node-external-ip: {{ ansible_host }}
   advertise-address: {{ ansible_host }}
