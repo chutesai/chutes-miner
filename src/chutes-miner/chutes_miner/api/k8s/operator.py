@@ -1302,6 +1302,9 @@ class MultiClusterK8sOperator(K8sOperator):
         if not hasattr(self, "_cluster_monitor_task"):
             self._cluster_monitor_task = asyncio.create_task(self._watch_clusters())
 
+    def _get_request_timeout(self, read_timeout: int) -> Tuple[int, int]:
+        return (5, read_timeout)
+
     async def _watch_clusters(self):
         try:
             pubsub = self._redis.subscribe_to_clusters()
@@ -1369,7 +1372,7 @@ class MultiClusterK8sOperator(K8sOperator):
                 context_name=name, kubeconfig=kubeconfig
             )
 
-            node = _client.read_node(name=name, _request_timeout=timeout_seconds)
+            node = _client.read_node(name=name, _request_timeout=self._get_request_timeout(timeout_seconds))
         except Exception as e:
             logger.warning(f"Failed to get node:\n{e}")
 
@@ -1383,7 +1386,7 @@ class MultiClusterK8sOperator(K8sOperator):
         # cluster = self._redis.get_resource_cluster(resource_name=name, resource_type="node")
         # We can assume the node name is the same as the context, if this changes this will break
         client = self._manager.get_core_client(context_name=name)
-        client.patch_node(name=name, body=body, _request_timeout=timeout_seconds)
+        client.patch_node(name=name, body=body, _request_timeout=self._get_request_timeout(timeout_seconds))
 
         return self.get_node(name)
 
@@ -1436,7 +1439,7 @@ class MultiClusterK8sOperator(K8sOperator):
                 client.delete_namespaced_deployment(
                     name=name,
                     namespace=namespace,
-                    _request_timeout=timeout_seconds
+                    _request_timeout=self._get_request_timeout(timeout_seconds)
                 )
             except ApiException as e:
                 if e.status == 404:
@@ -1452,7 +1455,7 @@ class MultiClusterK8sOperator(K8sOperator):
 
     def _deploy_service(self, service, server_name, namespace=settings.namespace, timeout_seconds: int = 60):
         client = self._manager.get_core_client(server_name)
-        return client.create_namespaced_service(namespace=namespace, body=service, _request_timeout=timeout_seconds)
+        return client.create_namespaced_service(namespace=namespace, body=service, _request_timeout=self._get_request_timeout(timeout_seconds))
 
     def _delete_service(self, name, namespace=settings.namespace, timeout_seconds: int = 60):
         context = self._redis.get_resource_cluster(
@@ -1466,7 +1469,7 @@ class MultiClusterK8sOperator(K8sOperator):
                 client.delete_namespaced_service(
                     name=name,
                     namespace=namespace,
-                    _request_timeout=timeout_seconds
+                    _request_timeout=self._get_request_timeout(timeout_seconds)
                 )
             except ApiException as e:
                 if e.status == 404:
@@ -1490,7 +1493,7 @@ class MultiClusterK8sOperator(K8sOperator):
                 client.delete_namespaced_config_map(
                     name=name,
                     namespace=namespace,
-                    _request_timeout=timeout_seconds
+                    _request_timeout=self._get_request_timeout(timeout_seconds)
                 )
             except ApiException as e:
                 if e.status != 404:
@@ -1503,7 +1506,7 @@ class MultiClusterK8sOperator(K8sOperator):
             client = self._manager.get_core_client(cluster)
             # Need to handle 409 per cluster so we don't break out early
             try:
-                client.create_namespaced_config_map(namespace=namespace, body=config_map, _request_timeout=timeout_seconds)
+                client.create_namespaced_config_map(namespace=namespace, body=config_map, _request_timeout=self._get_request_timeout(timeout_seconds))
             except ApiException as e:
                 if e.status != 409:
                     raise
@@ -1516,7 +1519,7 @@ class MultiClusterK8sOperator(K8sOperator):
 
     def _deploy_job(self, job, server_name, namespace=settings.namespace, timeout_seconds: int = 120):
         client = self._manager.get_batch_client(server_name)
-        return client.create_namespaced_job(namespace=namespace, body=job, _request_timeout=timeout_seconds)
+        return client.create_namespaced_job(namespace=namespace, body=job, _request_timeout=self._get_request_timeout(timeout_seconds))
 
     def _delete_job(self, name, namespace=settings.namespace, timeout_seconds: int = 120):
         context = self._redis.get_resource_cluster(
@@ -1526,7 +1529,7 @@ class MultiClusterK8sOperator(K8sOperator):
 
         try:
             client.delete_namespaced_job(
-                name=name, namespace=namespace, propagation_policy="Foreground", _request_timeout=timeout_seconds
+                name=name, namespace=namespace, propagation_policy="Foreground", _request_timeout=self._get_request_timeout(timeout_seconds)
             )
         except ApiException as e:
             if e.status == 404:
