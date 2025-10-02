@@ -1374,7 +1374,8 @@ class MultiClusterK8sOperator(K8sOperator):
 
             node = _client.read_node(name=name, _request_timeout=self._get_request_timeout(timeout_seconds))
         except Exception as e:
-            logger.warning(f"Failed to get node:\n{e}")
+            logger.error(f"Failed to get node:\n{e}")
+            raise ApiException(status=404, reason=f"Node {name} not found.")
 
         return node
 
