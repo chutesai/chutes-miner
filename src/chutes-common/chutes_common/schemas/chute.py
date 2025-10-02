@@ -4,7 +4,7 @@ ORM definitions for Chutes.
 
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
-from sqlalchemy import Column, String, DateTime, Integer
+from sqlalchemy import Column, String, DateTime, Integer, Boolean
 from sqlalchemy.dialects.postgresql import ARRAY
 from chutes_common.schemas import Base
 
@@ -26,5 +26,6 @@ class Chute(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
     ban_reason = Column(String, nullable=True)
     chutes_version = Column(String)
+    preemptible = Column(Boolean, default=True)
 
     deployments = relationship("Deployment", back_populates="chute", cascade="all, delete-orphan")

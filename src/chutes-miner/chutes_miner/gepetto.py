@@ -314,6 +314,7 @@ class Gepetto:
                     )
                     if deployment:
                         deployment.active = True
+                        deployment.activated_at = func.now()
                         if data.get("verified"):
                             deployment.verified_at = func.now()
                         await session.commit()
@@ -409,27 +410,12 @@ class Gepetto:
                     local_count = await self.count_non_job_deployments(
                         chute_id, chute_info["version"], validator
                     )
-                    if local_count >= 3:
-                        logger.info(f"Already have max instances of {chute_id=} {chute_name}")
-                        continue
 
                     # If there are no metrics, it means the chute is not being actively used, so don't scale.
                     metrics = self.remote_metrics.get(validator, {}).get(chute_id, {})
-                    if not metrics:
+                    if not metrics and chute_info["preemptible"]:
                         logger.info(
                             f"No metrics for {chute_id=} {chute_name}, scaling would be unproductive..."
-                        )
-                        continue
-
-                    # If we have all deployments already (no other miner has this) then no need to scale.
-                    total_count = metrics.get("instance_count", 0)
-                    if (
-                        local_count
-                        and local_count >= total_count
-                        and not metrics.get("rate_limit_count")
-                    ):
-                        logger.info(
-                            f"We have all deployments for {chute_id=} {chute_name}, scaling would be unproductive..."
                         )
                         continue
 
@@ -449,6 +435,7 @@ class Gepetto:
                         theoretical += rate_limited * per_invocation
 
                     # Calculate potential gain from a new deployment.
+                    total_count = metrics.get("instance_count", 0)
                     potential_gain = theoretical
                     if total_count:
                         potential_gain /= total_count + 1
@@ -461,6 +448,16 @@ class Gepetto:
 
                     # Calculate value ratio
                     chute_value = potential_gain / (potential_server.hourly_cost * chute.gpu_count)
+
+                    # Adjust chute_value for private chutes, which have a much different compute_units value of
+                    # number of seconds * compute multiplier * 16.
+                    if not chute_info["preemptible"]:
+                        compute_units = 60 * chute_info["compute_multiplier"] * 16
+                        chute_value = compute_units / (
+                            potential_server.hourly_cost * chute.gpu_count
+                        )
+                        logger.info(f"Overriding private chute potential value: {chute_value=}")
+
                     logger.info(
                         f"Estimated {potential_gain=} for name={chute_name} "
                         f"chute_id={chute_info['chute_id']} on {validator=}, "
@@ -480,19 +477,23 @@ class Gepetto:
 
         # Sort by value and attempt to deploy the highest value chute
         chute_values.sort(key=lambda x: x[2], reverse=True)
-        best_validator, best_chute_id, best_value = chute_values[0]
-        if (
-            chute := await self.load_chute(
-                best_chute_id,
-                self.remote_chutes[best_validator][best_chute_id]["version"],
-                best_validator,
-            )
-        ) is not None:
-            current_count = await self.count_non_job_deployments(
-                best_chute_id, chute.version, best_validator
-            )
-            logger.info(f"Scaling up {best_chute_id} for validator {best_validator}")
-            await self.scale_chute(chute, current_count + 1, preempt=False)
+        for idx in range(len(chute_values)):
+            best_validator, best_chute_id, best_value = chute_values[idx]
+            if (
+                chute := await self.load_chute(
+                    best_chute_id,
+                    self.remote_chutes[best_validator][best_chute_id]["version"],
+                    best_validator,
+                )
+            ) is not None:
+                current_count = await self.count_non_job_deployments(
+                    best_chute_id, chute.version, best_validator
+                )
+                logger.info(
+                    f"Attempting to scale up {chute.chute_id=} {chute.name=} for validator {best_validator}"
+                )
+                if await self.scale_chute(chute, current_count + 1, preempt=False):
+                    break
 
     async def autoscaler(self):
         """
@@ -737,6 +738,7 @@ class Gepetto:
                     "version",
                     "supported_gpus",
                     "chutes_version",
+                    "preemptible",
                 ):
                     setattr(chute, key, chute_dict.get(key))
                 chute.gpu_count = chute_dict["node_selector"]["gpu_count"]
@@ -755,6 +757,7 @@ class Gepetto:
                     gpu_count=chute_dict["node_selector"]["gpu_count"],
                     chutes_version=chute_dict["chutes_version"],
                     ban_reason=None,
+                    preemptible=chute_dict["preemptible"],
                 )
                 db.add(chute)
             await db.commit()
@@ -798,15 +801,10 @@ class Gepetto:
             return
 
         # XXX This is where you as a miner definitely want to customize the strategy!
-        supported_gpus = set(chute.supported_gpus)
-        if supported_gpus - set(["h200", "b200"]):
-            # Generally speaking, non-h200/b200 GPUs typically have lower compute multipliers than
-            # the job would provide because they regularly do not have even one request in flight
-            # on average, although that is not always the case, so this should be updated to be smarter.
-            logger.info(
-                f"Attempting a pre-empting deploy of {job_id=} {chute_id=} with {supported_gpus=} and {gpu_count=}"
-            )
-            await self.preempting_deploy(chute, job_id=job_id, disk_gb=disk_gb)
+        logger.info(
+            f"Attempting a pre-empting deploy of {job_id=} {chute_id=} with {chute.supported_gpus=} and {gpu_count=}"
+        )
+        await self.preempting_deploy(chute, job_id=job_id, disk_gb=disk_gb)
 
     async def job_deleted(self, event_data: Dict[str, Any]):
         """
@@ -906,7 +904,7 @@ class Gepetto:
         async with get_session() as session:
             await session.execute(
                 text(
-                    "UPDATE deployments SET active = true, stub = false WHERE config_id = :config_id"
+                    "UPDATE deployments SET active = true, activated_at = now(), stub = false WHERE config_id = :config_id"
                 ),
                 {"config_id": config_id},
             )
@@ -1254,9 +1252,10 @@ class Gepetto:
             .join(Server)
             .join(gpu_counts, Server.server_id == gpu_counts.c.server_id)
             .where(Server.locked.is_(False))
+            .where(Deployment.preemptible.is_(True))
             .where(Deployment.chute_id == chute.chute_id)
-            .where(Deployment.job_id.is_(None))  # Don't scale down job deployments
-            .where(Deployment.created_at <= func.now() - timedelta(minutes=5))
+            .where(Deployment.job_id.is_(None))
+            .where(Deployment.activated_at <= func.now() - timedelta(minutes=63))
             .order_by(text("removal_score DESC"))
             .limit(1)
         )
@@ -1335,11 +1334,10 @@ class Gepetto:
             logger.warning(
                 f"Refusing to perform a preempting deploy of banned chute {chute.chute_id=}: {chute.ban_reason=}"
             )
-            return
+            return False
 
         supported_gpus = list(chute.supported_gpus)
-        if "h200" in supported_gpus and set(supported_gpus) - set(["h200"]):
-            supported_gpus = list(set(supported_gpus) - set(["h200"]))
+
         # Get the prometheus data for staleness check
         prom = PrometheusConnect(url=settings.prometheus_url)
         last_invocations = {}
@@ -1351,7 +1349,6 @@ class Gepetto:
                 last_invocations[chute_id] = timestamp.replace(tzinfo=None)
         except Exception as e:
             logger.error(f"Failed to fetch prometheus metrics: {e}")
-            pass
 
         # Calculate value metrics for each chute per validator
         chute_values = {}
@@ -1418,7 +1415,7 @@ class Gepetto:
             servers = (await session.execute(query)).unique().scalars()
         if not servers:
             logger.warning(f"No servers in inventory are capable of running {chute.chute_id=}")
-            return
+            return False
 
         # Fetch disk space.
         servers = [
@@ -1452,12 +1449,17 @@ class Gepetto:
                     logger.warning(f"Cannot preempt job deployments: {deployment.job_id=}")
                     continue
 
+                # Ignore un-preemptible deployments.
+                if not deployment.preemptible:
+                    logger.warning(f"Skipping un-preemptible deployment: {deployment.chute_id=}")
+                    continue
+
                 # Make sure we aren't pointlessly preempting (already have a deployment in progress).
                 if deployment.chute_id == chute.chute_id:
                     logger.warning(
                         f"Attempting to preempt for {chute.chute_id=}, but deployment already exists: {deployment.deployment_id=}"
                     )
-                    return
+                    return False
 
                 # Can't preempt deployments that haven't been verified yet.
                 if not deployment.verified_at:
@@ -1469,10 +1471,10 @@ class Gepetto:
                 # Can't preempt deployments that are <= 5 minutes since verification.
                 age = datetime.now(timezone.utc).replace(
                     tzinfo=None
-                ) - deployment.verified_at.replace(tzinfo=None)
-                if age <= timedelta(minutes=60):
+                ) - deployment.activated_at.replace(tzinfo=None)
+                if age <= timedelta(minutes=62):
                     logger.warning(
-                        f"Cannot preempt {deployment.deployment_id=}, verification age is only {age}"
+                        f"Cannot preempt {deployment.deployment_id=}, time since active is only {age}"
                     )
                     continue
 
@@ -1511,7 +1513,7 @@ class Gepetto:
             logger.warning(
                 f"Could not find a server with sufficient preemptable deployments for {chute.chute_id=}"
             )
-            return
+            return False
 
         # Before we actually delete any deployments, let's ensure we can actually obtain the launch token,
         # because only one miner can claim a single job for example, so we don't want to undeploy if we
@@ -1522,7 +1524,7 @@ class Gepetto:
             logger.warning(
                 f"Failed to obtain launch token, skipping pre-emption {chute.chute_id=} {job_id=}"
             )
-            return
+            return False
 
         # Do the preemption.
         try:
@@ -1536,7 +1538,7 @@ class Gepetto:
             logger.error(f"Unexpected error preempting deployments: {exc}")
             if job_id:
                 await self.release_job(chute, job_id)
-            raise
+            return False
 
         # Deploy on our target server.
         deployment = None
@@ -1555,6 +1557,7 @@ class Gepetto:
             )
             if not launch_token:
                 await self.announce_deployment(deployment)
+            return True
         except DeploymentFailure as exc:
             logger.error(
                 f"Error attempting to deploy {chute.chute_id=} {job_id=} on {server.server_id=} via preemption: {exc}\n{traceback.format_exc()}"
@@ -1563,8 +1566,9 @@ class Gepetto:
                 await self.undeploy(deployment.deployment_id)
             if job_id:
                 self.release_job(chute, job_id)
+        return False
 
-    async def scale_chute(self, chute: Chute, desired_count: int, preempt: bool = False):
+    async def scale_chute(self, chute: Chute, desired_count: int, preempt: bool = False) -> bool:
         """
         Scale up or down a chute.
 
@@ -1588,9 +1592,10 @@ class Gepetto:
                     # The default selects the deployment which when removed results in highest free GPU count on that server.
                     if (deployment := await self.optimal_scale_down_deployment(chute)) is not None:
                         await self.undeploy(deployment.deployment_id)
+                        return True
                     else:
                         logger.error(f"Scale down impossible right now, sorry: {chute.chute_id}")
-                        return
+                        return False
 
                 # Scale up?
                 else:
@@ -1606,8 +1611,8 @@ class Gepetto:
                         # If no server can accept the new capacity, and preempt is true, we need to
                         # figure out which deployment(s) to remove.
                         if preempt:
-                            await self.preempting_deploy(chute)
-                        return
+                            return await self.preempting_deploy(chute)
+                        return False
 
                     else:
                         logger.info(
@@ -1627,13 +1632,14 @@ class Gepetto:
                             )
                             if not launch_token:
                                 await self.announce_deployment(deployment)
+                            return True
                         except DeploymentFailure as exc:
                             logger.error(
                                 f"Error attempting to deploy {chute.chute_id=} on {server.server_id=}: {exc}\n{traceback.format_exc()}"
                             )
                             if deployment:
                                 await self.undeploy(deployment.deployment_id)
-                            return
+        return False
 
     async def reconcile(self):
         """
@@ -1659,6 +1665,7 @@ class Gepetto:
                             chute.image,
                             chute.code,
                             chute.ref_str,
+                            f"{chute.preemptible}",
                             f"{chute.gpu_count}",
                             f"{chute.chutes_version}",
                             f"{set(sorted(chute.supported_gpus))}",
@@ -1676,6 +1683,7 @@ class Gepetto:
                             chute_data["image"],
                             chute_data["code"],
                             chute_data["ref_str"],
+                            f"{chute_data['preemptible']}",
                             f"{chute_data['node_selector']['gpu_count']}",
                             f"{chute_data['chutes_version']}",
                             f"{set(sorted(chute_data['supported_gpus']))}",
@@ -1821,6 +1829,7 @@ class Gepetto:
                         remote_active = remote_instance.get("active", True)
                         if deployment.active != remote_active:
                             deployment.active = remote_active
+                            deployment.activated_at = func.now()
                             deployment.stub = False
                             logger.info(
                                 f"Updating deployment {deployment.deployment_id} active status to {deployment.active}"

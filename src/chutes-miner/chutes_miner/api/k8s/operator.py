@@ -737,6 +737,7 @@ class K8sOperator(abc.ABC):
             stub=True,
             job_id=job_id,
             config_id=config_id,
+            preemptible=chute.preemptible,
         )
         session.add(deployment)
         deployment.gpus = gpus
