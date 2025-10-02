@@ -1388,6 +1388,28 @@ class MultiClusterK8sOperator(K8sOperator):
             raise ApiException(status=404, reason=f"Failed to find deployment {deployment_name}")
 
         return self._extract_job_info(resources.jobs[0])
+    
+    def _wait_for_deployment(self, label_selector: str, timeout_seconds: int = 120) -> None:
+        """
+        Wait for a deleted pod to be fully removed.
+        """
+        pods = self.get_pods(settings.namespace, label_selector)
+        found = len(pods.items) > 0
+        if not found:
+            try:
+                for event in self.watch_pods(
+                    namespace=settings.namespace, label_selector=label_selector, timeout=timeout_seconds
+                ):
+                    if not event.is_deleted:
+                        logger.success(f"Deployment {label_selector=} is in cache.")
+                        found = True
+                        break
+            except Exception as exc:
+                logger.warning(f"Error waiting for deployment to be cached: {exc}")
+
+        if not found:
+            raise ApiException(status=404, reason=f"Failed to find deployment {label_selector} in cache.")
+                
 
     def _delete_deployment(self, name, namespace=settings.namespace):
         context = self._redis.get_resource_cluster(
@@ -1472,7 +1494,10 @@ class MultiClusterK8sOperator(K8sOperator):
 
     def _deploy_job(self, job, server_name, namespace=settings.namespace):
         client = self._manager.get_batch_client(server_name)
-        return client.create_namespaced_job(namespace=namespace, body=job)
+        created_job = client.create_namespaced_job(namespace=namespace, body=job)
+        deployment_id=job.metadata.labels["chutes/deployment-id"]
+        self._wait_for_deployment(f"chutes/deployment-id={deployment_id}", timeout_seconds=15)
+        return created_job
 
     def _delete_job(self, name, namespace=settings.namespace):
         context = self._redis.get_resource_cluster(
