@@ -46,14 +46,6 @@
           loop: "{{ kubeconfig_exists.results }}"
           when: not item.stat.exists
 
-        - name: "Update server address in individual kubeconfig (only if newly created)"
-          ansible.builtin.replace:
-            path: "~{{ item.item }}/.kube/config"
-            regexp: "https://127.0.0.1:6443"
-            replace: "https://{{ ansible_host }}:{{ k3s_api_port | default('6443') }}"
-          loop: "{{ kubeconfig_exists.results }}"
-          when: not item.stat.exists
-
         - name: "Update context name in individual kubeconfig (only if newly created)"
           ansible.builtin.replace:
             path: "~{{ item.item }}/.kube/config"
@@ -63,10 +55,9 @@
           when: not item.stat.exists
 
         - name: "Update default namespace in individual kubeconfig (only if newly created)"
-          ansible.builtin.replace:
-            path: "~{{ item.item }}/.kube/config"
-            regexp: "namespace: default"
-            replace: "namespace: chutes"
+          ansible.builtin.shell: |
+            kubectl --kubeconfig="~{{ item.item }}/.kube/config" \
+              config set-context {{ inventory_hostname }} --namespace=chutes
           loop: "{{ kubeconfig_exists.results }}"
           when: not item.stat.exists
 
@@ -154,18 +145,10 @@
           loop: "{{ kubeconfig_contents.results }}"
           when: not item.failed | default(false)
 
-        - name: Update context names in collected kubeconfigs
-          ansible.builtin.replace:
-            path: "{{ temp_staging_dir }}/{{ hostvars[item.item]['inventory_hostname'] }}.yaml"
-            regexp: ": default"
-            replace: ": {{ hostvars[item.item]['inventory_hostname'] }}"
-          loop: "{{ kubeconfig_contents.results }}"
-          when: not item.failed | default(false)
-
         - name: Set namespace in collected kubeconfigs
           ansible.builtin.shell: |
             kubectl --kubeconfig="{{ temp_staging_dir }}/{{ hostvars[item.item]['inventory_hostname'] }}.yaml" \
-              config set-context --current --namespace=chutes
+              config set-context {{ inventory_hostname }} --namespace=chutes
           loop: "{{ kubeconfig_contents.results }}"
           when: not item.failed | default(false)
           changed_when: true

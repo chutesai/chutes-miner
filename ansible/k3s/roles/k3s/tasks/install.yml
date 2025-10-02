@@ -44,7 +44,7 @@
     regexp: \.\s+<\(k3s completion bash\)
     line: ". <(k3s completion bash)  # Added by k3s-ansible"
 
-- name: Setup optional config file
+- name: Setup config file
   when: k3s_server_config_yaml is defined
   block:
     - name: Make config directory
@@ -52,6 +52,29 @@
         path: /etc/rancher/k3s
         mode: "0755"
         state: directory
+
+    - name: Gather network interface facts
+      ansible.builtin.setup:
+        gather_subset:
+          - '!all'
+          - 'network'
+
+    - name: Set public IP from inventory
+      ansible.builtin.set_fact:
+        public_ip: "{{ ansible_host }}"
+
+    - name: Check if public IP is bound to any interface
+      ansible.builtin.set_fact:
+        public_ip_found: "{{ ansible_interfaces | json_query('[*].ipv4.address') | select('defined') | select('==', public_ip) | length > 0 }}"
+
+    - name: Determine private IP if public IP is not found
+      ansible.builtin.set_fact:
+        private_ip: "{{ (ansible_interfaces | select('match', '^(eth|ens|enp).*') | map('json_query', 'ansible_facts[\\0].ipv4.address') | select('defined') | select('match', '^(192\\.168|10\\.|172\\.(1[6-9]|2[0-9]|3[0-1]))\\..*') | first) | default(ansible_default_ipv4.address, true) }}"
+      when: not public_ip_found
+
+    - name: Set node_ip for K3s configuration
+      ansible.builtin.set_fact:
+        node_ip: "{{ public_ip if public_ip_found else private_ip }}"
 
     - name: Copy config values
       ansible.builtin.copy:
