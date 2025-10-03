@@ -4,8 +4,11 @@ lint-local:
 	@echo "Running lint for: $(TARGET_NAMES)"; \
 	root_dir=$$(pwd); \
 	exit_code=0; \
-	for target in $(TARGETS); do \
-		pkg_name=$$(basename $$target); \
+	for pkg_name in $(TARGET_NAMES); do \
+		if [ ! -d "src/$$pkg_name" ]; then \
+			continue; \
+		fi; \
+		target="src/$$pkg_name"; \
 		echo "--------------------------------------------------------"; \
 		echo "Running lint for $$pkg_name ($$target)"; \
 		echo "--------------------------------------------------------"; \
@@ -21,8 +24,11 @@ reformat: ##@local Reformat all packages or specific TARGET_PROJECT
 reformat:
 	@echo "Reformatting: $(TARGET_NAMES)"; \
 	root_dir=$$(pwd); \
-	for target in $(TARGETS); do \
-		pkg_name=$$(basename $$target); \
+	for pkg_name in $(TARGET_NAMES); do \
+		if [ ! -d "src/$$pkg_name" ]; then \
+			continue; \
+		fi; \
+		target="src/$$pkg_name"; \
 		echo "--------------------------------------------------------"; \
 		echo "Running reformat for $$pkg_name ($$target)"; \
 		echo "--------------------------------------------------------"; \
@@ -35,9 +41,12 @@ reformat:
 test-local: ##@local Run test suite locally on all packages or specific TARGET_PROJECT
 test-local:
 	@echo "Running tests locally for: $(TARGET_NAMES)"
-	@for target in $(TARGETS); do \
-		pkg_name=$$(basename $$target); \
-		if [ -d "docker/$$pkg_name" ]; then \
+	for pkg_name in $(TARGET_NAMES); do \
+		if [ ! -d "tests/$$pkg_name" ]; then \
+			continue; \
+		fi; \
+		target="tests/$$pkg_name"; \
+		if [ -d "tests/$$pkg_name" ]; then \
 			echo "Running tests for $$pkg_name ($$target)"; \
 			cd $$target; \
 			${POETRY} run pytest -s --tb=native --durations=5 --cov=. --cov-report=html ../../tests/$$pkg_name; \

@@ -111,10 +111,7 @@ async def start_server_monitoring(agent_url: str):
 
 
 async def stop_server_monitoring(agent_url: str):
-    async with aiohttp.ClientSession(
-        conn_timeout=5,
-        read_timeout=30
-    ) as session:
+    async with aiohttp.ClientSession(conn_timeout=5, read_timeout=30) as session:
         headers, _ = sign_request(purpose="monitoring", management=True)
         async with session.get(
             f"{agent_url}/monitor/stop",
@@ -122,11 +119,13 @@ async def stop_server_monitoring(agent_url: str):
         ) as response:
             if response.status != 200:
                 raise Exception(f"Failed to stop monitoring for cluster: {await response.text()}")
-            
+
+
 async def clear_server_cache(cluster_name):
     _redis = MonitoringRedisClient()
     await _redis.clear_cluster(cluster_name)
     _redis.close()
+
 
 async def gather_gpu_info(
     server_id: str,
@@ -603,15 +602,15 @@ async def bootstrap_server(
                 f"failed to advertising node to {validator.hotkey} via {validator.api}: {exc}",
             )
             raise
-        assert (
-            len(set(node["seed"] for node in validator_nodes)) == 1
-        ), f"more than one seed produced from {validator.hotkey}!"
+        assert len(set(node["seed"] for node in validator_nodes)) == 1, (
+            f"more than one seed produced from {validator.hotkey}!"
+        )
         if not seed:
             seed = validator_nodes[0]["seed"]
         else:
-            assert (
-                seed == validator_nodes[0]["seed"]
-            ), f"validators produced differing seeds {seed} vs {validator_nodes[0]['seed']}"
+            assert seed == validator_nodes[0]["seed"], (
+                f"validators produced differing seeds {seed} vs {validator_nodes[0]['seed']}"
+            )
         yield sse_message(
             f"successfully advertised node {node_object.metadata.uid} to validator {validator.hotkey}, received seed: {seed}"
         )

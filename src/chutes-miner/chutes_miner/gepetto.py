@@ -954,12 +954,15 @@ class Gepetto:
                     try:
                         await stop_server_monitoring(server.agent_api)
                     except aiohttp.ConnectionTimeoutError:
-                        logger.warning(f"Timed out trying to stop monitoring for cluster {server.name}. Manually clearing cache.")
+                        logger.warning(
+                            f"Timed out trying to stop monitoring for cluster {server.name}. Manually clearing cache."
+                        )
                         # Since the clustTimed out trying to stop monitoring for cluster {server.name}t available we need to manually clear the cac. Manually clearing cache.he
                         await clear_server_cache(server.name)
                     except Exception as e:
-                        logger.error(f"Unexpected error encountered trying to stop monitoring for {server.name}.\n{e}")
-
+                        logger.error(
+                            f"Unexpected error encountered trying to stop monitoring for {server.name}.\n{e}"
+                        )
 
                 await asyncio.gather(
                     *[self.gpu_deleted({"gpu_id": gpu.gpu_id}) for gpu in server.gpus]
@@ -1484,8 +1487,7 @@ class Gepetto:
                     logger.warning(
                         f"Cannot preempt {deployment.deployment_id=}, time active unknown."
                     )
-                    continue    
-                
+                    continue
 
                 # If we'd be left with > 1 instance, we can preempt.
                 if proposed_counts.get(deployment.chute_id, 0) > 1:
