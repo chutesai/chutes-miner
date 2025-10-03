@@ -1471,14 +1471,21 @@ class Gepetto:
                     continue
 
                 # Can't preempt deployments that are <= 5 minutes since verification.
-                age = datetime.now(timezone.utc).replace(
-                    tzinfo=None
-                ) - deployment.activated_at.replace(tzinfo=None)
-                if age <= timedelta(minutes=62):
+                if deployment.activated_at:
+                    age = datetime.now(timezone.utc).replace(
+                        tzinfo=None
+                    ) - deployment.activated_at.replace(tzinfo=None)
+                    if age <= timedelta(minutes=62):
+                        logger.warning(
+                            f"Cannot preempt {deployment.deployment_id=}, time since active is only {age}"
+                        )
+                        continue
+                else:
                     logger.warning(
-                        f"Cannot preempt {deployment.deployment_id=}, time since active is only {age}"
+                        f"Cannot preempt {deployment.deployment_id=}, time active unknown."
                     )
-                    continue
+                    continue    
+                
 
                 # If we'd be left with > 1 instance, we can preempt.
                 if proposed_counts.get(deployment.chute_id, 0) > 1:
