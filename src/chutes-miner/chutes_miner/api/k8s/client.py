@@ -19,7 +19,7 @@ class KubernetesMultiClusterClientManager:
         _client = None
         try:
             _client = self._get_client_for_context(context_name, timeout=timeout)
-        except (KubeContextNotFound) as e:
+        except KubeContextNotFound as e:
             logger.error(f"Failed to get api client:\n{e}")
 
         return _client
@@ -29,45 +29,44 @@ class KubernetesMultiClusterClientManager:
         try:
             api_client = self._get_client_for_context(context_name, timeout=timeout)
             _client = client.AppsV1Api(api_client)
-        except (KubeContextNotFound) as e:
+        except KubeContextNotFound as e:
             logger.error(f"Failed to get app client:\n{e}")
 
         return _client
 
     def get_core_client(
-        self, 
-        context_name: str, 
+        self,
+        context_name: str,
         kubeconfig: Optional[KubeConfig] = None,
-        timeout: Optional[int] = None
+        timeout: Optional[int] = None,
     ) -> client.CoreV1Api:
         _client = None
         try:
             api_client = self._get_client_for_context(context_name, kubeconfig, timeout=timeout)
             _client = client.CoreV1Api(api_client)
-        except (KubeContextNotFound) as e:
+        except KubeContextNotFound as e:
             logger.error(f"Failed to get core client:\n{e}")
 
         return _client
 
-    def get_batch_client(self, context_name: str, timeout: Optional[int] = None) -> client.BatchV1Api:
+    def get_batch_client(
+        self, context_name: str, timeout: Optional[int] = None
+    ) -> client.BatchV1Api:
         _client = None
         try:
             api_client = self._get_client_for_context(context_name, timeout=timeout)
             _client = client.BatchV1Api(api_client)
-        except (KubeContextNotFound) as e:
+        except KubeContextNotFound as e:
             logger.error(f"Failed to get batch client:\n{e}")
 
         return _client
 
     @lru_cache(maxsize=10)
     def _get_client_for_context(
-        self, 
-        context: str, 
-        kubeconfig: Optional[KubeConfig] = None,
-        timeout: Optional[int] = None
+        self, context: str, kubeconfig: Optional[KubeConfig] = None, timeout: Optional[int] = None
     ) -> client.ApiClient:
         """Create a new client configured for the specified context
-        
+
         Args:
             context: The kubernetes context name
             kubeconfig: Optional kubeconfig override
@@ -87,9 +86,9 @@ class KubernetesMultiClusterClientManager:
         api_client = config.kube_config.new_client_from_config_dict(
             _kubeconfig.to_dict(), context=context, persist_config=False
         )
-        
+
         # Set the timeout on the configuration
         _timeout = timeout if timeout is not None else self.default_timeout
         api_client.configuration.timeout = _timeout
-        
+
         return api_client

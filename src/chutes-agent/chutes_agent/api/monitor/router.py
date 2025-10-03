@@ -20,7 +20,7 @@ async def health_check():
     """Health check endpoint"""
     if resource_monitor.state == MonitoringState.ERROR:
         raise HTTPException(status_code=503, detail="Resource monitor in ERROR state")
-    
+
     return {"status": "healthy", "cluster": settings.cluster_name}
 
 

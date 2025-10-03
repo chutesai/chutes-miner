@@ -1,0 +1,7 @@
+-- migrate:up
+ALTER TABLE chutes ADD COLUMN IF NOT EXISTS preemptible BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE deployments ADD COLUMN IF NOT EXISTS preemptible BOOLEAN NOT NULL DEFAULT TRUE;
+
+-- migrate:down
+ALTER TABLE chutes DROP COLUMN IF EXISTS preemptible;
+ALTER TABLE deployments DROP COLUMN IF EXISTS preemptible;

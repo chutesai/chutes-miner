@@ -28,10 +28,12 @@ class Deployment(Base):
     version = Column(String, nullable=False)
     active = Column(Boolean, default=False)
     verified_at = Column(DateTime(timezone=True))
+    activated_at = Column(DateTime(timezone=True))
     stub = Column(Boolean, default=False)
     job_id = Column(String, nullable=True)
     config_id = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    preemptible = Column(Boolean, default=True)
 
     gpus = relationship("GPU", back_populates="deployment", lazy="joined")
     chute = relationship("Chute", back_populates="deployments", lazy="joined")

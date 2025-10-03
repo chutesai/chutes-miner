@@ -3,8 +3,11 @@ test: ##@test Run test suite on all packages or specific TARGET_PROJECT
 test: service ?= test
 test:
 	@echo "Running tests for: $(TARGET_NAMES)"
-	@for target in $(TARGETS); do \
-		pkg_name=$$(basename $$target); \
+	for pkg_name in $(TARGET_NAMES); do \
+		if [ ! -d "src/$$pkg_name" ]; then \
+			continue; \
+		fi; \
+		target="src/$$pkg_name"; \
 		if [ -d "docker/$$pkg_name" ]; then \
 			if PROJECT=$$pkg_name ${DC} -p $$pkg_name -f docker/$$pkg_name/docker-compose.yaml -f docker/$$pkg_name/docker-compose.base.yaml config --services | grep -q "^$(service)$$"; then \
 				echo "Running $(service) for $$pkg_name ($$target)"; \
