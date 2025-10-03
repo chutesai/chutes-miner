@@ -1586,6 +1586,7 @@ class Gepetto:
         MINERS: This is probably the most critical function to optimize.
         """
         async with self._scale_lock:
+            scaled = False
             while (
                 current_count := await self.count_non_job_deployments(
                     chute.chute_id, chute.version, chute.validator
@@ -1603,10 +1604,11 @@ class Gepetto:
                     # The default selects the deployment which when removed results in highest free GPU count on that server.
                     if (deployment := await self.optimal_scale_down_deployment(chute)) is not None:
                         await self.undeploy(deployment.deployment_id)
-                        return True
+                        scaled = True
                     else:
                         logger.error(f"Scale down impossible right now, sorry: {chute.chute_id}")
-                        return False
+                        scaled = False
+                        break
 
                 # Scale up?
                 else:
@@ -1623,8 +1625,8 @@ class Gepetto:
                         # figure out which deployment(s) to remove.
                         if preempt:
                             return await self.preempting_deploy(chute)
-                        return False
-
+                        scaled = False
+                        break
                     else:
                         logger.info(
                             f"Attempting to deploy {chute.chute_id=} on {server.server_id=}"
@@ -1643,14 +1645,17 @@ class Gepetto:
                             )
                             if not launch_token:
                                 await self.announce_deployment(deployment)
-                            return True
+                            scaled = True
                         except DeploymentFailure as exc:
                             logger.error(
                                 f"Error attempting to deploy {chute.chute_id=} on {server.server_id=}: {exc}\n{traceback.format_exc()}"
                             )
                             if deployment:
                                 await self.undeploy(deployment.deployment_id)
-        return False
+                            scaled = False
+                            break
+
+            return scaled
 
     async def reconcile(self):
         """
