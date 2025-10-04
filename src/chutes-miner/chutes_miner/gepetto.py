@@ -764,7 +764,7 @@ class Gepetto:
                 db.add(chute)
             await db.commit()
             await db.refresh(chute)
-            await k8s.create_code_config_map(chute)
+            await k8s.create_code_config_map(chute, force=True)
 
     async def job_created(self, event_data: Dict[str, Any]):
         """
@@ -1198,7 +1198,7 @@ class Gepetto:
                         db.add(chute)
                     await db.commit()
                     await db.refresh(chute)
-                    await k8s.create_code_config_map(chute)
+                    await k8s.create_code_config_map(chute, force=True)
 
             # Deploy the new version.
             logger.info(
