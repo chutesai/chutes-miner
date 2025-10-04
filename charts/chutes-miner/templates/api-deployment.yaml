@@ -79,7 +79,7 @@ spec:
             - name: NODE_IP
               valueFrom:
                 fieldRef:
-                  fieldPath: status.hostIP
+                  fieldPath: metadata.labels['chutes/external-ip']
             - name: MONITOR_API
               value: "http://$(NODE_IP):32001"
             {{- end }}
