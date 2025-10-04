@@ -254,8 +254,23 @@ class ClusterMonitor:
             if cluster_name not in clusters:
                 raise ClusterNotFoundException(f"Cluster {cluster_name} not found.")
 
+            status = await self.redis_client.get_cluster_status(cluster_name)
+            # If we are setting resources for an unhealthy cluster this is a reconnect
+            is_reconnect = status and not status.is_healthy
+
+            await self.redis_client.update_cluster_status(
+                ClusterStatus(
+                    cluster_name=cluster_name,
+                    state=ClusterState.STARTING,
+                    last_heartbeat=datetime.now(timezone.utc),
+                )
+            )
+
             # Clear all data
             await self.redis_client.set_cluster_resources(cluster_name, resources)
+
+            if is_reconnect:
+                self.redis_client.publish_cluster_reconnect(cluster_name)
 
             logger.info(f"Successfully set cluster resources for {cluster_name}")
 

@@ -16,7 +16,6 @@
   tags: namespaces
 
 - name: Add chutes labels to nodes
-  when: inventory_hostname in groups['workers']
   block:
     - name: Add IP label
       kubernetes.core.k8s:
@@ -29,7 +28,10 @@
             labels:
               chutes/external-ip: "{{ ansible_host }}"
         merge_type: strategic-merge
-
+        
+- name: Add worker labels to nodes
+  when: inventory_hostname in groups['workers']
+  block:
     - name: Add worker label
       kubernetes.core.k8s:
         state: present

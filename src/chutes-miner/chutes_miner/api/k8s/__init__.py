@@ -59,11 +59,11 @@ async def undeploy(deployment_id: str):
     return await K8sOperator().undeploy(deployment_id)
 
 
-async def create_code_config_map(chute: Chute):
+async def create_code_config_map(chute: Chute, force=False):
     """
     Create a ConfigMap to store the chute code.
     """
-    return await K8sOperator().create_code_config_map(chute)
+    return await K8sOperator().create_code_config_map(chute, force)
 
 
 async def deploy_chute(
