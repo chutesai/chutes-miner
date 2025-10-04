@@ -1,7 +1,7 @@
 # app/cache/redis_client.py
 from datetime import datetime, timezone
 from chutes_common.k8s import ClusterResources, WatchEvent, WatchEventType, serializer
-from chutes_common.monitoring.messages import ClusterChangeMessage, ResourceChangeMessage
+from chutes_common.monitoring.messages import ClusterChangeMessage, ClusterReconnetMessage, ResourceChangeMessage
 from chutes_common.monitoring.models import (
     ClusterState,
     ClusterStatus,
@@ -139,10 +139,45 @@ class MonitoringRedisClient:
             logger.error(f"Failed to publish resource change: {e}")
             # Don't raise - pub/sub failures shouldn't break the main functionality
 
+    def publish_cluster_reconnect(self, cluster_name: str):
+        """Publish reconnect event to Redis pub/sub"""
+        try:
+            # Create different channel types for different use cases
+            channels = [
+                "clusters:all:reconnect",  # All resource changes across all clusters
+            ]
+
+            # Create the message payload
+            message = ClusterReconnetMessage(
+                cluster=cluster_name, timestamp=datetime.now(timezone.utc)
+            )
+
+            message_json = json.dumps(message.to_dict())
+
+            # Publish to all relevant channels
+            for channel in channels:
+                self.redis.publish(channel, message_json)
+
+            logger.debug(
+                f"Published cluster change to {len(channels)} channels: {cluster_name} [{event_type.value}]"
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to publish resource change: {e}")
+            # Don't raise - pub/sub failures shouldn't break the main functionality
+
     def subscribe_to_cluster_resources(self, cluster_name: str) -> PubSub:
         """Subscribe to all resource changes for a specific cluster"""
         pubsub = self.redis.pubsub()
         channel = f"cluster:{cluster_name}:resources"
+        pubsub.subscribe(channel)
+        logger.info(f"Subscribed to channel: {channel}")
+        return pubsub
+    
+    def subscribe_to_cluster_reconnect(self) -> PubSub:
+        """Subscribe to all resource changes for a specific cluster"""
+        pubsub = self.redis.pubsub()
+        channel = "clusters:all:reconnect"
         pubsub.subscribe(channel)
         logger.info(f"Subscribed to channel: {channel}")
         return pubsub

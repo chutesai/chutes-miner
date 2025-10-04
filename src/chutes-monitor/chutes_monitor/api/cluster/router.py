@@ -111,14 +111,6 @@ class ClusterRouter:
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Server does not exist in inventory.",
                 )
-
-            await self.redis_client.update_cluster_status(
-                ClusterStatus(
-                    cluster_name=cluster_name,
-                    state=ClusterState.STARTING,
-                    last_heartbeat=datetime.now(timezone.utc),
-                )
-            )
             await self.cluster_monitor.set_cluster_resources(cluster_name, request.resources)
         except ClusterNotFoundException as e:
             logger.error(f"Failed to set resources for {cluster_name}:\n{e}")

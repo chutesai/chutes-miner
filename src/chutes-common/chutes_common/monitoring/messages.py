@@ -46,3 +46,21 @@ class ClusterChangeMessage:
             "event_type": self.event_type.value,
             "timestamp": self.timestamp.isoformat(),
         }
+    
+class ClusterReconnetMessage:
+    def __init__(self, cluster: str, timestamp: datetime):
+        self.cluster = cluster
+        self.timestamp = timestamp
+
+    @classmethod
+    def from_dict(cls, v: dict[str, Any]) -> "ResourceChangeMessage":
+        return cls(
+            cluster=v.get("cluster"),
+            timestamp=datetime.strptime(v.get("timestamp"), "%Y-%m-%dT%H:%M:%S.%f%z"),
+        )
+
+    def to_dict(self):
+        return {
+            "cluster": self.cluster,
+            "timestamp": self.timestamp.isoformat(),
+        }

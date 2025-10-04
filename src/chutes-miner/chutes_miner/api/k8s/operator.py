@@ -9,7 +9,7 @@ import uuid
 import traceback
 import abc
 import semver
-from chutes_common.monitoring.messages import ClusterChangeMessage, ResourceChangeMessage
+from chutes_common.monitoring.messages import ClusterChangeMessage, ClusterReconnetMessage, ResourceChangeMessage
 from chutes_common.monitoring.models import ResourceType
 from chutes_common.redis import MonitoringRedisClient
 from chutes_miner.api.k8s.client import KubernetesMultiClusterClientManager
@@ -29,6 +29,7 @@ from kubernetes.client import (
     V1ConfigMap,
     V1Job,
     V1JobList,
+    V1ConfigMapList
 )
 from kubernetes.client.rest import ApiException
 from kubernetes.client import CoreV1Api
@@ -1336,6 +1337,17 @@ class MultiClusterK8sOperator(K8sOperator):
 
     async def _watch_clusters(self):
         try:
+            _watch_resources_task = asyncio.create_task(self._watch_cluster_resources())
+            _watch_reconnects_task = asyncio.create_task(self._watch_cluster_connections())
+        except asyncio.CancelledError:
+            _watch_resources_task.cancel()
+            _watch_reconnects_task.cancel()
+        except Exception as e:
+            logger.errror("Unexecpted error watching clusters:\n{e}")
+            raise
+
+    async def _watch_cluster_resources(self):
+        try:
             pubsub = self._redis.subscribe_to_clusters()
 
             while True:
@@ -1390,6 +1402,54 @@ class MultiClusterK8sOperator(K8sOperator):
                         )
         except Exception as e:
             logger.error(f"Unexpected exception while handling cluster change:\n{e}")
+
+    async def _watch_cluster_connections(self):
+        try:
+            pubsub = self._redis.subscribe_to_cluster_reconnect()
+
+            while True:
+                try:
+                    message = pubsub.get_message(timeout=1)
+                    if message and message["type"] == "message":
+                        data = json.loads(message["data"])
+                        _message = ClusterChangeMessage.from_dict(data)
+                        await self._handle_cluster_reconnect(_message)
+                    else:
+                        await asyncio.sleep(1)
+
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.error(f"Unexpected error while watching clusters:\n{e}")
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"Unexpected error while watching clusters:\n{e}")
+        finally:
+            pubsub.close()
+
+    async def _handle_cluster_reconnect(self, message: ClusterReconnetMessage):
+        try:
+            async with get_session() as session:
+                
+                cluster_name = message.cluster
+
+                # Get all existing CMs
+                client = self._manager.get_core_client(cluster_name)
+                chute_cms: V1ConfigMapList = client.list_namespaced_config_map(settings.namespace, label_selector="chutes/code=true")
+
+                # Delete all Chute CMs
+                for cm in chute_cms.items():
+                    client.delete_namespaced_config_map(cm.metadata.name)
+                
+                # Propagate existing Chute CMs to the cluster
+                chutes = (await session.execute(select(Chute))).unique().scalars()
+                for chute in chutes:
+                    await self.create_code_config_map(chute)
+
+        except Exception as e:
+            logger.error(f"Unexpected exception while handling cluster change:\n{e}")
+
 
     def get_node(
         self, name: str, kubeconfig: Optional[KubeConfig] = None, timeout_seconds=15
