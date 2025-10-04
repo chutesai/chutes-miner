@@ -8,6 +8,7 @@ import time
 import uuid
 import traceback
 import abc
+from aiohttp import ConnectionTimeoutError
 import semver
 from chutes_common.monitoring.messages import ClusterChangeMessage, ClusterReconnetMessage, ResourceChangeMessage
 from chutes_common.monitoring.models import ResourceType
@@ -57,6 +58,7 @@ from chutes_miner.api.config import (
     settings,
 )
 from redis.client import PubSub
+from urllib3.exceptions import MaxRetryError
 import yaml
 
 # Cache disk stats.
@@ -1600,6 +1602,9 @@ class MultiClusterK8sOperator(K8sOperator):
                     namespace=namespace,
                     _request_timeout=self._get_request_timeout(timeout_seconds),
                 )
+            except (MaxRetryError, ConnectionTimeoutError):
+                # Cluster is unreachable, CMs will reconcile on reconnect
+                pass
             except ApiException as e:
                 if e.status != 404:
                     raise
@@ -1618,6 +1623,9 @@ class MultiClusterK8sOperator(K8sOperator):
                     body=config_map,
                     _request_timeout=self._get_request_timeout(timeout_seconds),
                 )
+            except (MaxRetryError, ConnectionTimeoutError):
+                # Cluster is unreachable, CMs will reconcile on reconnect
+                pass
             except ApiException as e:
                 if e.status != 409:
                     raise
