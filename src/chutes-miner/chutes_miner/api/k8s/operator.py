@@ -1343,21 +1343,10 @@ class MultiClusterK8sOperator(K8sOperator):
     def _initialize(self):
         # Ugly pattern to ensure we don't kick this off every time singleton is called.
         if not hasattr(self, "_cluster_monitor_task"):
-            self._cluster_monitor_task = asyncio.create_task(self._watch_clusters())
+            self._cluster_monitor_task = asyncio.create_task(self._watch_cluster_resources())
 
     def _get_request_timeout(self, read_timeout: int) -> Tuple[int, int]:
         return (5, read_timeout)
-
-    async def _watch_clusters(self):
-        try:
-            _watch_resources_task = asyncio.create_task(self._watch_cluster_resources())
-            _watch_reconnects_task = asyncio.create_task(self._watch_cluster_connections())
-        except asyncio.CancelledError:
-            _watch_resources_task.cancel()
-            _watch_reconnects_task.cancel()
-        except Exception as e:
-            logger.errror("Unexecpted error watching clusters:\n{e}")
-            raise
 
     async def _watch_cluster_resources(self):
         try:
@@ -1416,6 +1405,20 @@ class MultiClusterK8sOperator(K8sOperator):
         except Exception as e:
             logger.error(f"Unexpected exception while handling cluster change:\n{e}")
 
+    def watch_cluster_connections(self):
+        """
+        Reconcile chutes on a regular basis.
+        """
+        try:
+            _watch_reconnects_task = asyncio.create_task(self._watch_cluster_connections())
+        except asyncio.CancelledError:
+            _watch_reconnects_task.cancel()
+        except Exception as e:
+            logger.error(
+                f"Unexpected error watching cluster connections: {e}\n{traceback.format_exc()}"
+            )
+
+
     async def _watch_cluster_connections(self):
         try:
             pubsub = self._redis.subscribe_to_cluster_reconnect()
@@ -1428,16 +1431,16 @@ class MultiClusterK8sOperator(K8sOperator):
                         _message = ClusterChangeMessage.from_dict(data)
                         await self._handle_cluster_reconnect(_message)
                     else:
-                        await asyncio.sleep(1)
+                        await asyncio.sleep(15)
 
                 except asyncio.CancelledError:
                     break
                 except Exception as e:
-                    logger.error(f"Unexpected error while watching clusters:\n{e}")
+                    logger.error(f"Unexpected error getting cluster reconnects messages:\n{e}")
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            logger.error(f"Unexpected error while watching clusters:\n{e}")
+            logger.error(f"Unexpected error while watching cluster reconnects:\n{e}")
         finally:
             pubsub.close()
 
@@ -1452,13 +1455,17 @@ class MultiClusterK8sOperator(K8sOperator):
                 chute_cms: V1ConfigMapList = client.list_namespaced_config_map(settings.namespace, label_selector="chutes/code=true")
 
                 # Delete all Chute CMs
-                for cm in chute_cms.items():
-                    client.delete_namespaced_config_map(cm.metadata.name)
+                for cm in chute_cms.items:
+                    self._delete_config_map_from_cluster(
+                        cluster_name,
+                        name=cm.metadata.name
+                    )
                 
                 # Propagate existing Chute CMs to the cluster
                 chutes = (await session.execute(select(Chute))).unique().scalars()
                 for chute in chutes:
-                    await self.create_code_config_map(chute)
+                    config_map = self._build_code_config_map(chute)
+                    await self._deploy_config_map_to_cluster(cluster_name, config_map)
 
         except Exception as e:
             logger.error(f"Unexpected exception while handling cluster change:\n{e}")
@@ -1605,20 +1612,23 @@ class MultiClusterK8sOperator(K8sOperator):
         # Create CM on all clusters
         clusters = self._redis.get_all_cluster_names()
         for cluster in clusters:
-            client = self._manager.get_core_client(cluster)
-            # Need to handle 404 per cluster so we don't break out early
-            try:
-                client.delete_namespaced_config_map(
-                    name=name,
-                    namespace=namespace,
-                    _request_timeout=self._get_request_timeout(timeout_seconds),
-                )
-            except (MaxRetryError, ConnectionTimeoutError):
-                # Cluster is unreachable, CMs will reconcile on reconnect
-                pass
-            except ApiException as e:
-                if e.status != 404:
-                    raise
+            self._delete_config_map_from_cluster(cluster, name, namespace, timeout_seconds)
+
+    def _delete_config_map_from_cluster(self, cluster, name, namespace=settings.namespace, timeout_seconds: int = 60):
+        client = self._manager.get_core_client(cluster)
+        # Need to handle 404 per cluster so we don't break out early
+        try:
+            client.delete_namespaced_config_map(
+                name=name,
+                namespace=namespace,
+                _request_timeout=self._get_request_timeout(timeout_seconds),
+            )
+        except (MaxRetryError, ConnectionTimeoutError):
+            # Cluster is unreachable, CMs will reconcile on reconnect
+            pass
+        except ApiException as e:
+            if e.status != 404:
+                raise
 
     def _deploy_config_map(
         self, config_map: V1ConfigMap, namespace=settings.namespace, timeout_seconds: int = 60, force=False

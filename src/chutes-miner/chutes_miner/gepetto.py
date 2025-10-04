@@ -6,7 +6,7 @@ import re
 import aiohttp
 import asyncio
 import hashlib
-from chutes_miner.api.k8s.operator import K8sOperator
+from chutes_miner.api.k8s.operator import K8sOperator, MultiClusterK8sOperator
 from chutes_miner.api.server.util import clear_server_cache, stop_server_monitoring
 import orjson as json
 import traceback
@@ -2182,6 +2182,12 @@ class Gepetto:
         """
         Reconcile on a regular basis.
         """
+        # This is kind of gross, but need to ensure CMs reconcile
+        # when a node reconnects for multi cluster and is 
+        # backwards compatible with single cluster
+        if isinstance(K8sOperator(), MultiClusterK8sOperator):
+            MultiClusterK8sOperator().watch_cluster_connections()
+
         while True:
             await asyncio.sleep(60)
             try:
