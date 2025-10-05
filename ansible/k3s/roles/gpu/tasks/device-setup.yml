@@ -64,7 +64,7 @@
           ansible.builtin.apt:
             deb: /tmp/cuda-keyring.deb
 
-    - name: Update apt cache
+    - name: Update apt cache after keyring
       ansible.builtin.apt:
         update_cache: true
 
@@ -76,16 +76,13 @@
             name: cuda-toolkit-{{ cuda_version }}
             state: present
 
-        - name: Install NVIDIA driver packages
+        - name: Install NVIDIA driver with matching Fabric Manager
           ansible.builtin.apt:
             name:
-              - nvidia-open-{{ nvidia_version }}
+              - nvidia-driver-{{ nvidia_version }}-server-open
               - nvidia-fabricmanager-{{ nvidia_version }}
             state: present
           register: driver_install
-          notify: system reboot
-          # Only reboot if driver packages actually changed
-          changed_when: driver_install.changed
 
         - name: Install NVIDIA Container Toolkit
           ansible.builtin.apt:
@@ -93,11 +90,84 @@
             state: present
             update_cache: true
 
+        - name: Reboot system if drivers were installed
+          ansible.builtin.reboot:
+            reboot_timeout: 600
+            connect_timeout: 300
+            post_reboot_delay: 30
+          when: driver_install.changed
+
+        - name: Wait for system to be ready after reboot
+          ansible.builtin.wait_for_connection:
+            timeout: 300
+            delay: 10
+          when: driver_install.changed
+
+        - name: Verify NVIDIA driver is loaded
+          ansible.builtin.command: nvidia-smi --query-gpu=driver_version --format=csv,noheader
+          register: driver_version_check
+          changed_when: false
+          failed_when: driver_version_check.rc != 0
+
+        - name: Display detected driver version
+          ansible.builtin.debug:
+            msg: "Detected NVIDIA driver version: {{ driver_version_check.stdout_lines[0] }}"
+
+        - name: Get Fabric Manager package version
+          ansible.builtin.shell:
+            cmd: |
+              set -o pipefail
+              dpkg -l | grep 'nvidia-fabricmanager-[0-9]' | awk '{print $3}' | head -n1
+            executable: /bin/bash
+          register: fabricmanager_version_check
+          changed_when: false
+          failed_when: fabricmanager_version_check.rc != 0
+
+        - name: Display Fabric Manager package version
+          ansible.builtin.debug:
+            msg: "Detected Fabric Manager package version: {{ fabricmanager_version_check.stdout }}"
+
+        - name: Get Fabric Manager runtime version
+          ansible.builtin.shell:
+            cmd: |
+              set -o pipefail
+              nv-fabricmanager --version 2>&1 | grep -oP 'version \K[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown"
+            executable: /bin/bash
+          register: fm_runtime_version
+          changed_when: false
+          failed_when: false
+
+        - name: Display Fabric Manager runtime version
+          ansible.builtin.debug:
+            msg: "Fabric Manager runtime version: {{ fm_runtime_version.stdout }}"
+          when: fm_runtime_version.stdout != "unknown"
+
+        - name: Extract version components
+          ansible.builtin.set_fact:
+            driver_full_version: "{{ driver_version_check.stdout_lines[0] }}"
+            fm_full_version: "{{ fabricmanager_version_check.stdout }}"
+            driver_major_minor: "{{ driver_version_check.stdout_lines[0].split('.')[:2] | join('.') }}"
+            fm_major_minor: "{{ fabricmanager_version_check.stdout.split('.')[:2] | join('.') }}"
+
+        - name: Verify driver and Fabric Manager versions match
+          ansible.builtin.assert:
+            that:
+              - driver_major_minor == fm_major_minor
+            fail_msg: "Driver version ({{ driver_full_version }}) does not match Fabric Manager version ({{ fm_full_version }}). Major.Minor must match: {{ driver_major_minor }} != {{ fm_major_minor }}"
+            success_msg: "Driver ({{ driver_full_version }}) and Fabric Manager ({{ fm_full_version }}) versions are compatible"
+
         - name: Configure NVIDIA Fabric Manager
           ansible.builtin.systemd:
             name: nvidia-fabricmanager
             enabled: true
-            masked: false
+            state: started
+            daemon_reload: true
+
+        - name: Verify Fabric Manager is running
+          ansible.builtin.systemd:
+            name: nvidia-fabricmanager
+          register: fm_status
+          failed_when: fm_status.status.ActiveState != 'active'
 
     - name: Set NVIDIA device permissions
       ansible.builtin.file:
@@ -133,11 +203,13 @@
         block: |
           * soft nofile 40000
           * hard nofile 40001
+        marker: "# {mark} ANSIBLE MANAGED BLOCK - NVIDIA limits"
 
     - name: Configure PAM limits
       ansible.builtin.lineinfile:
         path: "{{ item }}"
         line: "session required pam_limits.so"
+        state: present
       with_items:
         - /etc/pam.d/common-session
         - /etc/pam.d/common-session-noninteractive
