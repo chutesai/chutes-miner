@@ -589,7 +589,7 @@ class K8sOperator(abc.ABC):
         """Create a ConfigMap to store the chute code."""
         try:
             config_map = self._build_code_config_map(chute)
-            self._deploy_config_map(config_map, force)
+            self._deploy_config_map(config_map, force=force)
         except ApiException as e:
             if e.status != 409:
                 raise
@@ -1465,7 +1465,7 @@ class MultiClusterK8sOperator(K8sOperator):
                 chutes = (await session.execute(select(Chute))).unique().scalars()
                 for chute in chutes:
                     config_map = self._build_code_config_map(chute)
-                    await self._deploy_config_map_to_cluster(cluster_name, config_map)
+                    self._deploy_config_map_to_cluster(cluster_name, config_map)
 
         except Exception as e:
             logger.error(f"Unexpected exception while handling cluster change:\n{e}")
