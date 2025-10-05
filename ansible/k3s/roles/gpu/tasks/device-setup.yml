@@ -68,6 +68,60 @@
       ansible.builtin.apt:
         update_cache: true
 
+    - name: Verify GCC
+      block:
+        - name: Check kernel compiler version
+          ansible.builtin.shell:
+            cmd: |
+              set -o pipefail
+              cat /proc/version | grep -oP 'gcc version \K[0-9]+' | head -n1
+            executable: /bin/bash
+          register: kernel_gcc_version
+          changed_when: false
+          failed_when: false
+
+        - name: Check installed GCC version
+          ansible.builtin.shell:
+            cmd: gcc --version | grep -oP 'gcc.*\K[0-9]+\.[0-9]+' | head -n1 | cut -d. -f1
+            executable: /bin/bash
+          register: system_gcc_version
+          changed_when: false
+          failed_when: false
+
+        - name: Install matching GCC version
+          ansible.builtin.apt:
+            name: 
+              - gcc-{{ kernel_gcc_version.stdout }}
+              - g++-{{ kernel_gcc_version.stdout }}
+            state: present
+          when: 
+            - kernel_gcc_version.stdout != system_gcc_version.stdout
+            - kernel_gcc_version.rc == 0
+          environment:
+            DEBIAN_FRONTEND: noninteractive
+            NEEDRESTART_SUSPEND: "y"
+
+        - name: Set correct GCC as default
+          ansible.builtin.alternatives:
+            name: gcc
+            path: /usr/bin/gcc-{{ kernel_gcc_version.stdout }}
+            priority: 120
+          when: 
+            - kernel_gcc_version.stdout != system_gcc_version.stdout
+            - kernel_gcc_version.rc == 0
+
+    - name: Check for NVSwitch hardware
+      ansible.builtin.shell:
+        cmd: lspci | grep -i nvswitch
+        executable: /bin/bash
+      register: nvswitch_check
+      changed_when: false
+      failed_when: false
+
+    - name: Display NVSwitch detection result
+      ansible.builtin.debug:
+        msg: "{{ 'NVSwitch detected - Fabric Manager will be installed' if nvswitch_check.rc == 0 else 'No NVSwitch detected - Fabric Manager will be skipped' }}"
+
     - name: GPU Setup Tasks
       when: not skip_cuda | bool
       block:
@@ -76,13 +130,17 @@
             name: cuda-toolkit-{{ cuda_version }}
             state: present
 
-        - name: Install NVIDIA driver with matching Fabric Manager
+        - name: Install NVIDIA driver
           ansible.builtin.apt:
-            name:
-              - nvidia-driver-{{ nvidia_version }}-server-open
-              - nvidia-fabricmanager-{{ nvidia_version }}
+            name: nvidia-driver-{{ nvidia_version }}-server-open
             state: present
           register: driver_install
+
+        - name: Install Fabric Manager (only if NVSwitch present)
+          ansible.builtin.apt:
+            name: nvidia-fabricmanager-{{ nvidia_version }}
+            state: present
+          when: nvswitch_check.rc == 0
 
         - name: Install NVIDIA Container Toolkit
           ansible.builtin.apt:
@@ -113,6 +171,11 @@
           ansible.builtin.debug:
             msg: "Detected NVIDIA driver version: {{ driver_version_check.stdout_lines[0] }}"
 
+    - name: Fabric Manager verification (only if NVSwitch present)
+      when:
+        - not skip_cuda | bool
+        - nvswitch_check.rc == 0
+      block:
         - name: Get Fabric Manager package version
           ansible.builtin.shell:
             cmd: |
@@ -126,21 +189,6 @@
         - name: Display Fabric Manager package version
           ansible.builtin.debug:
             msg: "Detected Fabric Manager package version: {{ fabricmanager_version_check.stdout }}"
-
-        - name: Get Fabric Manager runtime version
-          ansible.builtin.shell:
-            cmd: |
-              set -o pipefail
-              nv-fabricmanager --version 2>&1 | grep -oP 'version \K[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown"
-            executable: /bin/bash
-          register: fm_runtime_version
-          changed_when: false
-          failed_when: false
-
-        - name: Display Fabric Manager runtime version
-          ansible.builtin.debug:
-            msg: "Fabric Manager runtime version: {{ fm_runtime_version.stdout }}"
-          when: fm_runtime_version.stdout != "unknown"
 
         - name: Extract version components
           ansible.builtin.set_fact:
@@ -156,7 +204,7 @@
             fail_msg: "Driver version ({{ driver_full_version }}) does not match Fabric Manager version ({{ fm_full_version }}). Major.Minor must match: {{ driver_major_minor }} != {{ fm_major_minor }}"
             success_msg: "Driver ({{ driver_full_version }}) and Fabric Manager ({{ fm_full_version }}) versions are compatible"
 
-        - name: Configure NVIDIA Fabric Manager
+        - name: Configure and start NVIDIA Fabric Manager
           ansible.builtin.systemd:
             name: nvidia-fabricmanager
             enabled: true
@@ -168,6 +216,14 @@
             name: nvidia-fabricmanager
           register: fm_status
           failed_when: fm_status.status.ActiveState != 'active'
+
+    - name: Disable Fabric Manager if no NVSwitch
+      ansible.builtin.systemd:
+        name: nvidia-fabricmanager
+        enabled: false
+        state: stopped
+      when: nvswitch_check.rc != 0
+      failed_when: false
 
     - name: Set NVIDIA device permissions
       ansible.builtin.file:
