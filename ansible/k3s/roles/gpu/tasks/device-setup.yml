@@ -14,9 +14,6 @@
     - name: Update apt cache
       ansible.builtin.apt:
         update_cache: true
-      environment:
-        DEBIAN_FRONTEND: noninteractive
-        NEEDRESTART_SUSPEND: "y"
 
     - name: Get list of installed CUDA/NVIDIA packages
       ansible.builtin.shell:
@@ -68,47 +65,60 @@
       ansible.builtin.apt:
         update_cache: true
 
-    - name: Verify GCC
+    - name: Verify GCC for DKMS builds
       block:
-        - name: Check kernel compiler version
+        - name: Get kernel compiler info from build headers
           ansible.builtin.shell:
             cmd: |
               set -o pipefail
-              cat /proc/version | grep -oP 'gcc version \K[0-9]+' | head -n1
+              grep 'LINUX_COMPILER' /lib/modules/$(uname -r)/build/include/generated/compile.h | \
+              sed -n 's/.*gcc[^0-9]*\([0-9]\+\)\..*/\1/p'
             executable: /bin/bash
           register: kernel_gcc_version
           changed_when: false
           failed_when: false
 
-        - name: Check installed GCC version
+        - name: Fallback to /proc/version if compile.h not found
           ansible.builtin.shell:
-            cmd: gcc --version | grep -oP 'gcc.*\K[0-9]+\.[0-9]+' | head -n1 | cut -d. -f1
+            cmd: |
+              set -o pipefail
+              cat /proc/version | grep -oP '(?:x86_64-linux-gnu-)?gcc-\K[0-9]+' | head -n1
             executable: /bin/bash
-          register: system_gcc_version
+          register: kernel_gcc_version_fallback
           changed_when: false
           failed_when: false
+          when: kernel_gcc_version.stdout == "" or kernel_gcc_version.rc != 0
+
+        - name: Set final kernel GCC version
+          ansible.builtin.set_fact:
+            required_gcc_version: "{{ kernel_gcc_version.stdout if kernel_gcc_version.stdout != '' else kernel_gcc_version_fallback.stdout }}"
+
+        - name: Display kernel GCC requirement
+          ansible.builtin.debug:
+            msg: "Kernel requires GCC {{ required_gcc_version }}"
+          when: required_gcc_version != ""
 
         - name: Install matching GCC version
           ansible.builtin.apt:
             name: 
-              - gcc-{{ kernel_gcc_version.stdout }}
-              - g++-{{ kernel_gcc_version.stdout }}
+              - gcc-{{ required_gcc_version }}
+              - g++-{{ required_gcc_version }}
             state: present
-          when: 
-            - kernel_gcc_version.stdout != system_gcc_version.stdout
-            - kernel_gcc_version.rc == 0
+          when: required_gcc_version != ""
           environment:
             DEBIAN_FRONTEND: noninteractive
             NEEDRESTART_SUSPEND: "y"
 
-        - name: Set correct GCC as default
-          ansible.builtin.alternatives:
-            name: gcc
-            path: /usr/bin/gcc-{{ kernel_gcc_version.stdout }}
-            priority: 120
-          when: 
-            - kernel_gcc_version.stdout != system_gcc_version.stdout
-            - kernel_gcc_version.rc == 0
+        - name: Set GCC as default
+          ansible.builtin.shell:
+            cmd: |
+              update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-{{ required_gcc_version }} 120
+              update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-{{ required_gcc_version }} 120
+              update-alternatives --set gcc /usr/bin/gcc-{{ required_gcc_version }}
+              update-alternatives --set g++ /usr/bin/g++-{{ required_gcc_version }}
+            executable: /bin/bash
+          when: required_gcc_version != ""
+          changed_when: true
 
     - name: Check for NVSwitch hardware
       ansible.builtin.shell:
