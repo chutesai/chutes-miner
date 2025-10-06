@@ -135,6 +135,7 @@
               - nvidia-fabricmanager-{{ nvidia_version }}
             state: present
           register: driver_install
+          changed_when: driver_install.changed
 
         - name: Install NVIDIA Container Toolkit
           ansible.builtin.apt:
@@ -165,7 +166,7 @@
           ansible.builtin.debug:
             msg: "Detected NVIDIA driver version: {{ driver_version_check.stdout_lines[0] }}"
 
-    - name: Fabric Manager verification (only if NVSwitch present)
+    - name: Fabric Manager verification
       when:
         - not skip_cuda | bool
       block:
