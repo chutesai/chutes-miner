@@ -120,18 +120,6 @@
           when: required_gcc_version != ""
           changed_when: true
 
-    - name: Check for NVSwitch hardware
-      ansible.builtin.shell:
-        cmd: lspci | grep -i nvswitch
-        executable: /bin/bash
-      register: nvswitch_check
-      changed_when: false
-      failed_when: false
-
-    - name: Display NVSwitch detection result
-      ansible.builtin.debug:
-        msg: "{{ 'NVSwitch detected - Fabric Manager will be installed' if nvswitch_check.rc == 0 else 'No NVSwitch detected - Fabric Manager will be skipped' }}"
-
     - name: GPU Setup Tasks
       when: not skip_cuda | bool
       block:
@@ -140,17 +128,13 @@
             name: cuda-toolkit-{{ cuda_version }}
             state: present
 
-        - name: Install NVIDIA driver
+        - name: Install NVIDIA driver packages
           ansible.builtin.apt:
-            name: nvidia-driver-{{ nvidia_version }}-server-open
+            name: 
+              - nvidia-driver-{{ nvidia_version }}-server-open
+              - nvidia-fabricmanager-{{ nvidia_version }}
             state: present
           register: driver_install
-
-        - name: Install Fabric Manager (only if NVSwitch present)
-          ansible.builtin.apt:
-            name: nvidia-fabricmanager-{{ nvidia_version }}
-            state: present
-          when: nvswitch_check.rc == 0
 
         - name: Install NVIDIA Container Toolkit
           ansible.builtin.apt:
@@ -184,7 +168,6 @@
     - name: Fabric Manager verification (only if NVSwitch present)
       when:
         - not skip_cuda | bool
-        - nvswitch_check.rc == 0
       block:
         - name: Get Fabric Manager package version
           ansible.builtin.shell:
@@ -220,20 +203,6 @@
             enabled: true
             state: started
             daemon_reload: true
-
-        - name: Verify Fabric Manager is running
-          ansible.builtin.systemd:
-            name: nvidia-fabricmanager
-          register: fm_status
-          failed_when: fm_status.status.ActiveState != 'active'
-
-    - name: Disable Fabric Manager if no NVSwitch
-      ansible.builtin.systemd:
-        name: nvidia-fabricmanager
-        enabled: false
-        state: stopped
-      when: nvswitch_check.rc != 0
-      failed_when: false
 
     - name: Set NVIDIA device permissions
       ansible.builtin.file:
