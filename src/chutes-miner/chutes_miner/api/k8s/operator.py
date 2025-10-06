@@ -1428,7 +1428,7 @@ class MultiClusterK8sOperator(K8sOperator):
                     message = pubsub.get_message(timeout=1)
                     if message and message["type"] == "message":
                         data = json.loads(message["data"])
-                        _message = ClusterChangeMessage.from_dict(data)
+                        _message = ClusterReconnetMessage.from_dict(data)
                         await self._handle_cluster_reconnect(_message)
                     else:
                         await asyncio.sleep(15)
@@ -1478,8 +1478,10 @@ class MultiClusterK8sOperator(K8sOperator):
         Retrieve a node from the cluster by name.
         """
         try:
-            # If the server isn't healthy don't return the node from cache
-            self._verify_node_health(name)
+            # If kubeconfig provided this is the initial node retrieval, can't verify health
+            if not kubeconfig:
+                # If the server isn't healthy don't return the node from cache
+                self._verify_node_health(name)
 
             _client: CoreV1Api = self._manager.get_core_client(
                 context_name=name, kubeconfig=kubeconfig
@@ -1509,11 +1511,9 @@ class MultiClusterK8sOperator(K8sOperator):
         return self.get_node(name)
     
     def _verify_node_health(self, name: str):
-            status_task = asyncio.create_task(self._redis.get_cluster_status(name))
-            asyncio.gather(status_task)
-            status = status_task.result()
-            if status and not status.is_healthy:
-                raise ApiException(status=503, reason=f"Node {name} is not healthy, check the agent.")
+        status = self._redis.get_cluster_status(name)
+        if status and not status.is_healthy:
+            raise ApiException(status=503, reason=f"Node {name} is not healthy, check the agent.")
 
     async def get_deployment(self, deployment_id: str) -> Dict:
         """Get a single Chute deployment by ID."""
