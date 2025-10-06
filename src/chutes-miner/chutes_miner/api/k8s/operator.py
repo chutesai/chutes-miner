@@ -1451,6 +1451,8 @@ class MultiClusterK8sOperator(K8sOperator):
 
     async def _handle_cluster_reconnect(self, message: ClusterReconnetMessage):
         try:
+            logger.info(f"Cluster {message.cluster} reconnected.  Refreshing Chutes config maps.")
+
             async with get_session() as session:
                 cluster_name = message.cluster
 
