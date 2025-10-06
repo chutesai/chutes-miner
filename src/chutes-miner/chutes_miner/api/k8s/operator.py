@@ -10,7 +10,11 @@ import traceback
 import abc
 from aiohttp import ConnectionTimeoutError
 import semver
-from chutes_common.monitoring.messages import ClusterChangeMessage, ClusterReconnetMessage, ResourceChangeMessage
+from chutes_common.monitoring.messages import (
+    ClusterChangeMessage,
+    ClusterReconnetMessage,
+    ResourceChangeMessage,
+)
 from chutes_common.monitoring.models import ResourceType
 from chutes_common.redis import MonitoringRedisClient
 from chutes_miner.api.k8s.client import KubernetesMultiClusterClientManager
@@ -30,7 +34,7 @@ from kubernetes.client import (
     V1ConfigMap,
     V1Job,
     V1JobList,
-    V1ConfigMapList
+    V1ConfigMapList,
 )
 from kubernetes.client.rest import ApiException
 from kubernetes.client import CoreV1Api
@@ -1321,7 +1325,9 @@ class SingleClusterK8sOperator(K8sOperator):
         except ApiException as e:
             if e.status == 409 and force:
                 k8s_core_client().delete_namespaced_config_map(
-                    name=config_map.metadata.name, namespace=namespace, _request_timeout=timeout_seconds
+                    name=config_map.metadata.name,
+                    namespace=namespace,
+                    _request_timeout=timeout_seconds,
                 )
                 k8s_core_client().create_namespaced_config_map(
                     namespace=namespace, body=config_map, _request_timeout=timeout_seconds
@@ -1418,7 +1424,6 @@ class MultiClusterK8sOperator(K8sOperator):
                 f"Unexpected error watching cluster connections: {e}\n{traceback.format_exc()}"
             )
 
-
     async def _watch_cluster_connections(self):
         try:
             pubsub = self._redis.subscribe_to_cluster_reconnect()
@@ -1447,20 +1452,18 @@ class MultiClusterK8sOperator(K8sOperator):
     async def _handle_cluster_reconnect(self, message: ClusterReconnetMessage):
         try:
             async with get_session() as session:
-                
                 cluster_name = message.cluster
 
                 # Get all existing CMs
                 client = self._manager.get_core_client(cluster_name)
-                chute_cms: V1ConfigMapList = client.list_namespaced_config_map(settings.namespace, label_selector="chutes/code=true")
+                chute_cms: V1ConfigMapList = client.list_namespaced_config_map(
+                    settings.namespace, label_selector="chutes/code=true"
+                )
 
                 # Delete all Chute CMs
                 for cm in chute_cms.items:
-                    self._delete_config_map_from_cluster(
-                        cluster_name,
-                        name=cm.metadata.name
-                    )
-                
+                    self._delete_config_map_from_cluster(cluster_name, name=cm.metadata.name)
+
                 # Propagate existing Chute CMs to the cluster
                 chutes = (await session.execute(select(Chute))).unique().scalars()
                 for chute in chutes:
@@ -1469,7 +1472,6 @@ class MultiClusterK8sOperator(K8sOperator):
 
         except Exception as e:
             logger.error(f"Unexpected exception while handling cluster change:\n{e}")
-
 
     def get_node(
         self, name: str, kubeconfig: Optional[KubeConfig] = None, timeout_seconds=15
@@ -1509,7 +1511,7 @@ class MultiClusterK8sOperator(K8sOperator):
         )
 
         return self.get_node(name)
-    
+
     def _verify_node_health(self, name: str):
         status = self._redis.get_cluster_status(name)
         if status and not status.is_healthy:
@@ -1586,7 +1588,7 @@ class MultiClusterK8sOperator(K8sOperator):
     ):
         # If the server isn't healthy don't deploy
         self._verify_node_health(server_name)
-        
+
         client = self._manager.get_core_client(server_name)
         return client.create_namespaced_service(
             namespace=namespace,
@@ -1626,7 +1628,9 @@ class MultiClusterK8sOperator(K8sOperator):
         for cluster in clusters:
             self._delete_config_map_from_cluster(cluster, name, namespace, timeout_seconds)
 
-    def _delete_config_map_from_cluster(self, cluster, name, namespace=settings.namespace, timeout_seconds: int = 60):
+    def _delete_config_map_from_cluster(
+        self, cluster, name, namespace=settings.namespace, timeout_seconds: int = 60
+    ):
         client = self._manager.get_core_client(cluster)
         # Need to handle 404 per cluster so we don't break out early
         try:
@@ -1643,15 +1647,27 @@ class MultiClusterK8sOperator(K8sOperator):
                 raise
 
     def _deploy_config_map(
-        self, config_map: V1ConfigMap, namespace=settings.namespace, timeout_seconds: int = 60, force=False
+        self,
+        config_map: V1ConfigMap,
+        namespace=settings.namespace,
+        timeout_seconds: int = 60,
+        force=False,
     ):
         # Create CM on all clusters
         clusters = self._redis.get_all_cluster_names()
         for cluster in clusters:
-            self._deploy_config_map_to_cluster(cluster, config_map, namespace, timeout_seconds, force)
+            self._deploy_config_map_to_cluster(
+                cluster, config_map, namespace, timeout_seconds, force
+            )
 
-    
-    def _deploy_config_map_to_cluster(self, cluster: str, config_map: V1ConfigMap, namespace=settings.namespace, timeout_seconds: int = 60, force=False):
+    def _deploy_config_map_to_cluster(
+        self,
+        cluster: str,
+        config_map: V1ConfigMap,
+        namespace=settings.namespace,
+        timeout_seconds: int = 60,
+        force=False,
+    ):
         try:
             client = self._manager.get_core_client(cluster)
             client.create_namespaced_config_map(
@@ -1661,18 +1677,24 @@ class MultiClusterK8sOperator(K8sOperator):
             )
         except (MaxRetryError, ConnectionTimeoutError):
             # Cluster is unreachable, CMs will reconcile on reconnect
-            logger.warning(f"Failed to deploy {config_map.metadata.name} on cluster {cluster}, unable to connect.  CMs will reconcile on reconnect.")
+            logger.warning(
+                f"Failed to deploy {config_map.metadata.name} on cluster {cluster}, unable to connect.  CMs will reconcile on reconnect."
+            )
         except ApiException as e:
             # Need to handle 409 per cluster so we don't break out early
             if e.status == 409 and force:
                 client.delete_namespaced_config_map(
-                    name=config_map.metadata.name, namespace=namespace, _request_timeout=self._get_request_timeout(timeout_seconds)
+                    name=config_map.metadata.name,
+                    namespace=namespace,
+                    _request_timeout=self._get_request_timeout(timeout_seconds),
                 )
                 client.create_namespaced_config_map(
-                    namespace=namespace, body=config_map, _request_timeout=self._get_request_timeout(timeout_seconds)
+                    namespace=namespace,
+                    body=config_map,
+                    _request_timeout=self._get_request_timeout(timeout_seconds),
                 )
             else:
-                # TODO: This shouldn't really happen but need to 
+                # TODO: This shouldn't really happen but need to
                 # handle this better as this would still short circuit other nodes
                 raise
 

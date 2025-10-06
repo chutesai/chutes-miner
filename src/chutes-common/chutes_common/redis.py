@@ -1,7 +1,11 @@
 # app/cache/redis_client.py
 from datetime import datetime, timezone
 from chutes_common.k8s import ClusterResources, WatchEvent, WatchEventType, serializer
-from chutes_common.monitoring.messages import ClusterChangeMessage, ClusterReconnetMessage, ResourceChangeMessage
+from chutes_common.monitoring.messages import (
+    ClusterChangeMessage,
+    ClusterReconnetMessage,
+    ResourceChangeMessage,
+)
 from chutes_common.monitoring.models import (
     ClusterState,
     ClusterStatus,
@@ -159,7 +163,7 @@ class MonitoringRedisClient:
                 self.redis.publish(channel, message_json)
 
             logger.debug(
-                f"Published cluster change to {len(channels)} channels: {cluster_name} [{event_type.value}]"
+                f"Published cluster change to {len(channels)} channels: {cluster_name}"
             )
 
         except Exception as e:
@@ -173,7 +177,7 @@ class MonitoringRedisClient:
         pubsub.subscribe(channel)
         logger.info(f"Subscribed to channel: {channel}")
         return pubsub
-    
+
     def subscribe_to_cluster_reconnect(self) -> PubSub:
         """Subscribe to all resource changes for a specific cluster"""
         pubsub = self.redis.pubsub()

@@ -17,13 +17,14 @@ SessionLocal = sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=F
 
 # Sync engine for synchronous operations
 sync_engine = create_engine(
-    settings.sqlalchemy.replace('+asyncpg', ''),
+    settings.sqlalchemy.replace("+asyncpg", ""),
     echo=settings.debug,
     pool_size=5,
     max_overflow=5,
-    pool_timeout=30
+    pool_timeout=30,
 )
 SyncSessionLocal = sessionmaker(bind=sync_engine, class_=Session, expire_on_commit=False)
+
 
 @asynccontextmanager
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
@@ -49,6 +50,7 @@ async def get_db_session():
         finally:
             await session.close()
 
+
 @contextmanager
 def get_sync_session() -> Generator[Session, None, None]:
     with SyncSessionLocal() as session:
@@ -60,6 +62,7 @@ def get_sync_session() -> Generator[Session, None, None]:
             raise
         finally:
             session.close()
+
 
 def generate_uuid():
     """

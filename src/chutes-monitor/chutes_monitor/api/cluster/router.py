@@ -1,5 +1,4 @@
 # app/api/routes/clusters.py
-from datetime import datetime, timezone
 from chutes_common.auth import authorize
 from chutes_common.constants import MONITORING_PURPOSE
 from chutes_common.exceptions import ClusterConflictException, ClusterNotFoundException
@@ -9,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from loguru import logger
 
 from chutes_monitor.cluster_monitor import ClusterMonitor
-from chutes_common.monitoring.models import ClusterState, ClusterStatus, HeartbeatData
+from chutes_common.monitoring.models import ClusterStatus, HeartbeatData
 from chutes_common.monitoring.requests import SetClusterResourcesRequest, ResourceUpdateRequest
 from chutes_common.redis import MonitoringRedisClient
 from sqlalchemy import select

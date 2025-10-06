@@ -46,7 +46,8 @@ class ClusterChangeMessage:
             "event_type": self.event_type.value,
             "timestamp": self.timestamp.isoformat(),
         }
-    
+
+
 class ClusterReconnetMessage:
     def __init__(self, cluster: str, timestamp: datetime):
         self.cluster = cluster

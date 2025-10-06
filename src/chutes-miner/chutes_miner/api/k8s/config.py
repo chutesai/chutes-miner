@@ -1,4 +1,3 @@
-import asyncio
 from dataclasses import dataclass, field
 from chutes_miner.api.database import get_sync_session
 from chutes_common.schemas.server import Server
