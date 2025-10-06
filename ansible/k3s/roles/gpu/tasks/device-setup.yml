@@ -198,13 +198,6 @@
             fail_msg: "Driver version ({{ driver_full_version }}) does not match Fabric Manager version ({{ fm_full_version }}). Major.Minor must match: {{ driver_major_minor }} != {{ fm_major_minor }}"
             success_msg: "Driver ({{ driver_full_version }}) and Fabric Manager ({{ fm_full_version }}) versions are compatible"
 
-        - name: Configure and start NVIDIA Fabric Manager
-          ansible.builtin.systemd:
-            name: nvidia-fabricmanager
-            enabled: true
-            state: started
-            daemon_reload: true
-
     - name: Set NVIDIA device permissions
       ansible.builtin.file:
         path: "{{ item }}"
