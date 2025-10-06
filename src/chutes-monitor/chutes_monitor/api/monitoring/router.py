@@ -49,7 +49,7 @@ class MonitoringRouter:
             cluster_overviews = []
 
             for cluster_name in cluster_names:
-                cluster_status = await self.redis_client.get_cluster_status(cluster_name)
+                cluster_status = self.redis_client.get_cluster_status(cluster_name)
                 if not cluster_status:
                     continue
 
@@ -115,7 +115,7 @@ class MonitoringRouter:
 
     async def _get_cluster_details(self, cluster_name):
         # Get cluster status
-        cluster_status = await self.redis_client.get_cluster_status(cluster_name)
+        cluster_status = self.redis_client.get_cluster_status(cluster_name)
         if not cluster_status:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

@@ -14,9 +14,6 @@
     - name: Update apt cache
       ansible.builtin.apt:
         update_cache: true
-      environment:
-        DEBIAN_FRONTEND: noninteractive
-        NEEDRESTART_SUSPEND: "y"
 
     - name: Get list of installed CUDA/NVIDIA packages
       ansible.builtin.shell:
@@ -64,9 +61,64 @@
           ansible.builtin.apt:
             deb: /tmp/cuda-keyring.deb
 
-    - name: Update apt cache
+    - name: Update apt cache after keyring
       ansible.builtin.apt:
         update_cache: true
+
+    - name: Verify GCC for DKMS builds
+      block:
+        - name: Get kernel compiler info from build headers
+          ansible.builtin.shell:
+            cmd: |
+              set -o pipefail
+              grep 'LINUX_COMPILER' /lib/modules/$(uname -r)/build/include/generated/compile.h | \
+              sed -n 's/.*gcc[^0-9]*\([0-9]\+\)\..*/\1/p'
+            executable: /bin/bash
+          register: kernel_gcc_version
+          changed_when: false
+          failed_when: false
+
+        - name: Fallback to /proc/version if compile.h not found
+          ansible.builtin.shell:
+            cmd: |
+              set -o pipefail
+              cat /proc/version | grep -oP '(?:x86_64-linux-gnu-)?gcc-\K[0-9]+' | head -n1
+            executable: /bin/bash
+          register: kernel_gcc_version_fallback
+          changed_when: false
+          failed_when: false
+          when: kernel_gcc_version.stdout == "" or kernel_gcc_version.rc != 0
+
+        - name: Set final kernel GCC version
+          ansible.builtin.set_fact:
+            required_gcc_version: "{{ kernel_gcc_version.stdout if kernel_gcc_version.stdout != '' else kernel_gcc_version_fallback.stdout }}"
+
+        - name: Display kernel GCC requirement
+          ansible.builtin.debug:
+            msg: "Kernel requires GCC {{ required_gcc_version }}"
+          when: required_gcc_version != ""
+
+        - name: Install matching GCC version
+          ansible.builtin.apt:
+            name: 
+              - gcc-{{ required_gcc_version }}
+              - g++-{{ required_gcc_version }}
+            state: present
+          when: required_gcc_version != ""
+          environment:
+            DEBIAN_FRONTEND: noninteractive
+            NEEDRESTART_SUSPEND: "y"
+
+        - name: Set GCC as default
+          ansible.builtin.shell:
+            cmd: |
+              update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-{{ required_gcc_version }} 120
+              update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-{{ required_gcc_version }} 120
+              update-alternatives --set gcc /usr/bin/gcc-{{ required_gcc_version }}
+              update-alternatives --set g++ /usr/bin/g++-{{ required_gcc_version }}
+            executable: /bin/bash
+          when: required_gcc_version != ""
+          changed_when: true
 
     - name: GPU Setup Tasks
       when: not skip_cuda | bool
@@ -78,13 +130,11 @@
 
         - name: Install NVIDIA driver packages
           ansible.builtin.apt:
-            name:
-              - nvidia-open-{{ nvidia_version }}
+            name: 
+              - nvidia-driver-{{ nvidia_version }}-server-open
               - nvidia-fabricmanager-{{ nvidia_version }}
             state: present
           register: driver_install
-          notify: system reboot
-          # Only reboot if driver packages actually changed
           changed_when: driver_install.changed
 
         - name: Install NVIDIA Container Toolkit
@@ -93,11 +143,60 @@
             state: present
             update_cache: true
 
-        - name: Configure NVIDIA Fabric Manager
-          ansible.builtin.systemd:
-            name: nvidia-fabricmanager
-            enabled: true
-            masked: false
+        - name: Reboot system if drivers were installed
+          ansible.builtin.reboot:
+            reboot_timeout: 600
+            connect_timeout: 300
+            post_reboot_delay: 30
+          when: driver_install.changed
+
+        - name: Wait for system to be ready after reboot
+          ansible.builtin.wait_for_connection:
+            timeout: 300
+            delay: 10
+          when: driver_install.changed
+
+        - name: Verify NVIDIA driver is loaded
+          ansible.builtin.command: nvidia-smi --query-gpu=driver_version --format=csv,noheader
+          register: driver_version_check
+          changed_when: false
+          failed_when: driver_version_check.rc != 0
+
+        - name: Display detected driver version
+          ansible.builtin.debug:
+            msg: "Detected NVIDIA driver version: {{ driver_version_check.stdout_lines[0] }}"
+
+    - name: Fabric Manager verification
+      when:
+        - not skip_cuda | bool
+      block:
+        - name: Get Fabric Manager package version
+          ansible.builtin.shell:
+            cmd: |
+              set -o pipefail
+              dpkg -l | grep 'nvidia-fabricmanager-[0-9]' | awk '{print $3}' | head -n1
+            executable: /bin/bash
+          register: fabricmanager_version_check
+          changed_when: false
+          failed_when: fabricmanager_version_check.rc != 0
+
+        - name: Display Fabric Manager package version
+          ansible.builtin.debug:
+            msg: "Detected Fabric Manager package version: {{ fabricmanager_version_check.stdout }}"
+
+        - name: Extract version components
+          ansible.builtin.set_fact:
+            driver_full_version: "{{ driver_version_check.stdout_lines[0] }}"
+            fm_full_version: "{{ fabricmanager_version_check.stdout }}"
+            driver_major_minor: "{{ driver_version_check.stdout_lines[0].split('.')[:2] | join('.') }}"
+            fm_major_minor: "{{ fabricmanager_version_check.stdout.split('.')[:2] | join('.') }}"
+
+        - name: Verify driver and Fabric Manager versions match
+          ansible.builtin.assert:
+            that:
+              - driver_major_minor == fm_major_minor
+            fail_msg: "Driver version ({{ driver_full_version }}) does not match Fabric Manager version ({{ fm_full_version }}). Major.Minor must match: {{ driver_major_minor }} != {{ fm_major_minor }}"
+            success_msg: "Driver ({{ driver_full_version }}) and Fabric Manager ({{ fm_full_version }}) versions are compatible"
 
     - name: Set NVIDIA device permissions
       ansible.builtin.file:
@@ -127,17 +226,52 @@
         executable: /bin/bash
       changed_when: false
 
+    - name: InfiniBand Setup Tasks
+      when: infiniband | default(false) | bool
+      block:
+        - name: Install InfiniBand diagnostics and NVLSM
+          apt:
+            name:
+              - infiniband-diags
+              - nvlsm
+            state: present
+
+        - name: Load ib_umad kernel module
+          modprobe:
+            name: ib_umad
+            state: present
+
+        - name: Make ib_umad module persistent
+          lineinfile:
+            path: /etc/modules
+            line: "ib_umad"
+            create: yes
+
+        - name: Create NVLSM directory
+          file:
+            path: /usr/share/nvidia/nvlsm
+            state: directory
+            mode: '0755'
+
+        - name: Create NVLSM configuration file
+          file:
+            path: /usr/share/nvidia/nvlsm/nvlsm.conf
+            state: touch
+            mode: '0644'
+
     - name: Configure file limits
       ansible.builtin.blockinfile:
         path: /etc/security/limits.conf
         block: |
           * soft nofile 40000
           * hard nofile 40001
+        marker: "# {mark} ANSIBLE MANAGED BLOCK - NVIDIA limits"
 
     - name: Configure PAM limits
       ansible.builtin.lineinfile:
         path: "{{ item }}"
         line: "session required pam_limits.so"
+        state: present
       with_items:
         - /etc/pam.d/common-session
         - /etc/pam.d/common-session-noninteractive

@@ -39,6 +39,8 @@ cuda_version: "13-0"
 nvidia_version: "580"
 # Flag to skip the cuda install entirely, if the provider already has cuda 12.x+ installed (note some chutes will not work unless 12.6+)
 skip_cuda: false
+# Infiniband bits, may be required for b200 (nvidia-fabricmanager won't start/complete without this if not already pre-installed).
+infiniband: false
 # Flag to enable/disable IPv6. Some hosts may require IPv6 to be on.
 ipv6_enabled: true
 

@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "chutes-common"
-version = "0.1.0"
+version = "0.2.0"
 description = "Common library for Chutes Miner"
 authors = ["Kyle Widmann <kyle.widmann@gmail.com>"]
 readme = "README.md"

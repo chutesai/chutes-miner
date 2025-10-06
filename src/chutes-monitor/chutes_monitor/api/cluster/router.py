@@ -1,5 +1,4 @@
 # app/api/routes/clusters.py
-from datetime import datetime, timezone
 from chutes_common.auth import authorize
 from chutes_common.constants import MONITORING_PURPOSE
 from chutes_common.exceptions import ClusterConflictException, ClusterNotFoundException
@@ -9,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from loguru import logger
 
 from chutes_monitor.cluster_monitor import ClusterMonitor
-from chutes_common.monitoring.models import ClusterState, ClusterStatus, HeartbeatData
+from chutes_common.monitoring.models import ClusterStatus, HeartbeatData
 from chutes_common.monitoring.requests import SetClusterResourcesRequest, ResourceUpdateRequest
 from chutes_common.redis import MonitoringRedisClient
 from sqlalchemy import select
@@ -111,14 +110,6 @@ class ClusterRouter:
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Server does not exist in inventory.",
                 )
-
-            await self.redis_client.update_cluster_status(
-                ClusterStatus(
-                    cluster_name=cluster_name,
-                    state=ClusterState.STARTING,
-                    last_heartbeat=datetime.now(timezone.utc),
-                )
-            )
             await self.cluster_monitor.set_cluster_resources(cluster_name, request.resources)
         except ClusterNotFoundException as e:
             logger.error(f"Failed to set resources for {cluster_name}:\n{e}")
@@ -152,7 +143,7 @@ class ClusterRouter:
         """Receive heartbeat from a member cluster"""
         try:
             logger.debug(f"Received heartbeat from cluster {cluster_name}")
-            current_status = await self.redis_client.get_cluster_status(cluster_name)
+            current_status = self.redis_client.get_cluster_status(cluster_name)
 
             if not current_status:
                 logger.debug(f"Cluster {cluster_name} not in cache, rejecting heartbeat.")

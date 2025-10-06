@@ -1,7 +1,6 @@
 .PHONY: tag
 tag: ##@images Tag docker images from the build step for Parachutes repo
 tag:
-tag:
 	@images=$$(find docker -maxdepth 1 -type d ! -path docker | sort); \
 	image_names=$$(echo $$images | xargs -n1 basename | tr '\n' ' '); \
 	filtered_images=""; \
@@ -39,20 +38,25 @@ tag:
 						image_name=$$(echo "$$image_conf" | cut -d'/' -f2); \
 						image_tag=""; \
 					fi; \
+					if [ "${BRANCH_NAME}" != "main" ]; then \
+						image_tag=$$image_tag"dev-"; \
+					fi; \
 					for stage_target in $$available_targets; do \
 						if [[ "$$stage_target" == production* ]]; then \
 							if [[ "$$stage_target" == *-* ]]; then \
 								suffix=$$(echo $$stage_target | sed 's/production-//'); \
 								latest_tag="$$image_tag$$suffix-latest"; \
 								target_tag="$$image_tag$$suffix-$$pkg_version"; \
+								src_version=$$pkg_version-$$suffix; \
 							else \
 								latest_tag=$$image_tag"latest"; \
 								target_tag="$$image_tag$$pkg_version"; \
+								src_version=$$pkg_version; \
 							fi; \
-							echo "docker tag $$pkg_name:$$pkg_version $$registry/$$image_name:$$target_tag"; \
-							docker tag $$pkg_name:$$pkg_version $$registry/$$image_name:$$target_tag; \
-							echo "docker tag $$pkg_name:$$pkg_version $$registry/$$image_name:$$latest_tag"; \
-							docker tag $$pkg_name:$$pkg_version $$registry/$$image_name:$$latest_tag; \
+							echo "docker tag $$pkg_name:$$src_version $$registry/$$image_name:$$target_tag"; \
+							docker tag $$pkg_name:$$src_version $$registry/$$image_name:$$target_tag; \
+							echo "docker tag $$pkg_name:$$src_version $$registry/$$image_name:$$latest_tag"; \
+							docker tag $$pkg_name:$$src_version $$registry/$$image_name:$$latest_tag; \
 						fi; \
 					done; \
 				else \
@@ -107,6 +111,9 @@ push:
 					else \
 						image_name=$$(echo "$$image_conf" | cut -d'/' -f2); \
 						image_tag=""; \
+					fi; \
+					if [ "${BRANCH_NAME}" != "main" ]; then \
+						image_tag=$$image_tag"dev-"; \
 					fi; \
 					for stage_target in $$available_targets; do \
 						if [[ "$$stage_target" == production* ]]; then \

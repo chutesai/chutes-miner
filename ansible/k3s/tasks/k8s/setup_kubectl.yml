@@ -240,6 +240,14 @@
             flat: true
           run_once: true
 
+        - name: Set permissions on kubeconfig
+          ansible.builtin.file:
+            path: "{{ controller_kubeconfig | default('~/.kube/config') }}"
+            mode: '0600'
+          delegate_to: localhost
+          become: false
+          run_once: true
+
         - name: Update server addresses for control node
           ansible.builtin.replace:
             path: "{{ controller_kubeconfig | default('~/.kube/config') }}"

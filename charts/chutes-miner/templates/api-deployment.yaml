@@ -36,11 +36,42 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{ if .Values.multiCluster }}
+      initContainers:
+        - name: get-node-ip
+          image: bitnamilegacy/kubectl:latest
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          command:
+            - sh
+            - -c
+            - |
+              NODE_IP=$(kubectl get node ${NODE_NAME} -o jsonpath='{.metadata.labels.chutes/external-ip}')
+              cat > /shared/env.sh << EOF
+              export NODE_IP="${NODE_IP}"
+              export MONITOR_API="http://${NODE_IP}:32001"
+              EOF
+          volumeMounts:
+            - name: shared-data
+              mountPath: /shared
+      {{- end }}
       containers:
         - name: api
           image: "{{ .Values.minerApi.image }}"
           imagePullPolicy: {{ .Values.minerApi.imagePullPolicy }}
+          {{ if .Values.multiCluster }}
+          command:
+            - sh
+            - -c
+            - |
+              . /shared/env.sh
+              exec python -m uvicorn --host 0.0.0.0 --port {{ .Values.minerApi.service.targetPort }} --workers 4 chutes_miner.api.main:app
+          {{- else }}
           command: ["python", "-m", "uvicorn", "--host", "0.0.0.0", "--port", "{{ .Values.minerApi.service.targetPort }}", "--workers", "4", "chutes_miner.api.main:app"]
+          {{- end }}
           env:
             - name: MINER_SS58
               valueFrom:
@@ -76,16 +107,20 @@ spec:
             {{ else }}
             - name: MONITORING_NAMESPACE
               value: "monitoring"
-            - name: NODE_IP
-              valueFrom:
-                fieldRef:
-                  fieldPath: status.hostIP
-            - name: MONITOR_API
-              value: "http://$(NODE_IP):32001"
             {{- end }}
+          {{ if .Values.multiCluster }}
+          volumeMounts:
+            - name: shared-data
+              mountPath: /shared
+          {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.minerApi.service.targetPort }}
               protocol: TCP
           resources:
             {{- toYaml .Values.minerApi.resources | nindent 12 }}
+      {{ if .Values.multiCluster }}
+      volumes:
+        - name: shared-data
+          emptyDir: {}
+      {{- end }}
