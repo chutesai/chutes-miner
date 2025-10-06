@@ -1349,12 +1349,12 @@ class MultiClusterK8sOperator(K8sOperator):
     def _initialize(self):
         # Ugly pattern to ensure we don't kick this off every time singleton is called.
         if not hasattr(self, "_cluster_monitor_task"):
-            self._cluster_monitor_task = asyncio.create_task(self._watch_cluster_resources())
+            self._cluster_monitor_task = asyncio.create_task(self._watch_clusters())
 
     def _get_request_timeout(self, read_timeout: int) -> Tuple[int, int]:
         return (5, read_timeout)
 
-    async def _watch_cluster_resources(self):
+    async def _watch_clusters(self):
         try:
             pubsub = self._redis.subscribe_to_clusters()
 
