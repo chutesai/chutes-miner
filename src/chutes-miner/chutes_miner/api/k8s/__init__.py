@@ -88,6 +88,5 @@ async def check_node_has_disk_available(node_name: str, required_disk_gb: int) -
     """
     Check if a node has sufficient disk space available for a deployment.
     """
-    return await K8sOperator().get_node_disk_info(node_name)
-    # disk_info = await get_node_disk_info(node_name)
-    # return disk_info.get("available_gb", 0) >= required_disk_gb
+    disk_info = await K8sOperator().get_node_disk_info(node_name)
+    return disk_info.get("available_gb", 0) >= required_disk_gb
