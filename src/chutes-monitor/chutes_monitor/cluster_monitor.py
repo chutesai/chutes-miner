@@ -138,7 +138,7 @@ class HealthChecker:
     async def _mark_cluster_healthy(self, cluster_name: str):
         """Mark cluster as healthy"""
         try:
-            current_status = await self.redis_client.get_cluster_status(cluster_name)
+            current_status = self.redis_client.get_cluster_status(cluster_name)
             current_state = current_status.get("state") if current_status else None
 
             # Only update if state has changed to avoid unnecessary Redis writes
@@ -254,7 +254,7 @@ class ClusterMonitor:
             if cluster_name not in clusters:
                 raise ClusterNotFoundException(f"Cluster {cluster_name} not found.")
 
-            status = await self.redis_client.get_cluster_status(cluster_name)
+            status = self.redis_client.get_cluster_status(cluster_name)
             # If we are setting resources for an unhealthy cluster this is a reconnect
             is_reconnect = status and not status.is_healthy
 
@@ -285,7 +285,7 @@ class ClusterMonitor:
             clusters = []
 
             for cluster_name in cluster_names:
-                status = await self.redis_client.get_cluster_status(cluster_name)
+                status = self.redis_client.get_cluster_status(cluster_name)
                 if status:
                     clusters.append(status)
 

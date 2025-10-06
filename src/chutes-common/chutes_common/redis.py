@@ -373,7 +373,7 @@ class MonitoringRedisClient:
         self.redis.expire(health_key, 300)
         return failures
 
-    async def get_cluster_status(self, cluster_name: str) -> Optional[ClusterStatus]:
+    def get_cluster_status(self, cluster_name: str) -> Optional[ClusterStatus]:
         """Get cluster health information"""
         health_key = f"clusters:{cluster_name}:health"
         health_data = self.redis.hgetall(health_key)

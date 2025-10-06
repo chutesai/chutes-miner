@@ -144,7 +144,7 @@ class ClusterRouter:
         """Receive heartbeat from a member cluster"""
         try:
             logger.debug(f"Received heartbeat from cluster {cluster_name}")
-            current_status = await self.redis_client.get_cluster_status(cluster_name)
+            current_status = self.redis_client.get_cluster_status(cluster_name)
 
             if not current_status:
                 logger.debug(f"Cluster {cluster_name} not in cache, rejecting heartbeat.")

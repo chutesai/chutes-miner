@@ -1,6 +1,6 @@
 import asyncio
 from dataclasses import dataclass, field
-from chutes_miner.api.database import get_session
+from chutes_miner.api.database import get_sync_session
 from chutes_common.schemas.server import Server
 from loguru import logger
 from sqlalchemy import select
@@ -271,7 +271,7 @@ class MultiClusterKubeConfig:
             # Only set once to ensure we don't overwrite
             # when getting the singleton
             self._kubeconfig: Optional[KubeConfig] = None
-            self._load_sync()
+            self._load()
 
     def __new__(cls, *args, **kwargs):
         """
@@ -284,27 +284,13 @@ class MultiClusterKubeConfig:
 
         return cls._instance
 
-    def _load_sync(self):
+    def _load(self):
         if self._kubeconfig:
             return
 
         try:
-            # Try to get existing event loop to determine context
-            asyncio.get_running_loop()
-            # In an event loop already, kick off load
-            task = asyncio.create_task(self._load_async())
-            asyncio.gather(task)
-        except RuntimeError:
-            # No event loop running - we can use asyncio.run()
-            asyncio.run(self._load_async())
-
-    async def _load_async(self):
-        if self._kubeconfig:
-            return
-
-        try:
-            async with get_session() as session:
-                servers = (await session.execute(select(Server))).unique().scalars()
+            with get_sync_session() as session:
+                servers = (session.execute(select(Server))).unique().scalars()
                 self._kubeconfig = KubeConfig()
                 for server in servers:
                     server_config = KubeConfig.from_dict(yaml.safe_load(server.kubeconfig))
