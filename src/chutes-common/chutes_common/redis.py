@@ -162,9 +162,7 @@ class MonitoringRedisClient:
             for channel in channels:
                 self.redis.publish(channel, message_json)
 
-            logger.debug(
-                f"Published cluster change to {len(channels)} channels: {cluster_name}"
-            )
+            logger.debug(f"Published cluster change to {len(channels)} channels: {cluster_name}")
 
         except Exception as e:
             logger.error(f"Failed to publish resource change: {e}")
