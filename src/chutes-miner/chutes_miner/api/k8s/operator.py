@@ -1479,11 +1479,7 @@ class MultiClusterK8sOperator(K8sOperator):
         """
         try:
             # If the server isn't healthy don't return the node from cache
-            status_task = asyncio.create_task(self._redis.get_cluster_status(name))
-            asyncio.gather(status_task)
-            status = status_task.result()
-            if status and not status.is_healthy:
-                raise ApiException(status=503, reason=f"Node {name} is not healthy, check the agent.")
+            self._verify_node_health(name)
 
             _client: CoreV1Api = self._manager.get_core_client(
                 context_name=name, kubeconfig=kubeconfig
@@ -1511,6 +1507,13 @@ class MultiClusterK8sOperator(K8sOperator):
         )
 
         return self.get_node(name)
+    
+    def _verify_node_health(self, name: str):
+            status_task = asyncio.create_task(self._redis.get_cluster_status(name))
+            asyncio.gather(status_task)
+            status = status_task.result()
+            if status and not status.is_healthy:
+                raise ApiException(status=503, reason=f"Node {name} is not healthy, check the agent.")
 
     async def get_deployment(self, deployment_id: str) -> Dict:
         """Get a single Chute deployment by ID."""
@@ -1581,6 +1584,9 @@ class MultiClusterK8sOperator(K8sOperator):
     def _deploy_service(
         self, service, server_name, namespace=settings.namespace, timeout_seconds: int = 60
     ):
+        # If the server isn't healthy don't deploy
+        self._verify_node_health(server_name)
+        
         client = self._manager.get_core_client(server_name)
         return client.create_namespaced_service(
             namespace=namespace,
@@ -1681,6 +1687,9 @@ class MultiClusterK8sOperator(K8sOperator):
     def _deploy_job(
         self, job, server_name, namespace=settings.namespace, timeout_seconds: int = 120
     ):
+        # If the server isn't healthy don't deploy since cache will be out of sync
+        self._verify_node_health(server_name)
+
         client = self._manager.get_batch_client(server_name)
         return client.create_namespaced_job(
             namespace=namespace,
