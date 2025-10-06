@@ -1477,20 +1477,26 @@ class MultiClusterK8sOperator(K8sOperator):
         """
         Retrieve a node from the cluster by name.
         """
-        node = None
         try:
+            # If the server isn't healthy don't return the node from cache
+            status_task = asyncio.create_task(self._redis.get_cluster_status(name))
+            asyncio.gather(status_task)
+            status = status_task.result()
+            if status and not status.is_healthy:
+                raise ApiException(status=503, reason=f"Node {name} is not healthy, check the agent.")
+
             _client: CoreV1Api = self._manager.get_core_client(
                 context_name=name, kubeconfig=kubeconfig
             )
 
-            node = _client.read_node(
+            return _client.read_node(
                 name=name, _request_timeout=self._get_request_timeout(timeout_seconds)
             )
+        except ApiException:
+            raise
         except Exception as e:
             logger.error(f"Failed to get node:\n{e}")
-            raise ApiException(status=404, reason=f"Node {name} not found.")
-
-        return node
+            raise ApiException(status=503, reason=f"Unexpected error getting node {name}:\n{e}")
 
     def _get_nodes(self) -> V1NodeList:
         resources = self._redis.get_resources(resource_type=ResourceType.NODE)

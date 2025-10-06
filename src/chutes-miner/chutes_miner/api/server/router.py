@@ -71,12 +71,12 @@ async def create_server(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Kubeconfig from {server_args.agent_api} expected to contain context for {server_args.name}, instead found {', '.join(ctx.name for ctx in server_kubeconfig.contexts)}",
             )
-
-    node = K8sOperator().get_node(server_args.name, server_kubeconfig)
-    if not node:
+    try:
+        node = K8sOperator().get_node(server_args.name, server_kubeconfig)
+    except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No kubernetes node with name={server_args.name} found!",
+            detail=f"Failed to get node {server_args.name}:\n{e}",
         )
     if (await db.execute(select(exists().where(Server.name == server_args.name)))).scalar():
         raise HTTPException(
