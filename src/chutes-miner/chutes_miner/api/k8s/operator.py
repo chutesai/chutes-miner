@@ -1599,8 +1599,30 @@ class MultiClusterK8sOperator(K8sOperator):
         )
 
     def _delete_service(self, name, namespace=settings.namespace, timeout_seconds: int = 60):
+
+        svc_name = name
+        if CHUTE_SVC_PREFIX in name:
+            resources = self._redis.get_resources(resource_type=ResourceType.SERVICE)
+            all_services = resources.services
+
+            # Find service by new or legacy name in one pass
+            target_service = None
+            legacy_name = name.replace(CHUTE_SVC_PREFIX, "chute-svc")
+            for svc in all_services:
+                svc_name = svc.metadata.name
+                if svc_name in (name, legacy_name):
+                    target_service = svc
+                    break
+
+            if not target_service:
+                logger.warning(f"Service {name} (or legacy {legacy_name}) not found in namespace {namespace}")
+                return
+            
+            svc_name = target_service.metadata.name
+
+
         context = self._redis.get_resource_cluster(
-            resource_name=name, resource_type=ResourceType.SERVICE, namespace=namespace
+            resource_name=svc_name, resource_type=ResourceType.SERVICE, namespace=namespace
         )
 
         if context:
@@ -1608,21 +1630,21 @@ class MultiClusterK8sOperator(K8sOperator):
 
             try:
                 client.delete_namespaced_service(
-                    name=name,
+                    name=svc_name,
                     namespace=namespace,
                     _request_timeout=self._get_request_timeout(timeout_seconds),
                 )
             except ApiException as e:
                 if e.status == 404:
                     # Not found, remove from redis
-                    self._redis.delete_resource(name, context, ResourceType.SERVICE, namespace)
+                    self._redis.delete_resource(svc_name, context, ResourceType.SERVICE, namespace)
                     logger.warning(
-                        f"Attempted to delete service {name}, but appears to have disappeared.  Removed from redis cache."
+                        f"Attempted to delete service {svc_name}, but appears to have disappeared.  Removed from redis cache."
                     )
                 else:
                     raise
         else:
-            logger.warning(f"Attempted to delete service {name}, but service not found.")
+            logger.warning(f"Attempted to delete service {svc_name}, but context not found.")
 
     def delete_config_map(self, name, namespace=settings.namespace, timeout_seconds: int = 60):
         # Create CM on all clusters
