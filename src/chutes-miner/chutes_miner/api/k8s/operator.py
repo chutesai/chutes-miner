@@ -1599,8 +1599,32 @@ class MultiClusterK8sOperator(K8sOperator):
         )
 
     def _delete_service(self, name, namespace=settings.namespace, timeout_seconds: int = 60):
+        svc_name = name
+        if CHUTE_SVC_PREFIX in name:
+            # Legacy check to cleanup services with legacy prefix
+            # TODO: Remove this once legacy deployments are not found
+            resources = self._redis.get_resources(resource_type=ResourceType.SERVICE)
+            all_services = resources.services
+
+            # Find service by new or legacy name in one pass
+            target_service = None
+            legacy_name = name.replace(CHUTE_SVC_PREFIX, "chute-svc")
+            for svc in all_services:
+                svc_name = svc.metadata.name
+                if svc_name in (name, legacy_name):
+                    target_service = svc
+                    break
+
+            if not target_service:
+                logger.warning(
+                    f"Service {name} (or legacy {legacy_name}) not found in namespace {namespace}"
+                )
+                return
+
+            svc_name = target_service.metadata.name
+
         context = self._redis.get_resource_cluster(
-            resource_name=name, resource_type=ResourceType.SERVICE, namespace=namespace
+            resource_name=svc_name, resource_type=ResourceType.SERVICE, namespace=namespace
         )
 
         if context:
@@ -1608,21 +1632,21 @@ class MultiClusterK8sOperator(K8sOperator):
 
             try:
                 client.delete_namespaced_service(
-                    name=name,
+                    name=svc_name,
                     namespace=namespace,
                     _request_timeout=self._get_request_timeout(timeout_seconds),
                 )
             except ApiException as e:
                 if e.status == 404:
                     # Not found, remove from redis
-                    self._redis.delete_resource(name, context, ResourceType.SERVICE, namespace)
+                    self._redis.delete_resource(svc_name, context, ResourceType.SERVICE, namespace)
                     logger.warning(
-                        f"Attempted to delete service {name}, but appears to have disappeared.  Removed from redis cache."
+                        f"Attempted to delete service {svc_name}, but appears to have disappeared.  Removed from redis cache."
                     )
                 else:
                     raise
         else:
-            logger.warning(f"Attempted to delete service {name}, but service not found.")
+            logger.warning(f"Attempted to delete service {svc_name}, but context not found.")
 
     def delete_config_map(self, name, namespace=settings.namespace, timeout_seconds: int = 60):
         # Create CM on all clusters
@@ -1684,7 +1708,13 @@ class MultiClusterK8sOperator(K8sOperator):
             )
         except ApiException as e:
             # Need to handle 409 per cluster so we don't break out early
+            logger.warning(
+                f"Configmap {config_map.metadata.name} already exists on cluster {cluster}."
+            )
             if e.status == 409 and force:
+                logger.warning(
+                    f"Replacing configmap {config_map.metadata.name} on clsuter {cluster}."
+                )
                 client.delete_namespaced_config_map(
                     name=config_map.metadata.name,
                     namespace=namespace,
@@ -1698,7 +1728,13 @@ class MultiClusterK8sOperator(K8sOperator):
             else:
                 # TODO: This shouldn't really happen but need to
                 # handle this better as this would still short circuit other nodes
-                raise
+                logger.error(
+                    f"Failed to deploy configmap {config_map.metadata.name} to cluster {cluster}:\n{e}"
+                )
+        except Exception as e:
+            logger.error(
+                f"Failed to deploy configmap {config_map.metadata.name} to cluster {cluster}.\n{e}"
+            )
 
     def _deploy_job_for_deployment(
         self, job, server_name, namespace=settings.namespace, timeout_seconds=120
