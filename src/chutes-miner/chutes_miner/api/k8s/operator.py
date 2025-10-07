@@ -1601,6 +1601,8 @@ class MultiClusterK8sOperator(K8sOperator):
     def _delete_service(self, name, namespace=settings.namespace, timeout_seconds: int = 60):
         svc_name = name
         if CHUTE_SVC_PREFIX in name:
+            # Legacy check to cleanup services with legacy prefix
+            # TODO: Remove this once legacy deployments are not found
             resources = self._redis.get_resources(resource_type=ResourceType.SERVICE)
             all_services = resources.services
 
