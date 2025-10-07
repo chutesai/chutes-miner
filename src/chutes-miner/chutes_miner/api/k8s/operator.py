@@ -1599,7 +1599,6 @@ class MultiClusterK8sOperator(K8sOperator):
         )
 
     def _delete_service(self, name, namespace=settings.namespace, timeout_seconds: int = 60):
-
         svc_name = name
         if CHUTE_SVC_PREFIX in name:
             resources = self._redis.get_resources(resource_type=ResourceType.SERVICE)
@@ -1615,11 +1614,12 @@ class MultiClusterK8sOperator(K8sOperator):
                     break
 
             if not target_service:
-                logger.warning(f"Service {name} (or legacy {legacy_name}) not found in namespace {namespace}")
+                logger.warning(
+                    f"Service {name} (or legacy {legacy_name}) not found in namespace {namespace}"
+                )
                 return
-            
-            svc_name = target_service.metadata.name
 
+            svc_name = target_service.metadata.name
 
         context = self._redis.get_resource_cluster(
             resource_name=svc_name, resource_type=ResourceType.SERVICE, namespace=namespace
