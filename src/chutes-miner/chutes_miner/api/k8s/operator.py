@@ -1706,7 +1706,13 @@ class MultiClusterK8sOperator(K8sOperator):
             )
         except ApiException as e:
             # Need to handle 409 per cluster so we don't break out early
+            logger.warning(
+                f"Configmap {config_map.metadata.name} already exists on cluster {cluster}."
+            )
             if e.status == 409 and force:
+                logger.warning(
+                    f"Replacing configmap {config_map.metadata.name} on clsuter {cluster}."
+                )
                 client.delete_namespaced_config_map(
                     name=config_map.metadata.name,
                     namespace=namespace,
@@ -1720,7 +1726,13 @@ class MultiClusterK8sOperator(K8sOperator):
             else:
                 # TODO: This shouldn't really happen but need to
                 # handle this better as this would still short circuit other nodes
-                raise
+                logger.error(
+                    f"Failed to deploy configmap {config_map.metadata.name} to cluster {cluster}:\n{e}"
+                )
+        except Exception as e:
+            logger.error(
+                f"Failed to deploy configmap {config_map.metadata.name} to cluster {cluster}.\n{e}"
+            )
 
     def _deploy_job_for_deployment(
         self, job, server_name, namespace=settings.namespace, timeout_seconds=120
