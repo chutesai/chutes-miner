@@ -1400,6 +1400,7 @@ class MultiClusterK8sOperator(K8sOperator):
                             self._manager.multi_config.add_config(
                                 KubeConfig.from_dict(yaml.safe_load(server.kubeconfig))
                             )
+                            await self._sync_chute_configmaps(message.cluster)
                         else:
                             logger.warning(
                                 f"Received add event for cluster {message.cluster} but no kubeconfig is set in DB."
@@ -1453,27 +1454,29 @@ class MultiClusterK8sOperator(K8sOperator):
         try:
             logger.info(f"Cluster {message.cluster} reconnected.  Refreshing Chutes config maps.")
 
-            async with get_session() as session:
-                cluster_name = message.cluster
-
-                # Get all existing CMs
-                client = self._manager.get_core_client(cluster_name)
-                chute_cms: V1ConfigMapList = client.list_namespaced_config_map(
-                    settings.namespace, label_selector="chutes/code=true"
-                )
-
-                # Delete all Chute CMs
-                for cm in chute_cms.items:
-                    self._delete_config_map_from_cluster(cluster_name, name=cm.metadata.name)
-
-                # Propagate existing Chute CMs to the cluster
-                chutes = (await session.execute(select(Chute))).unique().scalars()
-                for chute in chutes:
-                    config_map = self._build_code_config_map(chute)
-                    self._deploy_config_map_to_cluster(cluster_name, config_map)
+            await self._sync_chute_configmaps(message.cluster)
 
         except Exception as e:
             logger.error(f"Unexpected exception while handling cluster change:\n{e}")
+
+    async def _sync_chute_configmaps(self, cluster_name: str):
+        async with get_session() as session:
+
+            # Get all existing CMs
+            client = self._manager.get_core_client(cluster_name)
+            chute_cms: V1ConfigMapList = client.list_namespaced_config_map(
+                settings.namespace, label_selector="chutes/code=true"
+            )
+
+            # Delete all Chute CMs
+            for cm in chute_cms.items:
+                self._delete_config_map_from_cluster(cluster_name, name=cm.metadata.name)
+
+            # Propagate existing Chute CMs to the cluster
+            chutes = (await session.execute(select(Chute))).unique().scalars()
+            for chute in chutes:
+                config_map = self._build_code_config_map(chute)
+                self._deploy_config_map_to_cluster(cluster_name, config_map)
 
     def get_node(
         self, name: str, kubeconfig: Optional[KubeConfig] = None, timeout_seconds=15

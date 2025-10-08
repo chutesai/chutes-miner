@@ -637,13 +637,6 @@ async def bootstrap_server(
             yield sse_message(error_message)
             raise GraValBootstrapFailure(error_message)
 
-        if server_args.agent_api:
-            # If this is a mutli cluster setup, need to propagate existing Chute CMs to the cluster
-            async with get_session() as session:
-                chutes = (await session.execute(select(Chute))).unique().scalars()
-                for chute in chutes:
-                    await K8sOperator().create_code_config_map(chute)
-
     except Exception as exc:
         error_message = (
             f"unhandled exception bootstrapping new node: {exc}\n{traceback.format_exc()}"
