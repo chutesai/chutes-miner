@@ -16,7 +16,7 @@
         timeout: 60
       become: true
       vars:
-        kubectl_version: "v1.28.2"  # Specify desired kubectl version
+        kubectl_version: "v1.33.1"  # Specify desired kubectl version
       register: kubectl_download
       retries: 5
       delay: 30
