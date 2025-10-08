@@ -1087,6 +1087,7 @@ class Gepetto:
                 gpu_count=chute_dict["node_selector"]["gpu_count"],
                 chutes_version=chute_dict["chutes_version"],
                 ban_reason=None,
+                preemptible=chute_dict["preemptible"],
             )
             session.add(chute)
             await session.commit()
@@ -1194,6 +1195,7 @@ class Gepetto:
                             gpu_count=chute_dict["node_selector"]["gpu_count"],
                             chutes_version=chute_dict["chutes_version"],
                             ban_reason=None,
+                            preemptible=chute_dict["preemptible"],
                         )
                         db.add(chute)
                     await db.commit()
