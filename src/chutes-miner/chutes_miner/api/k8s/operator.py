@@ -1695,6 +1695,7 @@ class MultiClusterK8sOperator(K8sOperator):
         force=False,
     ):
         try:
+            self._verify_node_health(cluster)
             client = self._manager.get_core_client(cluster)
             client.create_namespaced_config_map(
                 namespace=namespace,
@@ -1708,26 +1709,26 @@ class MultiClusterK8sOperator(K8sOperator):
             )
         except ApiException as e:
             # Need to handle 409 per cluster so we don't break out early
-            logger.warning(
-                f"Configmap {config_map.metadata.name} already exists on cluster {cluster}."
-            )
-            if e.status == 409 and force:
-                logger.warning(
-                    f"Replacing configmap {config_map.metadata.name} on clsuter {cluster}."
-                )
-                client.delete_namespaced_config_map(
-                    name=config_map.metadata.name,
-                    namespace=namespace,
-                    _request_timeout=self._get_request_timeout(timeout_seconds),
-                )
-                client.create_namespaced_config_map(
-                    namespace=namespace,
-                    body=config_map,
-                    _request_timeout=self._get_request_timeout(timeout_seconds),
-                )
+
+            if e.status == 409:
+                # Swallow 409 and only replace if force flag is true
+                if force:
+                    logger.warning(
+                        f"Replacing configmap {config_map.metadata.name} on cluster {cluster}."
+                    )
+                    client.delete_namespaced_config_map(
+                        name=config_map.metadata.name,
+                        namespace=namespace,
+                        _request_timeout=self._get_request_timeout(timeout_seconds),
+                    )
+                    client.create_namespaced_config_map(
+                        namespace=namespace,
+                        body=config_map,
+                        _request_timeout=self._get_request_timeout(timeout_seconds),
+                    )
             else:
-                # TODO: This shouldn't really happen but need to
-                # handle this better as this would still short circuit other nodes
+                # We can just swallow 409s. Other errors shoudl be logged,
+                # but still do not want to short circuit
                 logger.error(
                     f"Failed to deploy configmap {config_map.metadata.name} to cluster {cluster}:\n{e}"
                 )
