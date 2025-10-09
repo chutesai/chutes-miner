@@ -1,4 +1,27 @@
 ---
+- name: Check if kubectl is installed
+  ansible.builtin.command: which kubectl
+  register: kubectl_check
+  failed_when: false
+  changed_when: false
+
+- name: Install kubectl
+  when: kubectl_check.rc != 0
+  block:
+    - name: Download kubectl binary
+      ansible.builtin.get_url:
+        url: "https://dl.k8s.io/release/{{ kubectl_version }}/bin/linux/amd64/kubectl"
+        dest: /usr/local/bin/kubectl
+        mode: "0755"
+        timeout: 60
+      become: true
+      vars:
+        kubectl_version: "v1.33.1"  # Specify desired kubectl version
+      register: kubectl_download
+      retries: 5
+      delay: 30
+      until: kubectl_download is not failed
+      
 - name: Install python3-kubernetes package
   ansible.builtin.apt:
     name: python3-kubernetes

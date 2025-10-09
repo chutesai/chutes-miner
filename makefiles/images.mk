@@ -39,7 +39,7 @@ tag:
 						image_tag=""; \
 					fi; \
 					if [ "${BRANCH_NAME}" != "main" ]; then \
-						image_tag=$$image_tag"dev-"; \
+						image_tag=$$image_tag$$BRANCH_NAME"-"; \
 					fi; \
 					for stage_target in $$available_targets; do \
 						if [[ "$$stage_target" == production* ]]; then \
@@ -113,7 +113,7 @@ push:
 						image_tag=""; \
 					fi; \
 					if [ "${BRANCH_NAME}" != "main" ]; then \
-						image_tag=$$image_tag"dev-"; \
+						image_tag=$$image_tag$$BRANCH_NAME"-"; \
 					fi; \
 					for stage_target in $$available_targets; do \
 						if [[ "$$stage_target" == production* ]]; then \

@@ -6,7 +6,7 @@ import re
 import aiohttp
 import asyncio
 import hashlib
-from chutes_miner.api.k8s.operator import K8sOperator, MultiClusterK8sOperator
+from chutes_miner.api.k8s.operator import K8sOperator
 from chutes_miner.api.server.util import clear_server_cache, stop_server_monitoring
 import orjson as json
 import traceback
@@ -949,6 +949,13 @@ class Gepetto:
                 .scalar_one_or_none()
             )
             if server:
+                await asyncio.gather(
+                    *[self.gpu_deleted({"gpu_id": gpu.gpu_id}) for gpu in server.gpus]
+                )
+                await session.refresh(server)
+                await session.delete(server)
+                await session.commit()
+
                 # If this is a standalone server, we need to stop monitoring from the agent
                 if server.agent_api:
                     try:
@@ -964,12 +971,6 @@ class Gepetto:
                             f"Unexpected error encountered trying to stop monitoring for {server.name}.\n{e}"
                         )
 
-                await asyncio.gather(
-                    *[self.gpu_deleted({"gpu_id": gpu.gpu_id}) for gpu in server.gpus]
-                )
-                await session.refresh(server)
-                await session.delete(server)
-                await session.commit()
         logger.info(f"Finished processing server_deleted event for {server_id=}")
 
     async def image_deleted(self, event_data: Dict[str, Any]):
@@ -1087,6 +1088,7 @@ class Gepetto:
                 gpu_count=chute_dict["node_selector"]["gpu_count"],
                 chutes_version=chute_dict["chutes_version"],
                 ban_reason=None,
+                preemptible=chute_dict["preemptible"],
             )
             session.add(chute)
             await session.commit()
@@ -1194,6 +1196,7 @@ class Gepetto:
                             gpu_count=chute_dict["node_selector"]["gpu_count"],
                             chutes_version=chute_dict["chutes_version"],
                             ban_reason=None,
+                            preemptible=chute_dict["preemptible"],
                         )
                         db.add(chute)
                     await db.commit()
@@ -2182,12 +2185,6 @@ class Gepetto:
         """
         Reconcile on a regular basis.
         """
-        # This is kind of gross, but need to ensure CMs reconcile
-        # when a node reconnects for multi cluster and is
-        # backwards compatible with single cluster
-        if isinstance(K8sOperator(), MultiClusterK8sOperator):
-            MultiClusterK8sOperator().watch_cluster_connections()
-
         while True:
             await asyncio.sleep(60)
             try:

@@ -83,6 +83,8 @@ spec:
             {{ else }}
             - name: MONITORING_NAMESPACE
               value: "monitoring" 
+            - name: RECONCILE_CLUSTERS
+              value: "true"
             {{- end }}
           resources:
             {{- toYaml .Values.gepetto.resources | nindent 12 }}

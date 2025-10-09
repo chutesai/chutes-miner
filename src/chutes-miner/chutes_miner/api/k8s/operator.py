@@ -41,7 +41,7 @@ from kubernetes.client import CoreV1Api
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from chutes_miner.api.exceptions import DeploymentFailure
-from chutes_miner.api.database import get_session
+from chutes_miner.api.database import get_session, get_sync_session
 from chutes_miner.api.k8s.constants import (
     CHUTE_CODE_CM_PREFIX,
     CHUTE_DEPLOY_PREFIX,
@@ -593,7 +593,7 @@ class K8sOperator(abc.ABC):
         """Create a ConfigMap to store the chute code."""
         try:
             config_map = self._build_code_config_map(chute)
-            self._deploy_config_map(config_map, force=force)
+            await self._deploy_config_map(config_map, force=force)
         except ApiException as e:
             if e.status != 409:
                 raise
@@ -614,7 +614,7 @@ class K8sOperator(abc.ABC):
         return config_map
 
     @abc.abstractmethod
-    def _deploy_config_map(
+    async def _deploy_config_map(
         self, config_map: V1ConfigMap, namespace=settings.namespace, timeout_seconds=60, force=False
     ):
         raise NotImplementedError()
@@ -1315,7 +1315,7 @@ class SingleClusterK8sOperator(K8sOperator):
             name=name, namespace=namespace, _request_timeout=timeout_seconds
         )
 
-    def _deploy_config_map(
+    async def _deploy_config_map(
         self, config_map: V1ConfigMap, namespace=settings.namespace, timeout_seconds=60, force=False
     ):
         try:
@@ -1323,15 +1323,16 @@ class SingleClusterK8sOperator(K8sOperator):
                 namespace=namespace, body=config_map, _request_timeout=timeout_seconds
             )
         except ApiException as e:
-            if e.status == 409 and force:
-                k8s_core_client().delete_namespaced_config_map(
-                    name=config_map.metadata.name,
-                    namespace=namespace,
-                    _request_timeout=timeout_seconds,
-                )
-                k8s_core_client().create_namespaced_config_map(
-                    namespace=namespace, body=config_map, _request_timeout=timeout_seconds
-                )
+            if e.status == 409:
+                if force:
+                    k8s_core_client().delete_namespaced_config_map(
+                        name=config_map.metadata.name,
+                        namespace=namespace,
+                        _request_timeout=timeout_seconds,
+                    )
+                    k8s_core_client().create_namespaced_config_map(
+                        namespace=namespace, body=config_map, _request_timeout=timeout_seconds
+                    )
             else:
                 raise
 
@@ -1342,14 +1343,21 @@ class MultiClusterK8sOperator(K8sOperator):
     # This class will implement the K8sOperator interface but translate operations
     # to work with Karmada's multi-cluster orchestration
     def __init__(self):
-        self._manager = KubernetesMultiClusterClientManager()
-        self._redis = MonitoringRedisClient()
         self._initialize()
 
     def _initialize(self):
         # Ugly pattern to ensure we don't kick this off every time singleton is called.
         if not hasattr(self, "_cluster_monitor_task"):
             self._cluster_monitor_task = asyncio.create_task(self._watch_clusters())
+
+        if not hasattr(self, "_manager"):
+            self._manager = KubernetesMultiClusterClientManager()
+
+        if not hasattr(self, "_redis"):
+            self._redis = MonitoringRedisClient()
+
+        if settings.reconcile_clusters and not hasattr(self, "_watch_reconnects_task"):
+            self.watch_cluster_connections()
 
     def _get_request_timeout(self, read_timeout: int) -> Tuple[int, int]:
         return (5, read_timeout)
@@ -1400,6 +1408,7 @@ class MultiClusterK8sOperator(K8sOperator):
                             self._manager.multi_config.add_config(
                                 KubeConfig.from_dict(yaml.safe_load(server.kubeconfig))
                             )
+                            self._sync_chute_configmaps(message.cluster)
                         else:
                             logger.warning(
                                 f"Received add event for cluster {message.cluster} but no kubeconfig is set in DB."
@@ -1416,9 +1425,7 @@ class MultiClusterK8sOperator(K8sOperator):
         Reconcile chutes on a regular basis.
         """
         try:
-            _watch_reconnects_task = asyncio.create_task(self._watch_cluster_connections())
-        except asyncio.CancelledError:
-            _watch_reconnects_task.cancel()
+            self._watch_reconnects_task = asyncio.create_task(self._watch_cluster_connections())
         except Exception as e:
             logger.error(
                 f"Unexpected error watching cluster connections: {e}\n{traceback.format_exc()}"
@@ -1453,9 +1460,16 @@ class MultiClusterK8sOperator(K8sOperator):
         try:
             logger.info(f"Cluster {message.cluster} reconnected.  Refreshing Chutes config maps.")
 
-            async with get_session() as session:
-                cluster_name = message.cluster
+            # Don't block in case there was a mass restart,
+            # instead dump each cluster to a thread
+            asyncio.create_task(asyncio.to_thread(self._sync_chute_configmaps, message.cluster))
 
+        except Exception as e:
+            logger.error(f"Unexpected exception while handling cluster change:\n{e}")
+
+    def _sync_chute_configmaps(self, cluster_name: str):
+        try:
+            with get_sync_session() as session:
                 # Get all existing CMs
                 client = self._manager.get_core_client(cluster_name)
                 chute_cms: V1ConfigMapList = client.list_namespaced_config_map(
@@ -1467,13 +1481,14 @@ class MultiClusterK8sOperator(K8sOperator):
                     self._delete_config_map_from_cluster(cluster_name, name=cm.metadata.name)
 
                 # Propagate existing Chute CMs to the cluster
-                chutes = (await session.execute(select(Chute))).unique().scalars()
+                chutes = (session.execute(select(Chute))).unique().scalars()
                 for chute in chutes:
                     config_map = self._build_code_config_map(chute)
                     self._deploy_config_map_to_cluster(cluster_name, config_map)
 
+            logger.info(f"Successfully synced chute configmaps for {cluster_name}")
         except Exception as e:
-            logger.error(f"Unexpected exception while handling cluster change:\n{e}")
+            logger.error(f"Unexpected exception syncing chute configmaps for {cluster_name}:\n{e}")
 
     def get_node(
         self, name: str, kubeconfig: Optional[KubeConfig] = None, timeout_seconds=15
@@ -1672,7 +1687,26 @@ class MultiClusterK8sOperator(K8sOperator):
             if e.status != 404:
                 raise
 
-    def _deploy_config_map(
+    async def _deploy_config_map(
+        self,
+        config_map: V1ConfigMap,
+        namespace=settings.namespace,
+        timeout_seconds: int = 60,
+        force=False,
+    ):
+        # We don't want to wait for this and block the main loop
+        # Offload to a thread to update this CM across all clusters
+        asyncio.create_task(
+            asyncio.to_thread(
+                self._deploy_config_map_to_all_clusters,
+                config_map=config_map,
+                namespace=namespace,
+                timeout_seconds=timeout_seconds,
+                force=force,
+            )
+        )
+
+    def _deploy_config_map_to_all_clusters(
         self,
         config_map: V1ConfigMap,
         namespace=settings.namespace,
@@ -1716,16 +1750,23 @@ class MultiClusterK8sOperator(K8sOperator):
                     logger.warning(
                         f"Replacing configmap {config_map.metadata.name} on cluster {cluster}."
                     )
-                    client.delete_namespaced_config_map(
-                        name=config_map.metadata.name,
-                        namespace=namespace,
-                        _request_timeout=self._get_request_timeout(timeout_seconds),
-                    )
-                    client.create_namespaced_config_map(
-                        namespace=namespace,
-                        body=config_map,
-                        _request_timeout=self._get_request_timeout(timeout_seconds),
-                    )
+                    try:
+                        client.delete_namespaced_config_map(
+                            name=config_map.metadata.name,
+                            namespace=namespace,
+                            _request_timeout=self._get_request_timeout(timeout_seconds),
+                        )
+                        client.create_namespaced_config_map(
+                            namespace=namespace,
+                            body=config_map,
+                            _request_timeout=self._get_request_timeout(timeout_seconds),
+                        )
+                    except ApiException:
+                        logger.error(
+                            f"Failed to force replace configmap {config_map.metdata.name} on cluster {cluster}"
+                        )
+            elif e.status == 503:
+                pass
             else:
                 # We can just swallow 409s. Other errors shoudl be logged,
                 # but still do not want to short circuit

@@ -142,9 +142,9 @@
 
 - name: Reset DNS configuration
   block:
-    - name: Reset resolved.conf
+    - name: Reset resolv.conf
       ansible.builtin.copy:
-        dest: /etc/systemd/resolved.conf
+        dest: /etc/systemd/resolv.conf
         content: |
           #  This file is part of systemd.
           #

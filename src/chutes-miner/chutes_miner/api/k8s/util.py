@@ -23,7 +23,11 @@ from kubernetes.client import (
 )
 
 from chutes_common.schemas.chute import Chute
-from chutes_miner.api.k8s.constants import CHUTE_DEPLOY_PREFIX, CHUTE_SVC_PREFIX
+from chutes_miner.api.k8s.constants import (
+    CHUTE_CODE_CM_PREFIX,
+    CHUTE_DEPLOY_PREFIX,
+    CHUTE_SVC_PREFIX,
+)
 from chutes_common.schemas.server import Server
 from chutes_miner.api.config import settings
 
@@ -127,7 +131,7 @@ def build_chute_job(
                         V1Volume(
                             name="code",
                             config_map=V1ConfigMapVolumeSource(
-                                name=f"chute-code-{code_uuid}",
+                                name=f"{CHUTE_CODE_CM_PREFIX}-{code_uuid}",
                             ),
                         ),
                         V1Volume(

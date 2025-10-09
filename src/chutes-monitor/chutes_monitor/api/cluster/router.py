@@ -103,7 +103,7 @@ class ClusterRouter:
         request: SetClusterResourcesRequest,
         _: None = Depends(authorize(allow_miner=True, purpose=MONITORING_PURPOSE)),
     ):
-        """Register and start monitoring a new cluster"""
+        """Set resources for an existing cluster"""
         try:
             if not await self._server_exists(cluster_name):
                 raise HTTPException(
