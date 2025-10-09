@@ -1473,23 +1473,29 @@ class MultiClusterK8sOperator(K8sOperator):
             logger.error(f"Unexpected exception while handling cluster change:\n{e}")
 
     def _sync_chute_configmaps(self, cluster_name: str):
-        with get_sync_session() as session:
+        try:
+            with get_sync_session() as session:
 
-            # Get all existing CMs
-            client = self._manager.get_core_client(cluster_name)
-            chute_cms: V1ConfigMapList = client.list_namespaced_config_map(
-                settings.namespace, label_selector="chutes/code=true"
-            )
+                # Get all existing CMs
+                client = self._manager.get_core_client(cluster_name)
+                chute_cms: V1ConfigMapList = client.list_namespaced_config_map(
+                    settings.namespace, label_selector="chutes/code=true"
+                )
 
-            # Delete all Chute CMs
-            for cm in chute_cms.items:
-                self._delete_config_map_from_cluster(cluster_name, name=cm.metadata.name)
+                # Delete all Chute CMs
+                for cm in chute_cms.items:
+                    self._delete_config_map_from_cluster(cluster_name, name=cm.metadata.name)
 
-            # Propagate existing Chute CMs to the cluster
-            chutes = (session.execute(select(Chute))).unique().scalars()
-            for chute in chutes:
-                config_map = self._build_code_config_map(chute)
-                self._deploy_config_map_to_cluster(cluster_name, config_map)
+                # Propagate existing Chute CMs to the cluster
+                chutes = (session.execute(select(Chute))).unique().scalars()
+                for chute in chutes:
+                    config_map = self._build_code_config_map(chute)
+                    self._deploy_config_map_to_cluster(cluster_name, config_map)
+                
+            logger.info(f"Successfully synced chute configmaps for {cluster_name}")
+        except Exception as e:
+            logger.error(f"Unexpected exception syncing chute configmaps for {cluster_name}:\n{e}")
+
 
     def get_node(
         self, name: str, kubeconfig: Optional[KubeConfig] = None, timeout_seconds=15
