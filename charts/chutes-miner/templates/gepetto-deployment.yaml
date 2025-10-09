@@ -80,11 +80,11 @@ spec:
             {{ if not .Values.multiCluster }}
             - name: NVIDIA_RUNTIME
               value: nvidia-container-runtime
-            - name: RECONCILE_CLUSTERS
-              value: "true"
             {{ else }}
             - name: MONITORING_NAMESPACE
               value: "monitoring" 
+            - name: RECONCILE_CLUSTERS
+              value: "true"
             {{- end }}
           resources:
             {{- toYaml .Values.gepetto.resources | nindent 12 }}
