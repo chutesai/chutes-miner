@@ -970,7 +970,7 @@ class Gepetto:
                         logger.error(
                             f"Unexpected error encountered trying to stop monitoring for {server.name}.\n{e}"
                         )
-                        
+
         logger.info(f"Finished processing server_deleted event for {server_id=}")
 
     async def image_deleted(self, event_data: Dict[str, Any]):
