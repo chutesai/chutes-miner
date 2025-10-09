@@ -88,5 +88,7 @@ class Settings(CommonSettings):
 
     monitor_api: str = str(os.getenv("MONITOR_API", ""))
 
+    reconcile_clusters: bool = os.getenv("RECONCILE_CLUSTERS", "false").lower() == "true"
+
 
 settings = Settings()

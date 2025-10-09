@@ -41,7 +41,7 @@ from kubernetes.client import CoreV1Api
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from chutes_miner.api.exceptions import DeploymentFailure
-from chutes_miner.api.database import get_session
+from chutes_miner.api.database import get_session, get_sync_session
 from chutes_miner.api.k8s.constants import (
     CHUTE_CODE_CM_PREFIX,
     CHUTE_DEPLOY_PREFIX,
@@ -1356,6 +1356,9 @@ class MultiClusterK8sOperator(K8sOperator):
         if not hasattr(self, "_redis"):
             self._redis = MonitoringRedisClient()
 
+        if settings.reconcile_clusters and not hasattr(self, "_watch_reconnects_task"):
+            self.watch_cluster_connections()
+
     def _get_request_timeout(self, read_timeout: int) -> Tuple[int, int]:
         return (5, read_timeout)
 
@@ -1422,14 +1425,12 @@ class MultiClusterK8sOperator(K8sOperator):
         Reconcile chutes on a regular basis.
         """
         try:
-            _watch_reconnects_task = asyncio.create_task(self._watch_cluster_connections())
-        except asyncio.CancelledError:
-            _watch_reconnects_task.cancel()
+            self._watch_reconnects_task = asyncio.create_task(self._watch_cluster_connections())
         except Exception as e:
             logger.error(
                 f"Unexpected error watching cluster connections: {e}\n{traceback.format_exc()}"
             )
-
+            
     async def _watch_cluster_connections(self):
         try:
             pubsub = self._redis.subscribe_to_cluster_reconnect()
@@ -1459,13 +1460,20 @@ class MultiClusterK8sOperator(K8sOperator):
         try:
             logger.info(f"Cluster {message.cluster} reconnected.  Refreshing Chutes config maps.")
 
-            await self._sync_chute_configmaps(message.cluster)
+            # Don't block in case there was a mass restart, 
+            # instead dump each cluster to a thread
+            asyncio.create_task(
+                asyncio.to_thread(
+                    self._sync_chute_configmaps,
+                    message.cluster
+                )
+            )
 
         except Exception as e:
             logger.error(f"Unexpected exception while handling cluster change:\n{e}")
 
-    async def _sync_chute_configmaps(self, cluster_name: str):
-        async with get_session() as session:
+    def _sync_chute_configmaps(self, cluster_name: str):
+        with get_sync_session() as session:
 
             # Get all existing CMs
             client = self._manager.get_core_client(cluster_name)
@@ -1478,10 +1486,10 @@ class MultiClusterK8sOperator(K8sOperator):
                 self._delete_config_map_from_cluster(cluster_name, name=cm.metadata.name)
 
             # Propagate existing Chute CMs to the cluster
-            chutes = (await session.execute(select(Chute))).unique().scalars()
+            chutes = (session.execute(select(Chute))).unique().scalars()
             for chute in chutes:
                 config_map = self._build_code_config_map(chute)
-                await self._deploy_config_map_to_cluster(cluster_name, config_map)
+                self._deploy_config_map_to_cluster(cluster_name, config_map)
 
     def get_node(
         self, name: str, kubeconfig: Optional[KubeConfig] = None, timeout_seconds=15
@@ -1687,14 +1695,33 @@ class MultiClusterK8sOperator(K8sOperator):
         timeout_seconds: int = 60,
         force=False,
     ):
+        # We don't want to wait for this and block the main loop
+        # Offload to a thread to update this CM across all clusters
+        asyncio.create_task(
+            asyncio.to_thread(
+                self._deploy_config_map_to_all_clusters,
+                config_map=config_map,
+                namespace=namespace,
+                timeout_seconds=timeout_seconds,
+                force=force
+            )
+        )
+
+    def _deploy_config_map_to_all_clusters(
+        self,
+        config_map: V1ConfigMap,
+        namespace=settings.namespace,
+        timeout_seconds: int = 60,
+        force=False
+    ):
         # Create CM on all clusters
         clusters = self._redis.get_all_cluster_names()
         for cluster in clusters:
-            await self._deploy_config_map_to_cluster(
+            self._deploy_config_map_to_cluster(
                 cluster, config_map, namespace, timeout_seconds, force
             )
 
-    async def _deploy_config_map_to_cluster(
+    def _deploy_config_map_to_cluster(
         self,
         cluster: str,
         config_map: V1ConfigMap,

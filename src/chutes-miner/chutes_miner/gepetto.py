@@ -2184,12 +2184,6 @@ class Gepetto:
         """
         Reconcile on a regular basis.
         """
-        # This is kind of gross, but need to ensure CMs reconcile
-        # when a node reconnects for multi cluster and is
-        # backwards compatible with single cluster
-        if isinstance(K8sOperator(), MultiClusterK8sOperator):
-            MultiClusterK8sOperator().watch_cluster_connections()
-
         while True:
             await asyncio.sleep(60)
             try:
