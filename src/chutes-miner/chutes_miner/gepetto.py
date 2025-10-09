@@ -949,6 +949,13 @@ class Gepetto:
                 .scalar_one_or_none()
             )
             if server:
+                await asyncio.gather(
+                    *[self.gpu_deleted({"gpu_id": gpu.gpu_id}) for gpu in server.gpus]
+                )
+                await session.refresh(server)
+                await session.delete(server)
+                await session.commit()
+
                 # If this is a standalone server, we need to stop monitoring from the agent
                 if server.agent_api:
                     try:
@@ -963,13 +970,7 @@ class Gepetto:
                         logger.error(
                             f"Unexpected error encountered trying to stop monitoring for {server.name}.\n{e}"
                         )
-
-                await asyncio.gather(
-                    *[self.gpu_deleted({"gpu_id": gpu.gpu_id}) for gpu in server.gpus]
-                )
-                await session.refresh(server)
-                await session.delete(server)
-                await session.commit()
+                        
         logger.info(f"Finished processing server_deleted event for {server_id=}")
 
     async def image_deleted(self, event_data: Dict[str, Any]):
