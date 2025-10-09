@@ -1343,14 +1343,18 @@ class MultiClusterK8sOperator(K8sOperator):
     # This class will implement the K8sOperator interface but translate operations
     # to work with Karmada's multi-cluster orchestration
     def __init__(self):
-        self._manager = KubernetesMultiClusterClientManager()
-        self._redis = MonitoringRedisClient()
         self._initialize()
 
     def _initialize(self):
         # Ugly pattern to ensure we don't kick this off every time singleton is called.
         if not hasattr(self, "_cluster_monitor_task"):
             self._cluster_monitor_task = asyncio.create_task(self._watch_clusters())
+        
+        if not hasattr(self, "_manager"):
+            self._manager = KubernetesMultiClusterClientManager()
+
+        if not hasattr(self, "_redis"):
+            self._redis = MonitoringRedisClient()
 
     def _get_request_timeout(self, read_timeout: int) -> Tuple[int, int]:
         return (5, read_timeout)
