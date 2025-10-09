@@ -1349,7 +1349,7 @@ class MultiClusterK8sOperator(K8sOperator):
         # Ugly pattern to ensure we don't kick this off every time singleton is called.
         if not hasattr(self, "_cluster_monitor_task"):
             self._cluster_monitor_task = asyncio.create_task(self._watch_clusters())
-        
+
         if not hasattr(self, "_manager"):
             self._manager = KubernetesMultiClusterClientManager()
 
@@ -1430,7 +1430,7 @@ class MultiClusterK8sOperator(K8sOperator):
             logger.error(
                 f"Unexpected error watching cluster connections: {e}\n{traceback.format_exc()}"
             )
-            
+
     async def _watch_cluster_connections(self):
         try:
             pubsub = self._redis.subscribe_to_cluster_reconnect()
@@ -1460,14 +1460,9 @@ class MultiClusterK8sOperator(K8sOperator):
         try:
             logger.info(f"Cluster {message.cluster} reconnected.  Refreshing Chutes config maps.")
 
-            # Don't block in case there was a mass restart, 
+            # Don't block in case there was a mass restart,
             # instead dump each cluster to a thread
-            asyncio.create_task(
-                asyncio.to_thread(
-                    self._sync_chute_configmaps,
-                    message.cluster
-                )
-            )
+            asyncio.create_task(asyncio.to_thread(self._sync_chute_configmaps, message.cluster))
 
         except Exception as e:
             logger.error(f"Unexpected exception while handling cluster change:\n{e}")
@@ -1475,7 +1470,6 @@ class MultiClusterK8sOperator(K8sOperator):
     def _sync_chute_configmaps(self, cluster_name: str):
         try:
             with get_sync_session() as session:
-
                 # Get all existing CMs
                 client = self._manager.get_core_client(cluster_name)
                 chute_cms: V1ConfigMapList = client.list_namespaced_config_map(
@@ -1491,11 +1485,10 @@ class MultiClusterK8sOperator(K8sOperator):
                 for chute in chutes:
                     config_map = self._build_code_config_map(chute)
                     self._deploy_config_map_to_cluster(cluster_name, config_map)
-                
+
             logger.info(f"Successfully synced chute configmaps for {cluster_name}")
         except Exception as e:
             logger.error(f"Unexpected exception syncing chute configmaps for {cluster_name}:\n{e}")
-
 
     def get_node(
         self, name: str, kubeconfig: Optional[KubeConfig] = None, timeout_seconds=15
@@ -1709,7 +1702,7 @@ class MultiClusterK8sOperator(K8sOperator):
                 config_map=config_map,
                 namespace=namespace,
                 timeout_seconds=timeout_seconds,
-                force=force
+                force=force,
             )
         )
 
@@ -1718,7 +1711,7 @@ class MultiClusterK8sOperator(K8sOperator):
         config_map: V1ConfigMap,
         namespace=settings.namespace,
         timeout_seconds: int = 60,
-        force=False
+        force=False,
     ):
         # Create CM on all clusters
         clusters = self._redis.get_all_cluster_names()
@@ -1769,7 +1762,9 @@ class MultiClusterK8sOperator(K8sOperator):
                             _request_timeout=self._get_request_timeout(timeout_seconds),
                         )
                     except ApiException:
-                        logger.error(f"Failed to force replace configmap {config_map.metdata.name} on cluster {cluster}")
+                        logger.error(
+                            f"Failed to force replace configmap {config_map.metdata.name} on cluster {cluster}"
+                        )
             elif e.status == 503:
                 pass
             else:

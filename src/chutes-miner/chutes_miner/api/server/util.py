@@ -13,7 +13,6 @@ import chutes_common.constants as cst
 from chutes_common.k8s import WatchEventType
 from chutes_common.monitoring.requests import StartMonitoringRequest
 from chutes_common.redis import MonitoringRedisClient
-from chutes_common.schemas.chute import Chute
 from chutes_miner.api.k8s.config import KubeConfig, MultiClusterKubeConfig
 from loguru import logger
 from kubernetes.client import (

@@ -6,7 +6,7 @@ import re
 import aiohttp
 import asyncio
 import hashlib
-from chutes_miner.api.k8s.operator import K8sOperator, MultiClusterK8sOperator
+from chutes_miner.api.k8s.operator import K8sOperator
 from chutes_miner.api.server.util import clear_server_cache, stop_server_monitoring
 import orjson as json
 import traceback
