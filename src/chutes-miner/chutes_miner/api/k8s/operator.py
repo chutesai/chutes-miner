@@ -1408,7 +1408,7 @@ class MultiClusterK8sOperator(K8sOperator):
                             self._manager.multi_config.add_config(
                                 KubeConfig.from_dict(yaml.safe_load(server.kubeconfig))
                             )
-                            await self._sync_chute_configmaps(message.cluster)
+                            self._sync_chute_configmaps(message.cluster)
                         else:
                             logger.warning(
                                 f"Received add event for cluster {message.cluster} but no kubeconfig is set in DB."
