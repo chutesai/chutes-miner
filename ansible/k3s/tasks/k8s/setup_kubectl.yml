@@ -93,6 +93,7 @@
       delegate_to: "{{ item }}"
       loop: "{{ ansible_play_hosts_all | default(groups['all']) | difference([control_node]) }}"
       register: k3s_installed_check
+      become: false
 
     - name: Build list of nodes with k3s installed
       ansible.builtin.set_fact:
