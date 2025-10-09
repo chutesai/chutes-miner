@@ -593,7 +593,7 @@ class K8sOperator(abc.ABC):
         """Create a ConfigMap to store the chute code."""
         try:
             config_map = self._build_code_config_map(chute)
-            self._deploy_config_map(config_map, force=force)
+            await self._deploy_config_map(config_map, force=force)
         except ApiException as e:
             if e.status != 409:
                 raise
@@ -614,7 +614,7 @@ class K8sOperator(abc.ABC):
         return config_map
 
     @abc.abstractmethod
-    def _deploy_config_map(
+    async def _deploy_config_map(
         self, config_map: V1ConfigMap, namespace=settings.namespace, timeout_seconds=60, force=False
     ):
         raise NotImplementedError()
@@ -1315,7 +1315,7 @@ class SingleClusterK8sOperator(K8sOperator):
             name=name, namespace=namespace, _request_timeout=timeout_seconds
         )
 
-    def _deploy_config_map(
+    async def _deploy_config_map(
         self, config_map: V1ConfigMap, namespace=settings.namespace, timeout_seconds=60, force=False
     ):
         try:
@@ -1323,15 +1323,16 @@ class SingleClusterK8sOperator(K8sOperator):
                 namespace=namespace, body=config_map, _request_timeout=timeout_seconds
             )
         except ApiException as e:
-            if e.status == 409 and force:
-                k8s_core_client().delete_namespaced_config_map(
-                    name=config_map.metadata.name,
-                    namespace=namespace,
-                    _request_timeout=timeout_seconds,
-                )
-                k8s_core_client().create_namespaced_config_map(
-                    namespace=namespace, body=config_map, _request_timeout=timeout_seconds
-                )
+            if e.status == 409:
+                if force:
+                    k8s_core_client().delete_namespaced_config_map(
+                        name=config_map.metadata.name,
+                        namespace=namespace,
+                        _request_timeout=timeout_seconds,
+                    )
+                    k8s_core_client().create_namespaced_config_map(
+                        namespace=namespace, body=config_map, _request_timeout=timeout_seconds
+                    )
             else:
                 raise
 
@@ -1476,7 +1477,7 @@ class MultiClusterK8sOperator(K8sOperator):
             chutes = (await session.execute(select(Chute))).unique().scalars()
             for chute in chutes:
                 config_map = self._build_code_config_map(chute)
-                self._deploy_config_map_to_cluster(cluster_name, config_map)
+                await self._deploy_config_map_to_cluster(cluster_name, config_map)
 
     def get_node(
         self, name: str, kubeconfig: Optional[KubeConfig] = None, timeout_seconds=15
@@ -1675,7 +1676,7 @@ class MultiClusterK8sOperator(K8sOperator):
             if e.status != 404:
                 raise
 
-    def _deploy_config_map(
+    async def _deploy_config_map(
         self,
         config_map: V1ConfigMap,
         namespace=settings.namespace,
@@ -1685,11 +1686,11 @@ class MultiClusterK8sOperator(K8sOperator):
         # Create CM on all clusters
         clusters = self._redis.get_all_cluster_names()
         for cluster in clusters:
-            self._deploy_config_map_to_cluster(
+            await self._deploy_config_map_to_cluster(
                 cluster, config_map, namespace, timeout_seconds, force
             )
 
-    def _deploy_config_map_to_cluster(
+    async def _deploy_config_map_to_cluster(
         self,
         cluster: str,
         config_map: V1ConfigMap,
@@ -1719,16 +1720,21 @@ class MultiClusterK8sOperator(K8sOperator):
                     logger.warning(
                         f"Replacing configmap {config_map.metadata.name} on cluster {cluster}."
                     )
-                    client.delete_namespaced_config_map(
-                        name=config_map.metadata.name,
-                        namespace=namespace,
-                        _request_timeout=self._get_request_timeout(timeout_seconds),
-                    )
-                    client.create_namespaced_config_map(
-                        namespace=namespace,
-                        body=config_map,
-                        _request_timeout=self._get_request_timeout(timeout_seconds),
-                    )
+                    try:
+                        client.delete_namespaced_config_map(
+                            name=config_map.metadata.name,
+                            namespace=namespace,
+                            _request_timeout=self._get_request_timeout(timeout_seconds),
+                        )
+                        client.create_namespaced_config_map(
+                            namespace=namespace,
+                            body=config_map,
+                            _request_timeout=self._get_request_timeout(timeout_seconds),
+                        )
+                    except ApiException:
+                        logger.error(f"Failed to force replace configmap {config_map.metdata.name} on cluster {cluster}")
+            elif e.status == 503:
+                pass
             else:
                 # We can just swallow 409s. Other errors shoudl be logged,
                 # but still do not want to short circuit
