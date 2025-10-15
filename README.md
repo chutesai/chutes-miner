@@ -36,8 +36,9 @@ We've tried to automate the bulk of the process via ansible, helm/kubernetes, so
     - [Chutes Miner GPU](#chutes-miner-gpu)
   - [4. Setup Your Infrastructure](#4-setup-your-infrastructure)
   - [5. Update Gepetto with Your Optimized Strategy](#5-update-gepetto-with-your-optimized-strategy)
-  - [6. Register](#6-register)
-  - [7. Add Your GPU Nodes to Inventory](#7-add-your-gpu-nodes-to-inventory)
+  - [6. Post Install](#6-post-install)
+  - [7. Register](#7-register)
+  - [8. Add Your GPU Nodes to Inventory](#8-add-your-gpu-nodes-to-inventory)
 - [Adding Servers](#%EF%B8%8F-adding-servers)
 - [Cluster Management Utilities](#%EF%B8%8F-cluster-management-utilities)
   - [ktx (Kube Context Switcher)](#ktx-kube-context-switcher)
@@ -253,17 +254,6 @@ The easiest way to interact with kubernetes would be from within the primary nod
     controller_kubeconfig: ~/.kube/chutes.config
     ```
 
-
-#### Dockerhub login
-
-- Create a docker hub login to avoid getting rate-limited on pulling public images (you may not need this at all, but it can't hurt):
-  - Head over to https://hub.docker.com/ and sign up, generate a new personal access token for public read-only access, then create the secret:
-
-```bash
-# Create secret for the plane context
-kubectl create secret docker-registry regcred --context chutes-miner-cpu-0 --docker-server=docker.io --docker-username=[replace with your username] --docker-password=[replace with your access token] --docker-email=[replace with your email]
-```
-
 #### Miner credentials
 
 In order to authenticate with the valiadtor you need to supply the miner credentials via a k8s secret.  This secret can be automatically created by ansible but you need the wallet first.
@@ -387,7 +377,19 @@ You must also restart the gepetto deployment after you make changes, but this wi
 kubectl rollout restart deployment/gepetto --context chutes-miner-cpu-0 -n chutes
 ```
 
-### 6. Register
+### 6. Post Install
+
+#### Dockerhub login (Optional)
+
+- Create a docker hub login to avoid getting rate-limited on pulling public images (you may not need this at all, but it can't hurt):
+  - Head over to https://hub.docker.com/ and sign up, generate a new personal access token for public read-only access, then create the secret:
+
+```bash
+# Create secret for the context
+kubectl create secret docker-registry regcred --context chutes-miner-cpu-0 --docker-server=docker.io --docker-username=[replace with your username] --docker-password=[replace with your access token] --docker-email=[replace with your email]
+```
+
+### 7. Register
 
 Register as a miner on subnet 64.
 ```bash
@@ -397,7 +399,7 @@ btcli subnet register --netuid 64 --wallet.name [COLDKEY] --wallet.hotkey [HOTKE
 You __*should not*__ announce an axon here!  All communications are done via client-side initialized socket.io connections so public axons serve no purpose and are just a security risk.
 
 
-### 7. Add your GPU nodes to inventory
+### 8. Add your GPU nodes to inventory
 
 The last step in enabling a GPU node in your miner is to use the `add-node` command in the `chutes-miner` CLI.  This calls the miner API, triggers spinning up graval validation services, etc.  This must be run exactly once for each GPU node in order for them to be usable by your miner.
 
