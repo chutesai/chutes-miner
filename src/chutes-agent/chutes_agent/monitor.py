@@ -3,8 +3,9 @@ import asyncio
 import logging
 import os
 from typing import Any, Callable, Optional
+from chutes_agent.k8s import KubernetesResourceType
 from chutes_common.monitoring.models import ClusterState, MonitoringState, MonitoringStatus
-from chutes_common.k8s import WatchEvent, serializer
+from chutes_common.k8s import WatchEvent, WatchEventType, serializer
 from chutes_common.exceptions import (
     ClusterConflictException,
     ClusterNotFoundException,
@@ -283,6 +284,9 @@ class ResourceMonitor:
             self.core_v1 = client.CoreV1Api()
             self.apps_v1 = client.AppsV1Api()
             self.batch_v1 = client.BatchV1Api()
+            self.networking_v1 = client.NetworkingV1Api()  # For Ingress
+            self.rbac_authorization_v1 = client.RbacAuthorizationV1Api()  # For RBAC
+            self.storage_v1 = client.StorageV1Api()  # For StorageClass
 
         except Exception as e:
             logger.error(f"Failed to initialize: {e}")
@@ -482,14 +486,156 @@ class ResourceMonitor:
     async def handle_resource_event(self, event: WatchEvent):
         """Handle a resource change event"""
         try:
-            await self.control_plane_client.send_resource_update(event)
+            # Special handling for all deletion events
+            if event.type == WatchEventType.DELETED:
+                # Check if resource still exists in cluster
+                still_exists = await self._check_resource_exists(event)
+                
+                if still_exists:
+                    # Resource still exists, it just got deletionTimestamp - send as TERMINATING
+                    terminating_event = WatchEvent(
+                        type=WatchEventType.TERMINATING,
+                        object=event.object
+                    )
+                    await self.control_plane_client.send_resource_update(terminating_event)
+                    
+                    # Schedule a task to check when resource is actually gone
+                    asyncio.create_task(self._monitor_resource_actual_deletion(event))
+                    
+                else:
+                    # Resource is actually gone - send normal DELETED event
+                    await self.control_plane_client.send_resource_update(event)
+            else:
+                # Normal event handling for non-deletion events
+                await self.control_plane_client.send_resource_update(event)
 
             logger.debug(
-                f"Sent {event.type} event for {event.obj_type}/{event.obj_name} in {event.obj_namespace}"
+                f"Sent {event.type} event for {event.obj_type}/{event.obj_name} in {event.obj_namespace or 'cluster-scoped'}"
             )
 
         except Exception as e:
             logger.error(f"Error handling {event.obj_type} event: {e}")
+
+    async def _check_resource_exists(self, event: WatchEvent) -> bool:
+        """Check if a resource still exists in the cluster"""
+        try:
+            # Convert string to enum for type safety
+            try:
+                resource_type = KubernetesResourceType.from_string(event.obj_type)
+            except ValueError:
+                logger.warning(f"Unknown resource type: {event.obj_type}")
+                return False
+            
+            if resource_type.is_namespaced:
+                # Namespaced resource
+                read_func = self._get_namespaced_read_function(resource_type)
+                if read_func:
+                    await read_func(name=event.obj_name, namespace=event.obj_namespace)
+                else:
+                    logger.warning(f"No read function found for namespaced resource type: {resource_type.value}")
+                    return False
+            else:
+                # Cluster-scoped resource
+                read_func = self._get_cluster_read_function(resource_type)
+                if read_func:
+                    await read_func(name=event.obj_name)
+                else:
+                    logger.warning(f"No read function found for cluster-scoped resource type: {resource_type.value}")
+                    return False
+            
+            return True  # If we get here, resource still exists
+            
+        except ApiException as e:
+            if e.status == 404:
+                return False  # Resource doesn't exist
+            else:
+                # Some other error - assume it exists to be safe
+                logger.error(f"Error checking if {event.obj_type} exists: {e}")
+                return True
+
+    def _get_namespaced_read_function(self, resource_type: KubernetesResourceType):
+        """Get the appropriate read function for namespaced resources"""
+        read_functions = {
+            KubernetesResourceType.POD: self.core_v1.read_namespaced_pod,
+            KubernetesResourceType.SERVICE: self.core_v1.read_namespaced_service,
+            KubernetesResourceType.DEPLOYMENT: self.apps_v1.read_namespaced_deployment,
+            KubernetesResourceType.JOB: self.batch_v1.read_namespaced_job,
+            KubernetesResourceType.CONFIG_MAP: self.core_v1.read_namespaced_config_map,
+            KubernetesResourceType.SECRET: self.core_v1.read_namespaced_secret,
+            KubernetesResourceType.PERSISTENT_VOLUME_CLAIM: self.core_v1.read_namespaced_persistent_volume_claim,
+            KubernetesResourceType.INGRESS: self.networking_v1.read_namespaced_ingress,
+            KubernetesResourceType.STATEFUL_SET: self.apps_v1.read_namespaced_stateful_set,
+            KubernetesResourceType.DAEMON_SET: self.apps_v1.read_namespaced_daemon_set,
+            KubernetesResourceType.REPLICA_SET: self.apps_v1.read_namespaced_replica_set,
+            KubernetesResourceType.CRON_JOB: self.batch_v1.read_namespaced_cron_job,
+            KubernetesResourceType.NETWORK_POLICY: self.networking_v1.read_namespaced_network_policy,
+            KubernetesResourceType.ROLE: self.rbac_authorization_v1.read_namespaced_role,
+            KubernetesResourceType.ROLE_BINDING: self.rbac_authorization_v1.read_namespaced_role_binding,
+            KubernetesResourceType.SERVICE_ACCOUNT: self.core_v1.read_namespaced_service_account,
+            KubernetesResourceType.NAMESPACE: self.core_v1.read_namespace,
+        }
+        return read_functions.get(resource_type)
+
+    def _get_cluster_read_function(self, resource_type: KubernetesResourceType):
+        """Get the appropriate read function for cluster-scoped resources"""
+        read_functions = {
+            KubernetesResourceType.NODE: self.core_v1.read_node,
+            KubernetesResourceType.PERSISTENT_VOLUME: self.core_v1.read_persistent_volume,
+            KubernetesResourceType.CLUSTER_ROLE: self.rbac_authorization_v1.read_cluster_role,
+            KubernetesResourceType.CLUSTER_ROLE_BINDING: self.rbac_authorization_v1.read_cluster_role_binding,
+            KubernetesResourceType.STORAGE_CLASS: self.storage_v1.read_storage_class,
+        }
+        return read_functions.get(resource_type)
+
+    async def _monitor_resource_actual_deletion(self, original_event: WatchEvent):
+        """Monitor for when a resource is actually deleted from the cluster"""
+        max_wait = 300  # 5 minutes max wait
+        check_interval = 2  # Check every 2 seconds
+        elapsed = 0
+        
+        resource_id = f"{original_event.obj_type}/{original_event.obj_name}"
+        if original_event.obj_namespace:
+            resource_id += f" in {original_event.obj_namespace}"
+        
+        logger.debug(f"Starting deletion monitoring for {resource_id}")
+        
+        while elapsed < max_wait:
+            try:
+                still_exists = await self._check_resource_exists(original_event)
+                
+                if not still_exists:
+                    # Resource is actually gone now - send the real DELETED event
+                    deleted_event = WatchEvent(
+                        type=WatchEventType.DELETED,
+                        object=original_event.object
+                    )
+                    await self.control_plane_client.send_resource_update(deleted_event)
+                    logger.debug(f"Resource {resource_id} actually deleted after {elapsed}s")
+                    return
+                
+                # Resource still exists, wait and check again
+                await asyncio.sleep(check_interval)
+                elapsed += check_interval
+                
+            except Exception as e:
+                logger.error(f"Error monitoring deletion of {resource_id}: {e}")
+                # Continue monitoring despite errors
+                await asyncio.sleep(check_interval)
+                elapsed += check_interval
+        
+        # If we get here, something went wrong or resource took too long to delete
+        logger.warning(f"Resource {resource_id} deletion monitoring timed out after {max_wait}s")
+        
+        # Send the DELETED event anyway after timeout to prevent cache leaks
+        try:
+            deleted_event = WatchEvent(
+                type=WatchEventType.DELETED,
+                object=original_event.object
+            )
+            await self.control_plane_client.send_resource_update(deleted_event)
+            logger.info(f"Sent DELETED event for {resource_id} after timeout")
+        except Exception as e:
+            logger.error(f"Failed to send timeout DELETED event for {resource_id}: {e}")
 
     async def send_heartbeat(self):
         """Send periodic heartbeat to control plane"""
