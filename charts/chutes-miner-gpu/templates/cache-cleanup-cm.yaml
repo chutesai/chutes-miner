@@ -78,22 +78,21 @@ data:
                 if uuid_hub.exists() and list(uuid_hub.glob("models--*")):
                     hub_dirs.append(uuid_hub)
 
-        if not hub_dirs:
-            print("No HuggingFace cache directories found")
-            return 0, []
-
         # Process each hub directory
         size_on_disk = 0
         all_repos = []
-        
-        for hub_dir in hub_dirs:
-            try:
-                cache_info = scan_cache_dir(cache_dir=hub_dir.parent)
-                print(f"Cache in {hub_dir}: {cache_info.size_on_disk / 1024**3:.2f}GB")
-                size_on_disk += cache_info.size_on_disk
-                all_repos.extend(cache_info.repos)
-            except Exception as e:
-                print(f"Error scanning {hub_dir}: {e}")
+
+        if hub_dirs:
+            for hub_dir in hub_dirs:
+                try:
+                    cache_info = scan_cache_dir(cache_dir=hub_dir)
+                    print(f"Cache in {hub_dir}: {cache_info.size_on_disk / 1024**3:.2f}GB")
+                    size_on_disk += cache_info.size_on_disk
+                    all_repos.extend(cache_info.repos)
+                except Exception as e:
+                    print(f"Error scanning {hub_dir}: {e}")
+        else:
+            print("No HuggingFace cache directories found")
 
         return SimpleNamespace(
             size_on_disk=size_on_disk,
@@ -117,9 +116,10 @@ data:
                 print(f"Skipping excluded repo: {repo.repo_id}")
                 continue
             if repo.last_accessed < cutoff_time:
-                print(f"Removing old cache: {repo.repo_id} ({repo.size_on_disk / 1024**3:.2f}GB, "
-                      f"last accessed: {time.strftime('%Y-%m-%d', time.localtime(repo.last_accessed))})")
-                shutil.rmtree(repo.repo_path)
+                print(f"Removing old cache: {repo.repo_id} ({repo.size_on_disk / 1024**3:.2f}GB\n"
+                      f"\tlast accessed: {time.strftime('%Y-%m-%d', time.localtime(repo.last_accessed))}\n"
+                      f"\t{repo.repo_path.parent.parent}")
+                shutil.rmtree(repo.repo_path.parent.parent)
         cache_info = scan_uuid_cache_dir()
         if cache_info.size_on_disk > max_size_bytes:
             repos = sorted(cache_info.repos, key=lambda r: r.size_on_disk, reverse=True)
@@ -129,8 +129,8 @@ data:
                     print(f"Skipping excluded repo: {repo.repo_id}")
                     continue
                 if repo.repo_path.exists():
-                    print(f"Removing large cache: {repo.repo_id} ({repo.size_on_disk / 1024**3:.2f}GB)")
-                    shutil.rmtree(repo.repo_path)
+                    print(f"Removing large cache: {repo.repo_id} ({repo.size_on_disk / 1024**3:.2f}GB) [{repo.repo_path.parent.parent}]")
+                    shutil.rmtree(repo.repo_path.parent.parent)
                     cache_info = scan_uuid_cache_dir()
                     if cache_info.size_on_disk <= max_size_bytes:
                         break
