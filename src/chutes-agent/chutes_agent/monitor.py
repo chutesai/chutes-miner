@@ -490,18 +490,17 @@ class ResourceMonitor:
             if event.type == WatchEventType.DELETED:
                 # Check if resource still exists in cluster
                 still_exists = await self._check_resource_exists(event)
-                
+
                 if still_exists:
                     # Resource still exists, it just got deletionTimestamp - send as TERMINATING
                     terminating_event = WatchEvent(
-                        type=WatchEventType.TERMINATING,
-                        object=event.object
+                        type=WatchEventType.TERMINATING, object=event.object
                     )
                     await self.control_plane_client.send_resource_update(terminating_event)
-                    
+
                     # Schedule a task to check when resource is actually gone
                     asyncio.create_task(self._monitor_resource_actual_deletion(event))
-                    
+
                 else:
                     # Resource is actually gone - send normal DELETED event
                     await self.control_plane_client.send_resource_update(event)
@@ -525,14 +524,16 @@ class ResourceMonitor:
             except ValueError:
                 logger.warning(f"Unknown resource type: {event.obj_type}")
                 return False
-            
+
             if resource_type.is_namespaced:
                 # Namespaced resource
                 read_func = self._get_namespaced_read_function(resource_type)
                 if read_func:
                     await read_func(name=event.obj_name, namespace=event.obj_namespace)
                 else:
-                    logger.warning(f"No read function found for namespaced resource type: {resource_type.value}")
+                    logger.warning(
+                        f"No read function found for namespaced resource type: {resource_type.value}"
+                    )
                     return False
             else:
                 # Cluster-scoped resource
@@ -540,11 +541,13 @@ class ResourceMonitor:
                 if read_func:
                     await read_func(name=event.obj_name)
                 else:
-                    logger.warning(f"No read function found for cluster-scoped resource type: {resource_type.value}")
+                    logger.warning(
+                        f"No read function found for cluster-scoped resource type: {resource_type.value}"
+                    )
                     return False
-            
+
             return True  # If we get here, resource still exists
-            
+
         except ApiException as e:
             if e.status == 404:
                 return False  # Resource doesn't exist
@@ -592,46 +595,42 @@ class ResourceMonitor:
         max_wait = 300  # 5 minutes max wait
         check_interval = 2  # Check every 2 seconds
         elapsed = 0
-        
+
         resource_id = f"{original_event.obj_type}/{original_event.obj_name}"
         if original_event.obj_namespace:
             resource_id += f" in {original_event.obj_namespace}"
-        
+
         logger.debug(f"Starting deletion monitoring for {resource_id}")
-        
+
         while elapsed < max_wait:
             try:
                 still_exists = await self._check_resource_exists(original_event)
-                
+
                 if not still_exists:
                     # Resource is actually gone now - send the real DELETED event
                     deleted_event = WatchEvent(
-                        type=WatchEventType.DELETED,
-                        object=original_event.object
+                        type=WatchEventType.DELETED, object=original_event.object
                     )
                     await self.control_plane_client.send_resource_update(deleted_event)
                     logger.debug(f"Resource {resource_id} actually deleted after {elapsed}s")
                     return
-                
+
                 # Resource still exists, wait and check again
                 await asyncio.sleep(check_interval)
                 elapsed += check_interval
-                
+
             except Exception as e:
                 logger.error(f"Error monitoring deletion of {resource_id}: {e}")
                 # Continue monitoring despite errors
                 await asyncio.sleep(check_interval)
                 elapsed += check_interval
-        
+
         # If we get here, something went wrong or resource took too long to delete
         logger.warning(f"Resource {resource_id} deletion monitoring timed out after {max_wait}s")
-        
+
         # Send the DELETED event anyway after timeout to prevent cache leaks
         try:
-            deleted_event = WatchEvent(
-                type=WatchEventType.DELETED,
-                object=original_event.object
-            )
+            deleted_event = WatchEvent(type=WatchEventType.DELETED, object=original_event.object)
             await self.control_plane_client.send_resource_update(deleted_event)
             logger.info(f"Sent DELETED event for {resource_id} after timeout")
         except Exception as e:
