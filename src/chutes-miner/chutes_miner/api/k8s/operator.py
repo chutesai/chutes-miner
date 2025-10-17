@@ -548,7 +548,9 @@ class K8sOperator(abc.ABC):
                 f"Error removing primary service {CHUTE_SVC_PREFIX}-{deployment_id}: {exc}"
             )
 
-        await self.wait_for_deletion(f"chutes/deployment-id={deployment_id}", timeout_seconds=timeout_seconds)
+        await self.wait_for_deletion(
+            f"chutes/deployment-id={deployment_id}", timeout_seconds=timeout_seconds
+        )
 
         if node_name:
             self.invalidate_node_disk_cache(node_name)
