@@ -498,7 +498,7 @@ def create_api_test_pods():
             pod_name = f"{base_name}-{i}"
             pod_uid = str(uuid.uuid4())
             rs_uid = str(uuid.uuid4())
-            deployment_uuid = job["metadata"]["labels"]["chutes/deployment-id"] if job else f"deployment-{uuid.uuid4()}"
+            deployment_uuid = job["metadata"]["labels"]["chutes/deployment-id"] if job else f"{uuid.uuid4()}"
             container_id = f"containerd://{uuid.uuid4().hex}"
 
             # Format current time in ISO format for JSON compatibility

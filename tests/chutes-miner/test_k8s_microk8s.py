@@ -338,7 +338,7 @@ async def test_wait_for_deletion_with_pods(mock_k8s_core_client, mock_watch):
     ]
 
     mock_event = {}
-    mock_event["type"] = "ADDED"
+    mock_event["type"] = "DELETED"
     mock_event["object"] = MagicMock()
     mock_watch_event = Mock()
     mock_watch_event.is_deleted = True
@@ -351,7 +351,41 @@ async def test_wait_for_deletion_with_pods(mock_k8s_core_client, mock_watch):
         await k8s.wait_for_deletion("app=test")
 
     # Assertions
-    assert mock_k8s_core_client.list_namespaced_pod.call_count == 1
+    assert mock_k8s_core_client.list_namespaced_pod.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_wait_for_deletion_with_timeout(mock_k8s_core_client, mock_watch):
+    """Test wait_for_deletion when pods exist and then get deleted."""
+    # Setup mock to return pods initially, then empty
+    pod_list_with_pods = MagicMock()
+    pod_list_with_pods.items = [MagicMock()]
+
+    pod_list_empty = MagicMock()
+    pod_list_empty.items = []
+
+    mock_k8s_core_client.list_namespaced_pod.side_effect = [
+        pod_list_with_pods,  # Initial check - pods exist
+        pod_list_with_pods,  # Initial check - pods exist
+        pod_list_empty,  # Check in the watch loop - pods gone
+    ]
+
+    mock_event = {}
+    mock_event["type"] = "DELETED"
+    mock_event["object"] = MagicMock()
+    mock_watch_event = Mock()
+    mock_watch_event.is_deleted = True
+    mock_watch.stream.return_value = [mock_event, mock_event]
+
+    with patch("chutes_miner.api.k8s.operator.WatchEvent") as mock_event_class:
+        mock_event_class.from_dict.return_value = mock_watch_event
+
+        # Call the function
+        await k8s.wait_for_deletion("app=test", timeout_seconds=25)
+
+    # Assertions
+    assert mock_k8s_core_client.list_namespaced_pod.call_count == 3
+    assert mock_k8s_core_client.list_namespaced_pod.call_args_list[2][1]["timeout_seconds"] == 25
 
 
 # Tests for undeploy

@@ -52,11 +52,11 @@ async def wait_for_deletion(label_selector: str, timeout_seconds: int = 120):
     return await K8sOperator().wait_for_deletion(label_selector, timeout_seconds)
 
 
-async def undeploy(deployment_id: str):
+async def undeploy(deployment_id: str, timeout_seconds: int = 120):
     """
     Delete a deployment, and associated service.
     """
-    return await K8sOperator().undeploy(deployment_id)
+    return await K8sOperator().undeploy(deployment_id, timeout_seconds=timeout_seconds)
 
 
 async def create_code_config_map(chute: Chute, force=False):
