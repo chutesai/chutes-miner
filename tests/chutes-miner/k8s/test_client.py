@@ -14,7 +14,7 @@ def sample_kubeconfig():
 
 def test_get_core_client(sample_kubeconfig):
     
-    with patch('chutes_miner.api.k8s.config.MultiClusterKubeConfig._load_async') as mock_load:
+    with patch('chutes_miner.api.k8s.config.MultiClusterKubeConfig._load') as mock_load:
         kubeconfig_dict = yaml.safe_load(sample_kubeconfig["kubeconfig"])
         kubeconfig = KubeConfig.from_dict(kubeconfig_dict)
 

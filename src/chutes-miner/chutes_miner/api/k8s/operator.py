@@ -498,7 +498,7 @@ class K8sOperator(abc.ABC):
         """
         Wait for a deleted pod to be fully removed.
         """
-        pods = self.get_pods(settings.namespace, label_selector)
+        pods = self.get_pods(settings.namespace, label_selector, timeout=timeout_seconds)
         if not pods.items:
             logger.info(f"Nothing to wait for: {label_selector}")
             return
@@ -508,7 +508,7 @@ class K8sOperator(abc.ABC):
                 namespace=settings.namespace, label_selector=label_selector, timeout=timeout_seconds
             ):
                 # Recheck pods
-                pods = self.get_pods(settings.namespace, label_selector)
+                pods = self.get_pods(settings.namespace, label_selector, timeout=timeout_seconds)
                 if not pods.items:
                     logger.success(f"Deletion of {label_selector=} is complete")
                     break
