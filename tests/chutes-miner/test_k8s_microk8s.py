@@ -351,7 +351,7 @@ async def test_wait_for_deletion_with_pods(mock_k8s_core_client, mock_watch):
         await k8s.wait_for_deletion("app=test")
 
     # Assertions
-    assert mock_k8s_core_client.list_namespaced_pod.call_count == 1
+    assert mock_k8s_core_client.list_namespaced_pod.call_count == 2
 
 
 # Tests for undeploy
