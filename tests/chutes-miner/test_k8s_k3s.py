@@ -534,6 +534,50 @@ async def test_wait_for_deletion_with_pods(mock_redis_client, create_api_test_po
     assert mock_redis_client.subscribe_to_resource_type.call_count == 1
     assert mock_pubsub.close.call_count == 1
 
+@pytest.mark.asyncio
+async def test_wait_for_deletion_with_timeout(mock_redis_client, create_api_test_pods):
+    """Test wait_for_deletion when pods exist and then get deleted."""
+    # Setup mock to return pods initially, then empty
+    pods = create_api_test_pods(1)
+    cluster_resources = ClusterResources.from_dict({
+        "pods": pods
+    })
+
+    mock_redis_client.get_resources.side_effect = [
+        cluster_resources,
+        cluster_resources,
+        ClusterResources()
+    ]
+
+    mock_pubsub = MagicMock()
+    mock_redis_client.subscribe_to_resource_type.return_value = mock_pubsub
+    mock_pubsub.get_message.side_effect = [
+        {
+            "type": "message",
+            "data": json.dumps(ResourceChangeMessage(
+                cluster="test-cluster", 
+                event=WatchEvent(type=WatchEventType.MODIFIED, object=cluster_resources.pods[0]),
+                timestamp=datetime.now(timezone.utc)
+            ).to_dict())
+        },
+        {
+            "type": "message",
+            "data": json.dumps(ResourceChangeMessage(
+                cluster="test-cluster", 
+                event=WatchEvent(type=WatchEventType.DELETED, object=cluster_resources.pods[0]),
+                timestamp=datetime.now(timezone.utc)
+            ).to_dict())
+        }
+    ]
+
+    with patch(
+        "chutes_miner.api.k8s.operator.MultiClusterK8sOperator._watch_resources"
+    ) as mock_watch_resources:
+        # Call the function
+        await k8s.wait_for_deletion("app=chute", timeout_seconds=25)
+
+        # Assertions
+        assert mock_watch_resources.call_args_list[0][1]["timeout"] == 25
 
 # Tests for undeploy
 @pytest.mark.asyncio
