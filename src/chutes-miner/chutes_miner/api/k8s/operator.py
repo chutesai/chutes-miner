@@ -504,10 +504,12 @@ class K8sOperator(abc.ABC):
             return
 
         try:
-            for event in self.watch_pods(
+            for _ in self.watch_pods(
                 namespace=settings.namespace, label_selector=label_selector, timeout=timeout_seconds
             ):
-                if event.is_deleted:
+                # Recheck pods
+                pods = self.get_pods(settings.namespace, label_selector)
+                if not pods.items:
                     logger.success(f"Deletion of {label_selector=} is complete")
                     break
         except Exception as exc:
@@ -1109,21 +1111,25 @@ class SingleClusterK8sOperator(K8sOperator):
             )
 
         # Use the standard Kubernetes watch mechanism
-        for event in watch.Watch().stream(
-            k8s_core_client().list_namespaced_pod,
-            namespace=namespace,
-            label_selector=label_selector,
-            field_selector=field_selector,
-            timeout_seconds=timeout,
-        ):
-            # Need to pass in object as dict to avoid pydantic errors
-            # Since watch event expects objects from k8s_asyncio
-            yield WatchEvent.from_dict(
-                {
-                    "type": event["type"],
-                    "object": k8s_api_client().sanitize_for_serialization(event["object"]),
-                }
-            )
+        w = watch.Watch()
+        try:
+            for event in w.stream(
+                k8s_core_client().list_namespaced_pod,
+                namespace=namespace,
+                label_selector=label_selector,
+                field_selector=field_selector,
+                timeout_seconds=timeout,
+            ):
+                # Need to pass in object as dict to avoid pydantic errors
+                # Since watch event expects objects from k8s_asyncio
+                yield WatchEvent.from_dict(
+                    {
+                        "type": event["type"],
+                        "object": k8s_api_client().sanitize_for_serialization(event["object"]),
+                    }
+                )
+        finally:
+            w.stop()
 
     def get_pods(
         self,
@@ -1228,21 +1234,25 @@ class SingleClusterK8sOperator(K8sOperator):
             )
 
         # Use the standard Kubernetes watch mechanism
-        for event in watch.Watch().stream(
-            k8s_app_client().list_namespaced_deployment,
-            namespace=namespace,
-            label_selector=label_selector,
-            field_selector=field_selector,
-            timeout_seconds=timeout,
-        ):
-            # Need to pass in object as dict to avoid pydantic errors
-            # Since watch event expects objects from k8s_asyncio
-            yield WatchEvent.from_dict(
-                {
-                    "type": event["type"],
-                    "object": k8s_api_client().sanitize_for_serialization(event["object"]),
-                }
-            )
+        w = watch.Watch()
+        try:
+            for event in w.stream(
+                k8s_app_client().list_namespaced_deployment,
+                namespace=namespace,
+                label_selector=label_selector,
+                field_selector=field_selector,
+                timeout_seconds=timeout,
+            ):
+                # Need to pass in object as dict to avoid pydantic errors
+                # Since watch event expects objects from k8s_asyncio
+                yield WatchEvent.from_dict(
+                    {
+                        "type": event["type"],
+                        "object": k8s_api_client().sanitize_for_serialization(event["object"]),
+                    }
+                )
+        finally:
+            w.close()
 
     def _delete_deployment(self, name, namespace=settings.namespace, timeout_seconds: int = 120):
         k8s_app_client().delete_namespaced_deployment(

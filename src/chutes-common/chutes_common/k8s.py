@@ -112,6 +112,7 @@ class WatchEventType(Enum):
 
     ADDED = "ADDED"
     MODIFIED = "MODIFIED"
+    TERMINATING = "TERMINATING"
     DELETED = "DELETED"
 
 
