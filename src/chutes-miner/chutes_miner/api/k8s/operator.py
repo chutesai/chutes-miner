@@ -516,7 +516,7 @@ class K8sOperator(abc.ABC):
             logger.warning(f"Error waiting for pods to be deleted: {exc}")
             raise
 
-    async def undeploy(self, deployment_id: str) -> None:
+    async def undeploy(self, deployment_id: str, timeout_seconds: int = 120) -> None:
         """
         Delete a job, and associated service.
         """
@@ -548,7 +548,7 @@ class K8sOperator(abc.ABC):
                 f"Error removing primary service {CHUTE_SVC_PREFIX}-{deployment_id}: {exc}"
             )
 
-        await self.wait_for_deletion(f"chutes/deployment-id={deployment_id}", timeout_seconds=15)
+        await self.wait_for_deletion(f"chutes/deployment-id={deployment_id}", timeout_seconds=timeout_seconds)
 
         if node_name:
             self.invalidate_node_disk_cache(node_name)
