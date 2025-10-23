@@ -168,12 +168,12 @@ def mock_k8s_operator():
 
 
 @pytest.fixture
-def mock_dependencies(mock_settings, mock_k8s_operator, mock_get_session):
+def mock_dependencies(mock_settings, mock_k8s_operator, mock_get_db_session):
     """Mock all external dependencies using constants for maintainability"""
     # Create dictionary mapping constants to mock instances
     dependency_config = {
         MockDependencies.K8S_OPERATOR: mock_k8s_operator,
-        MockDependencies.GET_SESSION: mock_get_session,
+        MockDependencies.GET_SESSION: mock_get_db_session,
         MockDependencies.SELECT: Mock(),
         MockDependencies.SERVER: Mock(),
         MockDependencies.GPU: Mock(),
@@ -416,7 +416,7 @@ async def test_bootstrap_server_multiple_seeds_assertion_error(
 
 @pytest.mark.asyncio
 async def test_bootstrap_server_cleanup_with_existing_server(
-    mock_node, mock_server_args, mock_k8s_operator, mock_dependencies
+    mock_node, mock_server_args, mock_k8s_operator, set_mock_db_session_result, mock_dependencies
 ):
     """Test cleanup behavior when server exists in database"""
     # Setup server with GPUs in database
@@ -430,17 +430,13 @@ async def test_bootstrap_server_cleanup_with_existing_server(
     mock_server_db.validator = "test_validator"
     
     mock_validator = MockValidator("test_hotkey", "http://test-validator.com")
-    
-    # Setup mock session with server query result
-    mock_session = AsyncMock()
-    mock_result = Mock()
-    mock_result.unique.return_value.scalar_one_or_none.return_value = mock_server_db
-    mock_session.execute.return_value = mock_result
-    
-    mock_dependencies[MockDependencies.GET_SESSION].return_value.__aenter__.return_value = mock_session
+
+    set_mock_db_session_result([mock_server_db])
+
     mock_dependencies[MockDependencies.VALIDATOR_BY_HOTKEY].return_value = mock_validator
     mock_dependencies[MockDependencies.TRACK_SERVER].side_effect = Exception("Tracking failed")
     mock_dependencies[MockDependencies.SSE_MESSAGE].side_effect = lambda msg: msg
+    mock_dependencies[MockDependencies.SIGN_REQUEST].return_value = ({}, None)
     
     # Mock aiohttp session for GPU cleanup
     mock_http_session = AsyncMock()
