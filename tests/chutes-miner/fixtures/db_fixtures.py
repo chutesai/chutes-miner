@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 import pytest
 
 
@@ -18,6 +18,7 @@ def mock_db_session():
     mock_result.unique.return_value = mock_result
     mock_result.scalar_one_or_none.return_value = []
     session.execute = AsyncMock(return_value=mock_result)
+    session.where = AsyncMock(return_value=mock_result)
     session.commit = AsyncMock()
     session.delete = AsyncMock()
     session.refresh = AsyncMock()
@@ -37,3 +38,27 @@ def mock_db_session():
     # Stop all patches when done
     for patcher in patches:
         patcher.stop()
+
+@pytest.fixture
+def mock_get_session():
+    # Create a specific __aexit__ function that returns False only when an exception is raised
+    async def mock_aexit(self, exc_type, exc_val, exc_tb):
+        # Return False only if there's an exception (exc_type is not None)
+        # Otherwise return True for normal operation
+        return exc_type is None
+
+    session = MagicMock()
+    mock_result = MagicMock()
+    mock_result.unique.return_value = mock_result
+    mock_result.scalar_one_or_none.return_value = []
+    session.execute = AsyncMock(return_value=mock_result)
+    session.where = AsyncMock(return_value=mock_result)
+    session.commit = AsyncMock()
+    session.delete = AsyncMock()
+    session.refresh = AsyncMock()
+
+    mock_context_manager = AsyncMock(__aenter__=AsyncMock(return_value=session), __aexit__=mock_aexit)
+    mock_get_session = Mock(return_value=mock_context_manager)
+
+    # Yield the shared mock for use in tests
+    return mock_get_session
