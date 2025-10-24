@@ -232,12 +232,8 @@ async def test_bootstrap_server_success_without_kubeconfig(
     mock_dependencies[MockDependencies.CHECK_VERIFICATION_TASK_STATUS].return_value = True
     mock_dependencies[MockDependencies.SSE_MESSAGE].side_effect = lambda msg: msg
     
-    # Mock database session
-    mock_session = AsyncMock()
-    mock_dependencies[MockDependencies.GET_SESSION].return_value.__aenter__.return_value = mock_session
-    
     # Execute test
-    from chutes_miner.api.server.util import bootstrap_server  # Replace with actual import
+    from chutes_miner.api.server.util import bootstrap_server
     messages = await collect_sse_messages(
         bootstrap_server(mock_node, mock_server_args, None)
     )
@@ -269,12 +265,8 @@ async def test_bootstrap_server_success_with_kubeconfig(
     mock_dependencies[MockDependencies.CHECK_VERIFICATION_TASK_STATUS].return_value = True
     mock_dependencies[MockDependencies.SSE_MESSAGE].side_effect = lambda msg: msg
     
-    # Mock database session
-    mock_session = AsyncMock()
-    mock_dependencies[MockDependencies.GET_SESSION].return_value.__aenter__.return_value = mock_session
-    
     # Execute test
-    from chutes_miner.api.server.util import bootstrap_server  # Replace with actual import
+    from chutes_miner.api.server.util import bootstrap_server
     messages = await collect_sse_messages(
         bootstrap_server(mock_node, mock_server_args, mock_kubeconfig)
     )
@@ -300,7 +292,7 @@ async def test_bootstrap_server_success_with_agent_api(
     mock_dependencies[MockDependencies.SSE_MESSAGE].side_effect = lambda msg: msg
     
     # Execute test
-    from chutes_miner.api.server.util import bootstrap_server  # Replace with actual import
+    from chutes_miner.api.server.util import bootstrap_server
     messages = await collect_sse_messages(
         bootstrap_server(mock_node, mock_server_args_with_agent, None)
     )
@@ -328,7 +320,7 @@ async def test_bootstrap_server_gpu_verification_failure(
     mock_dependencies[MockDependencies.SSE_MESSAGE].side_effect = lambda msg: msg
     
     # Execute test and expect exception
-    from chutes_miner.api.server.util import bootstrap_server, GraValBootstrapFailure  # Replace with actual import
+    from chutes_miner.api.server.util import bootstrap_server, GraValBootstrapFailure
     
     with pytest.raises(GraValBootstrapFailure):
         await collect_sse_messages(
@@ -354,7 +346,7 @@ async def test_bootstrap_server_advertise_nodes_failure(
     mock_dependencies[MockDependencies.SSE_MESSAGE].side_effect = lambda msg: msg
     
     # Execute test and expect exception
-    from chutes_miner.api.server.util import bootstrap_server  # Replace with actual import
+    from chutes_miner.api.server.util import bootstrap_server
     
     with pytest.raises(Exception, match="Advertisement failed"):
         await collect_sse_messages(
@@ -375,7 +367,7 @@ async def test_bootstrap_server_track_server_failure(
     mock_dependencies[MockDependencies.SSE_MESSAGE].side_effect = lambda msg: msg
     
     # Execute test and expect exception
-    from chutes_miner.api.server.util import bootstrap_server  # Replace with actual import
+    from chutes_miner.api.server.util import bootstrap_server
     
     with pytest.raises(Exception, match="Tracking failed"):
         await collect_sse_messages(
@@ -406,7 +398,7 @@ async def test_bootstrap_server_multiple_seeds_assertion_error(
     mock_dependencies[MockDependencies.SSE_MESSAGE].side_effect = lambda msg: msg
     
     # Execute test and expect assertion error
-    from chutes_miner.api.server.util import bootstrap_server  # Replace with actual import
+    from chutes_miner.api.server.util import bootstrap_server
     
     with pytest.raises(AssertionError, match="more than one seed"):
         await collect_sse_messages(
@@ -448,7 +440,7 @@ async def test_bootstrap_server_cleanup_with_existing_server(
         mock_aiohttp.return_value.__aenter__.return_value = mock_http_session
         
         # Execute test and expect exception
-        from chutes_miner.api.server.util import bootstrap_server  # Replace with actual import
+        from chutes_miner.api.server.util import bootstrap_server
         
         with pytest.raises(Exception, match="Tracking failed"):
             await collect_sse_messages(
@@ -481,7 +473,7 @@ async def test_bootstrap_server_verification_timeout_simulation(
     mock_dependencies[MockDependencies.GET_SESSION].return_value.__aenter__.return_value = mock_session
     
     # Execute test
-    from chutes_miner.api.server.util import bootstrap_server  # Replace with actual import
+    from chutes_miner.api.server.util import bootstrap_server
     messages = await collect_sse_messages(
         bootstrap_server(mock_node, mock_server_args, None)
     )
@@ -518,7 +510,7 @@ async def test_bootstrap_server_timing_measurement(
     end_time = 1045.5  # 45.5 seconds
     
     with patch('time.time', side_effect=[start_time, end_time]):
-        from chutes_miner.api.server.util import bootstrap_server  # Replace with actual import
+        from chutes_miner.api.server.util import bootstrap_server
         messages = await collect_sse_messages(
             bootstrap_server(mock_node, mock_server_args, None)
         )
@@ -541,7 +533,7 @@ async def test_bootstrap_server_sse_message_flow(mock_node, mock_server_args, mo
     mock_dependencies[MockDependencies.CHECK_VERIFICATION_TASK_STATUS].return_value = True
     mock_dependencies[MockDependencies.SSE_MESSAGE].side_effect = lambda msg: f"SSE: {msg}"
 
-    from chutes_miner.api.server.util import bootstrap_server  # Replace with actual import
+    from chutes_miner.api.server.util import bootstrap_server
     
     messages = await collect_sse_messages(
         bootstrap_server(mock_node, mock_server_args, None)
