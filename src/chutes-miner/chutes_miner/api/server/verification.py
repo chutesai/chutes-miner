@@ -15,11 +15,10 @@ from chutes_miner.api.database import get_session
 from chutes_miner.api.exceptions import GPUlessServer, GraValBootstrapFailure, NonEmptyServer
 from chutes_miner.api.k8s.constants import GRAVAL_JOB_PREFIX, GRAVAL_SVC_PREFIX
 from chutes_miner.api.k8s.operator import K8sOperator
-from chutes_miner.api.server.util import stop_server_monitoring
 from chutes_miner.api.util import sse_message
 from jsonschema import Validator
 from loguru import logger
-from sqlalchemy import Tuple, select, update
+from sqlalchemy import select, update
 from kubernetes.client import V1Node, V1Job, V1Service
 from kubernetes.client import (
     V1Node,
@@ -46,18 +45,41 @@ class VerificationStrategy(ABC):
         self.server_args = server_args
         self.server = server
         self.validator = validator_by_hotkey(server_args.validator)
+        self.queue = asyncio.Queue()
+        self._finished=False
 
-    @property
-    def yielder(self):
-        return self._yielder
-    
-    @yielder.setter
-    def yielder(self, value):
-        self._yielder = value
+    async def emit_message(self, message: str):
+        await self.queue.put(sse_message(message))
 
-    def emit_message(self, message: str):
-        if self._yielder:
-            self._yielder.send(sse_message(message))
+    async def run(self):
+        try:
+            await self.prepare_verification_environment()
+            await self.gather_gpu_info()
+            await self.advertise_to_validator()
+            await self.wait_for_verification_task()
+        finally:
+            self._finished = True
+
+    async def stream_messages(self):
+        """Yield messages from the queue until run has finished executing."""
+        while not self._finished:
+            try:
+                # Wait for a message with a timeout to avoid hanging indefinitely
+                message = await asyncio.wait_for(self.queue.get(), timeout=30.0)
+                self.queue.task_done()
+                yield message
+            except asyncio.TimeoutError:
+                await self.emit_message("Streaming timeout, no new messages")
+                break
+
+        # Drain any remaining messages in the queue after finishing
+        while not self.queue.empty():
+            try:
+                message = self.queue.get_nowait()
+                self.queue.task_done()
+                yield message
+            except asyncio.QueueEmpty:
+                break
 
     @abstractmethod
     async def prepare_verification_environment(
@@ -160,11 +182,11 @@ class GravalVerificationStrategy(VerificationStrategy):
         self.graval_job = graval_job
         self.graval_svc = graval_svc
 
-        self.emit_message("graval bootstrap job/service created, gathering device info...")
+        await self.emit_message("graval bootstrap job/service created, gathering device info...")
     
     async def _deploy_graval(
-        node_object: V1Node, validator_hotkey: str, cpu_per_gpu: int, memory_per_gpu: int
-    ) -> Tuple[V1Job, V1Service]:
+        self, node_object: V1Node, validator_hotkey: str, cpu_per_gpu: int, memory_per_gpu: int
+    ):
         """
         Create a job of the GraVal base validation service on a node.
         """
@@ -273,10 +295,7 @@ class GravalVerificationStrategy(VerificationStrategy):
         return await K8sOperator().deploy_graval(node_object, job, service)
 
     async def gather_gpu_info(
-        self,
-        node: V1Node,
-        server_args: ServerArgs,
-        server: Server
+        self
     ):
         """
         Gather GPU information using the appropriate method.
@@ -284,11 +303,11 @@ class GravalVerificationStrategy(VerificationStrategy):
         - TEE: Use TDX quotes and nv trust evidence
         """
         self.gpus = await self._gather_gpu_info(
-            server.server_id, server_args.validator, node
+            self.server.server_id, self.server_args.validator, self.node
         )
 
         model_name = self.gpus[0].device_info["name"]
-        self.emit_message(
+        await self.emit_message(
             f"discovered {len(self.gpus)} GPUs [{model_name=}] on node, advertising node to {len(settings.validators)} validator(s)...",
         )
 
@@ -339,7 +358,7 @@ class GravalVerificationStrategy(VerificationStrategy):
         # Configure our validation host/port.
         node_port = None
         node_ip = node_object.metadata.labels.get("chutes/external-ip")
-        for port in self.graval_service.spec.ports:
+        for port in self.graval_svc.spec.ports:
             if port.node_port:
                 node_port = port.node_port
                 break
@@ -403,7 +422,7 @@ class GravalVerificationStrategy(VerificationStrategy):
     
     async def advertise_to_validator(
         self
-    ) -> Tuple[str, list[dict]]:
+    ):
         """
         Advertise nodes to validator using appropriate endpoint.
         - Graval: POST to /nodes (or current endpoint)
@@ -413,7 +432,7 @@ class GravalVerificationStrategy(VerificationStrategy):
         """
         seed = None
         validator = validator_by_hotkey(self.server_args.validator)
-        self.emit_message(
+        await self.emit_message(
             f"advertising node to {validator.hotkey} via {validator.api}...",
         )
         validator_nodes = None
@@ -421,7 +440,7 @@ class GravalVerificationStrategy(VerificationStrategy):
         try:
             task_id, validator_nodes = await self._advertise_nodes(validator, self.gpus)
         except Exception as exc:
-            self.emit_message(
+            await self.emit_message(
                 f"failed to advertising node to {validator.hotkey} via {validator.api}: {exc}",
             )
             raise
@@ -434,7 +453,7 @@ class GravalVerificationStrategy(VerificationStrategy):
             assert seed == validator_nodes[0]["seed"], (
                 f"validators produced differing seeds {seed} vs {validator_nodes[0]['seed']}"
             )
-        self.emit_message(
+        await self.emit_message(
             f"successfully advertised node {self.node.metadata.uid} to validator {validator.hotkey}, received seed: {seed}"
         )
 
@@ -498,17 +517,17 @@ class GravalVerificationStrategy(VerificationStrategy):
         """
         # Wait for verification from this validator.
         while (status := await self._check_verification_task_status(self.validator, self.task_id)) is None:
-            self.emit_message(
+            await self.emit_message(
                 f"waiting for validator {self.validator.hotkey} to finish GPU verification..."
             )
             await asyncio.sleep(1)
         if status:
-            self.emit_message(
+            await self.emit_message(
                 f"validator {self.validator.hotkey} has successfully performed GPU verification"
             )
         else:
             error_message = f"GPU verification failed for {self.validator.hotkey}, aborting!"
-            self.emit_message(error_message)
+            await self.emit_message(error_message)
             raise GraValBootstrapFailure(error_message)
 
     async def cleanup(
@@ -521,7 +540,7 @@ class GravalVerificationStrategy(VerificationStrategy):
         - TEE: Cleanup TEE-specific resources if needed
         """
         node_object = self.node
-        
+
         await K8sOperator().cleanup_graval(node_object)
 
         if delete_node:

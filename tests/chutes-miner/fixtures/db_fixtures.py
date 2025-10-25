@@ -1,5 +1,6 @@
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from chutes_common.schemas.gpu import GPU
 import pytest
 
 
@@ -40,6 +41,14 @@ def mock_db_session():
     for patcher in patches:
         patcher.stop()
 
+def mock_refresh(obj: Any):
+    if isinstance(obj, GPU):
+        gpu = obj
+        # Populate server on refresh
+        gpu.server = MagicMock()
+        gpu.server.ip_address = "192.168.1.100"
+        gpu.server.verification_port = 8080
+
 # TODO: Update uses of mock_db_session from above to use this instead
 @pytest.fixture
 def get_mock_db_session():
@@ -60,7 +69,7 @@ def get_mock_db_session():
     session.where = AsyncMock(return_value=mock_execute_result)
     session.commit = AsyncMock()
     session.delete = AsyncMock()
-    session.refresh = AsyncMock()
+    session.refresh = AsyncMock(side_effect=mock_refresh)
 
     return session
 

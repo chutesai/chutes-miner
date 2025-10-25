@@ -2,6 +2,7 @@
 Server utility functions.
 """
 
+import asyncio
 import json
 import time
 import math
@@ -180,10 +181,9 @@ async def bootstrap_server(
     Bootstrap a server from start to finish, yielding SSEs for miner to track status.
     """
     started_at = time.time()
+    strategy = None
     
-    async def _cleanup(strategy: VerificationStrategy, delete_node=False):
-        strategy.cleanup(delete_node)
-
+    async def _cleanup(delete_node=False):
         if delete_node and server_args.agent_api:
             # If adding a standalone cluster, need to stop monitoring
             await stop_server_monitoring(server_args.agent_api)
@@ -226,19 +226,16 @@ async def bootstrap_server(
             )
 
         strategy = GravalVerificationStrategy(node, server_args, server)
-        # Set yield expression to allow emitting SSE messages
-        strategy.yielder = (yield)
 
-        # Setup resources for verification
-        await strategy.prepare_verification_environment()
+        task = asyncio.create_task(strategy.run())
 
-        # Excellent, now gather the GPU info.
-        await strategy.gather_gpu_info()
+        async for msg in strategy.stream_messages():
+            yield msg
 
-        # Beautiful, tell the validators about it.
-        await strategy.advertise_to_validator()
+        await task
 
-        await strategy.wait_for_verification_task()
+        if task.exception():
+            raise task.exception()
 
     except Exception as exc:
         error_message = (
@@ -246,10 +243,14 @@ async def bootstrap_server(
         )
         logger.error(error_message)
         yield sse_message(error_message)
-        await _cleanup(strategy, delete_node=True)
+        if strategy:
+            await strategy.cleanup(delete_node=True)
+        await _cleanup(delete_node=True)
         raise
     finally:
-        await _cleanup(strategy, delete_node=False)
+        if strategy:
+            await strategy.cleanup(delete_node=False)
+        await _cleanup(delete_node=False)
 
     # Astonishing, everything worked.
     async with get_session() as session:

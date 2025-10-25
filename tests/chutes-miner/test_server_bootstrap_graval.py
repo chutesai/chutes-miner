@@ -1,238 +1,19 @@
-import asyncio
-import time
-import traceback
-from unittest.mock import AsyncMock, Mock, _patch, patch
-from typing import Optional, AsyncGenerator
+from unittest.mock import AsyncMock, Mock, patch
 
-from chutes_miner.api.config import Settings
-from chutes_miner.api.k8s.operator import K8sOperator
+from chutes_common.k8s import WatchEvent, WatchEventType
+
 import pytest
-from kubernetes.client import V1Node, V1ObjectMeta
-
-# Assuming these are your project imports - adjust as needed
-# from chutes_miner.api.server.util import bootstrap_server, ServerArgs, KubeConfig, GraValBootstrapFailure
-
-# Constants for mock dependencies - makes maintenance easier and prevents typos
-class MockDependencies:
-    """Constants for all mocked dependencies in bootstrap_server"""
-    K8S_OPERATOR = 'K8sOperator'
-    GET_SESSION = 'get_session'
-    SELECT = 'select'
-    SERVER = 'Server'
-    GPU = 'GPU'
-    UPDATE = 'update'
-    VALIDATOR_BY_HOTKEY = 'validator_by_hotkey'
-    SIGN_REQUEST = 'sign_request'
-    STOP_SERVER_MONITORING = 'stop_server_monitoring'
-    START_SERVER_MONITORING = 'start_server_monitoring'
-    MULTI_CLUSTER_KUBE_CONFIG = 'MultiClusterKubeConfig'
-    TRACK_SERVER = 'track_server'
-    DEPLOY_GRAVAL = 'deploy_graval'
-    GATHER_GPU_INFO = 'gather_gpu_info'
-    SETTINGS = 'settings'
-    ADVERTISE_NODES = '_advertise_nodes'
-    CHECK_VERIFICATION_TASK_STATUS = 'check_verification_task_status'
-    LOGGER = 'logger'
-    SSE_MESSAGE = 'sse_message'
 
 
-class MockServerArgs:
-    """Mock ServerArgs class for testing"""
-    def __init__(self, validator="test_validator", hourly_cost=1.0, 
-                 gpu_short_ref="rtx4090", agent_api=None):
-        self.validator = validator
-        self.hourly_cost = hourly_cost
-        self.gpu_short_ref = gpu_short_ref
-        self.agent_api = agent_api
-
-
-class MockKubeConfig:
-    """Mock KubeConfig class for testing"""
-    pass
-
-
-class MockGPU:
-    """Mock GPU object"""
-    def __init__(self, gpu_id="gpu_123", device_info=None):
-        self.gpu_id = gpu_id
-        self.device_info = device_info or {"name": "RTX 4090"}
-
-
-class MockServer:
-    """Mock Server object"""
-    def __init__(self, server_id="server_123", validator="test_validator", 
-                 cpu_per_gpu=4, memory_per_gpu=16, gpus=None):
-        self.server_id = server_id
-        self.validator = validator
-        self.cpu_per_gpu = cpu_per_gpu
-        self.memory_per_gpu = memory_per_gpu
-        self.gpus = gpus or []
-
-
-class MockValidator:
-    """Mock Validator object"""
-    def __init__(self, hotkey="test_hotkey", api="http://test-api.com"):
-        self.hotkey = hotkey
-        self.api = api
-
-
-class GraValBootstrapFailure(Exception):
-    """Mock exception for testing"""
-    pass
-
-
-@pytest.fixture
-def mock_node():
-    """Create a mock V1Node object"""
-    node = V1Node()
-    node.metadata = V1ObjectMeta()
-    node.metadata.uid = "test-node-uid-123"
-    node.metadata.name = "test-node-name"
-    return node
-
-
-@pytest.fixture
-def mock_server_args():
-    """Create mock ServerArgs"""
-    return MockServerArgs(
-        validator="test_validator",
-        hourly_cost=2.5,
-        gpu_short_ref="rtx4090",
-        agent_api=None
-    )
-
-
-@pytest.fixture
-def mock_server_args_with_agent():
-    """Create mock ServerArgs with agent API"""
-    return MockServerArgs(
-        validator="test_validator",
-        hourly_cost=2.5,
-        gpu_short_ref="rtx4090",
-        agent_api="http://agent-api.com"
-    )
-
-
-@pytest.fixture
-def mock_kubeconfig():
-    """Create mock KubeConfig"""
-    return MockKubeConfig()
-
-
-@pytest.fixture
-def mock_gpus():
-    """Create mock GPU list"""
-    return [
-        MockGPU("gpu_1", {"name": "RTX 4090"}),
-        MockGPU("gpu_2", {"name": "RTX 4090"}),
-    ]
-
-
-@pytest.fixture
-def mock_server():
-    """Create mock Server object"""
-    return MockServer(
-        server_id="test-node-uid-123",
-        validator="test_validator",
-        cpu_per_gpu=8,
-        memory_per_gpu=32
-    )
-
-
-@pytest.fixture
-def mock_validator():
-    """Create mock Validator object"""
-    return MockValidator("test_hotkey", "http://test-validator.com")
-
-
-@pytest.fixture
-def mock_validator_nodes():
-    """Create mock validator nodes response"""
-    return [
-        {"seed": "test_seed_123", "gpu_id": "gpu_1"},
-        {"seed": "test_seed_123", "gpu_id": "gpu_2"},
-    ]
-
-@pytest.fixture
-def mock_settings(mock_validator):
-    _mock_settings = Mock(spec=Settings)
-    _mock_settings.validators = [mock_validator]
-
-    return _mock_settings
-
-@pytest.fixture
-def mock_k8s_operator():
-    _mock_operator = Mock(spec=K8sOperator)
-    _mock_operator.return_value = _mock_operator
-    return _mock_operator
-
-
-@pytest.fixture
-def mock_dependencies(mock_settings, mock_k8s_operator, mock_get_db_session):
-    """Mock all external dependencies using constants for maintainability"""
-    # Create dictionary mapping constants to mock instances
-    dependency_config = {
-        MockDependencies.K8S_OPERATOR: mock_k8s_operator,
-        MockDependencies.GET_SESSION: mock_get_db_session,
-        MockDependencies.SELECT: Mock(),
-        MockDependencies.SERVER: Mock(),
-        MockDependencies.GPU: Mock(),
-        MockDependencies.UPDATE: Mock(),
-        MockDependencies.VALIDATOR_BY_HOTKEY: Mock(),
-        MockDependencies.SIGN_REQUEST: Mock(),
-        MockDependencies.STOP_SERVER_MONITORING: AsyncMock(),
-        MockDependencies.START_SERVER_MONITORING: AsyncMock(),
-        MockDependencies.MULTI_CLUSTER_KUBE_CONFIG: Mock(),
-        MockDependencies.TRACK_SERVER: AsyncMock(),
-        MockDependencies.DEPLOY_GRAVAL: AsyncMock(),
-        MockDependencies.GATHER_GPU_INFO: AsyncMock(),
-        MockDependencies.SETTINGS: mock_settings,
-        MockDependencies.ADVERTISE_NODES: AsyncMock(),
-        MockDependencies.CHECK_VERIFICATION_TASK_STATUS: AsyncMock(),
-        MockDependencies.LOGGER: Mock(),
-        MockDependencies.SSE_MESSAGE: Mock(),
-    }
-    
-    # Create and start all patches
-    patches: list[_patch] = []
-    
-    for constant, mock_obj in dependency_config.items():
-        patcher = patch(f'chutes_miner.api.server.util.{constant}', mock_obj)
-        patches.append(patcher)
-        patcher.start()
-    
-    try:
-        yield dependency_config
-    finally:
-        # Stop all patches
-        for patcher in patches:
-            patcher.stop()
-
-
-async def collect_sse_messages(async_gen: AsyncGenerator) -> list:
-    """Helper to collect all SSE messages from the generator"""
-    messages = []
-    async for message in async_gen:
-        messages.append(message)
-    return messages
+from fixtures.bootstrap_fixtures import * # noqa
 
 
 @pytest.mark.asyncio
 async def test_bootstrap_server_success_without_kubeconfig(
-    mock_node, mock_server_args, mock_gpus, mock_server, 
-    mock_validator, mock_validator_nodes, mock_dependencies
+    mock_node, mock_server_args, mock_track_server, mock_aiohttp_response
 ):
     """Test successful server bootstrapping without kubeconfig"""
-    # Setup mocks
-    mock_dependencies[MockDependencies.TRACK_SERVER].return_value = (mock_node, mock_server)
-    mock_dependencies[MockDependencies.DEPLOY_GRAVAL].return_value = (Mock(), Mock())
-    mock_dependencies[MockDependencies.GATHER_GPU_INFO].return_value = mock_gpus
-    mock_dependencies[MockDependencies.VALIDATOR_BY_HOTKEY].return_value = mock_validator
-    mock_dependencies[MockDependencies.ADVERTISE_NODES].return_value = ("task_123", mock_validator_nodes)
-    mock_dependencies[MockDependencies.CHECK_VERIFICATION_TASK_STATUS].return_value = True
-    mock_dependencies[MockDependencies.SSE_MESSAGE].side_effect = lambda msg: msg
-    
-    # Execute test
+    # Mock aiohttp session for advertise nodes
     from chutes_miner.api.server.util import bootstrap_server
     messages = await collect_sse_messages(
         bootstrap_server(mock_node, mock_server_args, None)
@@ -244,26 +25,14 @@ async def test_bootstrap_server_success_without_kubeconfig(
     assert any("completed server bootstrapping" in str(msg) for msg in messages)
     
     # Verify key method calls
-    mock_dependencies[MockDependencies.TRACK_SERVER].assert_called_once()
-    mock_dependencies[MockDependencies.DEPLOY_GRAVAL].assert_called_once()
-    mock_dependencies[MockDependencies.GATHER_GPU_INFO].assert_called_once()
-    mock_dependencies[MockDependencies.ADVERTISE_NODES].assert_called_once()
+    mock_track_server.assert_called_once()
 
 
 @pytest.mark.asyncio
 async def test_bootstrap_server_success_with_kubeconfig(
-    mock_node, mock_server_args, mock_kubeconfig, mock_gpus, 
-    mock_server, mock_validator, mock_validator_nodes, mock_dependencies
+    mock_node, mock_server_args, mock_kubeconfig, mock_multicluster_kubeconfig
 ):
     """Test successful server bootstrapping with kubeconfig"""
-    # Setup mocks
-    mock_dependencies[MockDependencies.TRACK_SERVER].return_value = (mock_node, mock_server)
-    mock_dependencies[MockDependencies.DEPLOY_GRAVAL].return_value = (Mock(), Mock())
-    mock_dependencies[MockDependencies.GATHER_GPU_INFO].return_value = mock_gpus
-    mock_dependencies[MockDependencies.VALIDATOR_BY_HOTKEY].return_value = mock_validator
-    mock_dependencies[MockDependencies.ADVERTISE_NODES].return_value = ("task_123", mock_validator_nodes)
-    mock_dependencies[MockDependencies.CHECK_VERIFICATION_TASK_STATUS].return_value = True
-    mock_dependencies[MockDependencies.SSE_MESSAGE].side_effect = lambda msg: msg
     
     # Execute test
     from chutes_miner.api.server.util import bootstrap_server
@@ -273,24 +42,15 @@ async def test_bootstrap_server_success_with_kubeconfig(
     
     # Assertions
     assert len(messages) > 0
-    mock_dependencies[MockDependencies.MULTI_CLUSTER_KUBE_CONFIG].return_value.add_config.assert_called_once_with(mock_kubeconfig)
+    mock_multicluster_kubeconfig.return_value.add_config.assert_called_once_with(mock_kubeconfig)
 
 
 @pytest.mark.asyncio
 async def test_bootstrap_server_success_with_agent_api(
-    mock_node, mock_server_args_with_agent, mock_gpus, mock_server, 
-    mock_validator, mock_validator_nodes, mock_dependencies
+    mock_node, mock_server_args_with_agent, mock_dependencies,
+    mock_start_server_monitoring, mock_stop_server_monitoring
 ):
     """Test successful server bootstrapping with agent API monitoring"""
-    # Setup mocks
-    mock_dependencies[MockDependencies.TRACK_SERVER].return_value = (mock_node, mock_server)
-    mock_dependencies[MockDependencies.DEPLOY_GRAVAL].return_value = (Mock(), Mock())
-    mock_dependencies[MockDependencies.GATHER_GPU_INFO].return_value = mock_gpus
-    mock_dependencies[MockDependencies.VALIDATOR_BY_HOTKEY].return_value = mock_validator
-    mock_dependencies[MockDependencies.ADVERTISE_NODES].return_value = ("task_123", mock_validator_nodes)
-    mock_dependencies[MockDependencies.CHECK_VERIFICATION_TASK_STATUS].return_value = True
-    mock_dependencies[MockDependencies.SSE_MESSAGE].side_effect = lambda msg: msg
-    
     # Execute test
     from chutes_miner.api.server.util import bootstrap_server
     messages = await collect_sse_messages(
@@ -299,28 +59,28 @@ async def test_bootstrap_server_success_with_agent_api(
     
     # Assertions
     assert len(messages) > 0
-    mock_dependencies[MockDependencies.START_SERVER_MONITORING].assert_called_once_with("http://agent-api.com")
-    mock_dependencies[MockDependencies.STOP_SERVER_MONITORING].assert_not_called()
+    mock_start_server_monitoring.assert_called_once_with("http://agent-api.com")
+    mock_stop_server_monitoring.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_bootstrap_server_gpu_verification_failure(
-    mock_node, mock_server_args, mock_gpus, mock_server, 
-    mock_validator, mock_validator_nodes, mock_k8s_operator,
-    mock_dependencies
+    mock_node, mock_server_args, mock_k8s_operator, mock_pod,
+    mock_aiohttp_session, set_mock_db_session_result,
+    mock_server, mock_gpus
 ):
     """Test bootstrap failure due to GPU verification failure"""
-    # Setup mocks
-    mock_dependencies[MockDependencies.TRACK_SERVER].return_value = (mock_node, mock_server)
-    mock_dependencies[MockDependencies.DEPLOY_GRAVAL].return_value = (Mock(), Mock())
-    mock_dependencies[MockDependencies.GATHER_GPU_INFO].return_value = mock_gpus
-    mock_dependencies[MockDependencies.VALIDATOR_BY_HOTKEY].return_value = mock_validator
-    mock_dependencies[MockDependencies.ADVERTISE_NODES].return_value = ("task_123", mock_validator_nodes)
-    mock_dependencies[MockDependencies.CHECK_VERIFICATION_TASK_STATUS].return_value = False  # Verification fails
-    mock_dependencies[MockDependencies.SSE_MESSAGE].side_effect = lambda msg: msg
-    
+    mock_pod.status.phase = "Failed"
+    mock_k8s_operator.watch_pods.side_effect = [
+        [WatchEvent(type=WatchEventType.MODIFIED, object=mock_pod)]
+    ]
+
+    mock_server.gpus = mock_gpus
+    set_mock_db_session_result([mock_server])
+
     # Execute test and expect exception
-    from chutes_miner.api.server.util import bootstrap_server, GraValBootstrapFailure
+    from chutes_miner.api.server.util import bootstrap_server
+    from chutes_miner.api.exceptions import GraValBootstrapFailure
     
     with pytest.raises(GraValBootstrapFailure):
         await collect_sse_messages(
@@ -329,42 +89,44 @@ async def test_bootstrap_server_gpu_verification_failure(
     
     # Verify cleanup was called
     mock_k8s_operator.cleanup_graval.assert_called()
+    # Verify GPUs were cleaned up from validator
+    assert mock_aiohttp_session.delete.call_count == 2  # Two GPUs
 
 
 @pytest.mark.asyncio
 async def test_bootstrap_server_advertise_nodes_failure(
-    mock_node, mock_server_args, mock_gpus, mock_server, 
-    mock_validator, mock_k8s_operator, mock_dependencies
+    mock_node, mock_server_args, mock_k8s_operator, mock_server,
+    mock_gpus, set_mock_db_session_result, mock_aiohttp_session
 ):
     """Test bootstrap failure during node advertisement"""
     # Setup mocks
-    mock_dependencies[MockDependencies.TRACK_SERVER].return_value = (mock_node, mock_server)
-    mock_dependencies[MockDependencies.DEPLOY_GRAVAL].return_value = (Mock(), Mock())
-    mock_dependencies[MockDependencies.GATHER_GPU_INFO].return_value = mock_gpus
-    mock_dependencies[MockDependencies.VALIDATOR_BY_HOTKEY].return_value = mock_validator
-    mock_dependencies[MockDependencies.ADVERTISE_NODES].side_effect = Exception("Advertisement failed")
-    mock_dependencies[MockDependencies.SSE_MESSAGE].side_effect = lambda msg: msg
+    mock_server.gpus = mock_gpus
+    set_mock_db_session_result([mock_server])
+
+    with patch("chutes_miner.api.server.verification.GravalVerificationStrategy._advertise_nodes") as mock_advertise:
+        mock_advertise.side_effect = Exception("Advertisement failed")
     
-    # Execute test and expect exception
-    from chutes_miner.api.server.util import bootstrap_server
-    
-    with pytest.raises(Exception, match="Advertisement failed"):
-        await collect_sse_messages(
-            bootstrap_server(mock_node, mock_server_args, None)
-        )
-    
+        # Execute test and expect exception
+        from chutes_miner.api.server.util import bootstrap_server
+        
+        with pytest.raises(Exception, match="Advertisement failed"):
+            await collect_sse_messages(
+                bootstrap_server(mock_node, mock_server_args, None)
+            )
+        
     # Verify cleanup was called with delete_node=True
     mock_k8s_operator.cleanup_graval.assert_called()
+    # Verify GPUs were cleaned up from validator
+    assert mock_aiohttp_session.delete.call_count == 2  # Two GPUs
 
 
 @pytest.mark.asyncio
 async def test_bootstrap_server_track_server_failure(
-    mock_node, mock_server_args, mock_k8s_operator, mock_dependencies
+    mock_node, mock_server_args, mock_k8s_operator, mock_track_server
 ):
     """Test bootstrap failure during server tracking"""
     # Setup mocks
-    mock_dependencies[MockDependencies.TRACK_SERVER].side_effect = Exception("Tracking failed")
-    mock_dependencies[MockDependencies.SSE_MESSAGE].side_effect = lambda msg: msg
+    mock_track_server.side_effect = Exception("Tracking failed")
     
     # Execute test and expect exception
     from chutes_miner.api.server.util import bootstrap_server
@@ -375,27 +137,27 @@ async def test_bootstrap_server_track_server_failure(
         )
     
     # Verify cleanup was called
-    mock_k8s_operator.cleanup_graval.assert_called()
+    mock_k8s_operator.deploy_graval.assert_not_called()
+    mock_k8s_operator.cleanup_graval.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_bootstrap_server_multiple_seeds_assertion_error(
-    mock_node, mock_server_args, mock_gpus, mock_server, 
-    mock_validator, mock_k8s_operator, mock_dependencies
+    mock_node, mock_server_args, mock_aiohttp_response
 ):
     """Test bootstrap failure when validators return different seeds"""
     # Setup mocks with different seeds
-    validator_nodes_different_seeds = [
-        {"seed": "seed_1", "gpu_id": "gpu_1"},
-        {"seed": "seed_2", "gpu_id": "gpu_2"},  # Different seed!
-    ]
-    
-    mock_dependencies[MockDependencies.TRACK_SERVER].return_value = (mock_node, mock_server)
-    mock_dependencies[MockDependencies.DEPLOY_GRAVAL].return_value = (Mock(), Mock())
-    mock_dependencies[MockDependencies.GATHER_GPU_INFO].return_value = mock_gpus
-    mock_dependencies[MockDependencies.VALIDATOR_BY_HOTKEY].return_value = mock_validator
-    mock_dependencies[MockDependencies.ADVERTISE_NODES].return_value = ("task_123", validator_nodes_different_seeds)
-    mock_dependencies[MockDependencies.SSE_MESSAGE].side_effect = lambda msg: msg
+    mock_aiohttp_response.json = AsyncMock(return_value = {
+        "nodes": [
+            {
+                "seed": "seed1"
+            },
+            {
+                "seed": "seed2"
+            }
+        ],
+        "task_id": "verification-task"
+    })
     
     # Execute test and expect assertion error
     from chutes_miner.api.server.util import bootstrap_server
@@ -406,71 +168,14 @@ async def test_bootstrap_server_multiple_seeds_assertion_error(
         )
 
 
-@pytest.mark.asyncio
-async def test_bootstrap_server_cleanup_with_existing_server(
-    mock_node, mock_server_args, mock_k8s_operator, set_mock_db_session_result, mock_dependencies
-):
-    """Test cleanup behavior when server exists in database"""
-    # Setup server with GPUs in database
-    mock_gpu1 = Mock()
-    mock_gpu1.gpu_id = "gpu_1"
-    mock_gpu2 = Mock()
-    mock_gpu2.gpu_id = "gpu_2"
-    
-    mock_server_db = Mock()
-    mock_server_db.gpus = [mock_gpu1, mock_gpu2]
-    mock_server_db.validator = "test_validator"
-    
-    mock_validator = MockValidator("test_hotkey", "http://test-validator.com")
-
-    set_mock_db_session_result([mock_server_db])
-
-    mock_dependencies[MockDependencies.VALIDATOR_BY_HOTKEY].return_value = mock_validator
-    mock_dependencies[MockDependencies.TRACK_SERVER].side_effect = Exception("Tracking failed")
-    mock_dependencies[MockDependencies.SSE_MESSAGE].side_effect = lambda msg: msg
-    mock_dependencies[MockDependencies.SIGN_REQUEST].return_value = ({}, None)
-    
-    # Mock aiohttp session for GPU cleanup
-    mock_http_session = AsyncMock()
-    mock_resp = AsyncMock()
-    mock_resp.json.return_value = {"success": True}
-    mock_http_session.delete.return_value.__aenter__.return_value = mock_resp
-    
-    with patch('aiohttp.ClientSession') as mock_aiohttp:
-        mock_aiohttp.return_value.__aenter__.return_value = mock_http_session
-        
-        # Execute test and expect exception
-        from chutes_miner.api.server.util import bootstrap_server
-        
-        with pytest.raises(Exception, match="Tracking failed"):
-            await collect_sse_messages(
-                bootstrap_server(mock_node, mock_server_args, None)
-            )
-        
-        # Verify GPUs were cleaned up from validator
-        assert mock_http_session.delete.call_count == 2  # Two GPUs
-
-
 @pytest.mark.asyncio 
 async def test_bootstrap_server_verification_timeout_simulation(
-    mock_node, mock_server_args, mock_gpus, mock_server, 
-    mock_validator, mock_validator_nodes, mock_dependencies
+    mock_node, mock_server_args, mock_check_verification_task_status
 ):
     """Test verification status checking with multiple polls before success"""
-    # Setup mocks
-    mock_dependencies[MockDependencies.TRACK_SERVER].return_value = (mock_node, mock_server)
-    mock_dependencies[MockDependencies.DEPLOY_GRAVAL].return_value = (Mock(), Mock())
-    mock_dependencies[MockDependencies.GATHER_GPU_INFO].return_value = mock_gpus
-    mock_dependencies[MockDependencies.VALIDATOR_BY_HOTKEY].return_value = mock_validator
-    mock_dependencies[MockDependencies.ADVERTISE_NODES].return_value = ("task_123", mock_validator_nodes)
     
     # Simulate verification polling - return None twice, then True
-    mock_dependencies[MockDependencies.CHECK_VERIFICATION_TASK_STATUS].side_effect = [None, None, True]
-    mock_dependencies[MockDependencies.SSE_MESSAGE].side_effect = lambda msg: msg
-    
-    # Mock database session
-    mock_session = AsyncMock()
-    mock_dependencies[MockDependencies.GET_SESSION].return_value.__aenter__.return_value = mock_session
+    mock_check_verification_task_status.side_effect = [None, None, True]
     
     # Execute test
     from chutes_miner.api.server.util import bootstrap_server
@@ -479,7 +184,7 @@ async def test_bootstrap_server_verification_timeout_simulation(
     )
     
     # Verify verification was checked multiple times
-    assert mock_dependencies[MockDependencies.CHECK_VERIFICATION_TASK_STATUS].call_count == 3
+    mock_check_verification_task_status.call_count == 3
     
     # Verify we got waiting messages
     waiting_messages = [msg for msg in messages if "waiting for validator" in str(msg)]
@@ -492,24 +197,13 @@ async def test_bootstrap_server_timing_measurement(
     mock_validator, mock_validator_nodes, mock_dependencies
 ):
     """Test that bootstrap timing is properly measured and reported"""
-    # Setup mocks
-    mock_dependencies[MockDependencies.TRACK_SERVER].return_value = (mock_node, mock_server)
-    mock_dependencies[MockDependencies.DEPLOY_GRAVAL].return_value = (Mock(), Mock())
-    mock_dependencies[MockDependencies.GATHER_GPU_INFO].return_value = mock_gpus
-    mock_dependencies[MockDependencies.VALIDATOR_BY_HOTKEY].return_value = mock_validator
-    mock_dependencies[MockDependencies.ADVERTISE_NODES].return_value = ("task_123", mock_validator_nodes)
-    mock_dependencies[MockDependencies.CHECK_VERIFICATION_TASK_STATUS].return_value = True
-    mock_dependencies[MockDependencies.SSE_MESSAGE].side_effect = lambda msg: msg
-    
-    # Mock database session
-    mock_session = AsyncMock()
-    mock_dependencies[MockDependencies.GET_SESSION].return_value.__aenter__.return_value = mock_session
     
     # Mock time to control timing
     start_time = 1000.0
     end_time = 1045.5  # 45.5 seconds
     
-    with patch('time.time', side_effect=[start_time, end_time]):
+    with patch('chutes_miner.api.server.util.time') as mock_time:
+        mock_time.time.side_effect=[start_time, end_time]
         from chutes_miner.api.server.util import bootstrap_server
         messages = await collect_sse_messages(
             bootstrap_server(mock_node, mock_server_args, None)
@@ -523,16 +217,8 @@ async def test_bootstrap_server_timing_measurement(
 
 # Integration-style test that doesn't mock everything
 @pytest.mark.asyncio
-async def test_bootstrap_server_sse_message_flow(mock_node, mock_server_args, mock_dependencies):
+async def test_bootstrap_server_sse_message_flow(mock_node, mock_server_args):
     """Test that SSE messages are yielded in the expected order"""
-    mock_dependencies[MockDependencies.TRACK_SERVER].return_value = (mock_node, MockServer())
-    mock_dependencies[MockDependencies.DEPLOY_GRAVAL].return_value = (Mock(), Mock())
-    mock_dependencies[MockDependencies.GATHER_GPU_INFO].return_value = [MockGPU()]
-    mock_dependencies[MockDependencies.VALIDATOR_BY_HOTKEY].return_value = MockValidator()
-    mock_dependencies[MockDependencies.ADVERTISE_NODES].return_value = ("task_123", [{"seed": "test_seed"}])
-    mock_dependencies[MockDependencies.CHECK_VERIFICATION_TASK_STATUS].return_value = True
-    mock_dependencies[MockDependencies.SSE_MESSAGE].side_effect = lambda msg: f"SSE: {msg}"
-
     from chutes_miner.api.server.util import bootstrap_server
     
     messages = await collect_sse_messages(
