@@ -234,8 +234,9 @@ async def bootstrap_server(
 
         await task
 
-        if task.exception():
-            raise task.exception()
+        exception = task.exception()
+        if exception:
+            raise exception
 
     except Exception as exc:
         error_message = (

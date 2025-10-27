@@ -12,7 +12,7 @@ from chutes_common.schemas.gpu import GPU
 from chutes_common.schemas.server import Server, ServerArgs
 from chutes_miner.api.config import validator_by_hotkey
 from chutes_miner.api.database import get_session
-from chutes_miner.api.exceptions import GPUlessServer, GraValBootstrapFailure, NonEmptyServer
+from chutes_miner.api.exceptions import GPUlessServer, BootstrapFailure, GraValBootstrapFailure, NonEmptyServer, TEEBootstrapFailure
 from chutes_miner.api.k8s.constants import GRAVAL_JOB_PREFIX, GRAVAL_SVC_PREFIX
 from chutes_miner.api.k8s.operator import K8sOperator
 from chutes_miner.api.util import sse_message
@@ -42,6 +42,7 @@ class VerificationStrategy(ABC):
 
     def __init__(self, node: V1Node, server_args: ServerArgs, server: Server):
         self.node = node
+        self.node_ip = self.node.metadata.labels.get("chutes/external-ip")
         self.server_args = server_args
         self.server = server
         self.validator = validator_by_hotkey(server_args.validator)
@@ -93,9 +94,50 @@ class VerificationStrategy(ABC):
         Returns environment details needed for subsequent steps.
         """
         pass
+
+    async def gather_gpu_info(
+        self
+    ):
+        """
+        Gather GPU information using the appropriate method.
+        - Graval: Query graval service
+        - TEE: Use TDX quotes and nv trust evidence
+        """
+        raw_device_info = await self._gather_gpu_info()
+
+        self.gpus = await self._track_gpus(raw_device_info)
+
+        model_name = self.gpus[0].device_info["name"]
+        await self.emit_message(
+            f"discovered {len(self.gpus)} GPUs [{model_name=}] on node, advertising node to {len(settings.validators)} validator(s)...",
+        )
+
+    async def _track_gpus(self, devices) -> list[GPU]:
+        # Store inventory.
+        server_id = self.server.server_id
+        validator = self.validator
+        gpu_short_ref = self.node.metadata.labels.get("gpu-short-ref")
+        gpus = []
+        async with get_session() as session:
+            for device_id in range(len(devices)):
+                device_info = devices[device_id]
+                gpu = GPU(
+                    server_id=server_id,
+                    validator=validator,
+                    gpu_id=device_info["uuid"],
+                    device_info=device_info,
+                    model_short_ref=gpu_short_ref,
+                    verified=False,
+                )
+                session.add(gpu)
+                gpus.append(gpu)
+            await session.commit()
+            for idx in range(len(gpus)):
+                await session.refresh(gpus[idx])
+        return gpus
     
     @abstractmethod
-    async def gather_gpu_info(
+    async def _gather_gpu_info(
         self
     ):
         """
@@ -107,8 +149,7 @@ class VerificationStrategy(ABC):
     
     @abstractmethod
     async def advertise_to_validator(
-        self,
-        gpus: list[GPU]
+        self
     ):
         """
         Advertise nodes to validator using appropriate endpoint.
@@ -119,37 +160,27 @@ class VerificationStrategy(ABC):
         """
         pass
 
-    @abstractmethod
     async def wait_for_verification_task(self):
         """
         Wait for the verification task on the validator to complete
         """
+        # Wait for verification from this validator.
+        status = await self._wait_for_verification_task()
+        if status:
+            await self.emit_message(
+                f"validator {self.validator.hotkey} has successfully performed verification"
+            )
+        else:
+            error_message = f"Verification failed for {self.validator.hotkey}, aborting!"
+            await self.emit_message(error_message)
+            raise BootstrapFailure(error_message)
+        
+    @abstractmethod
+    async def _wait_for_verification_task(self):
+        """
+        Wait for the final status to come back from the validator
+        """
         pass
-
-    @backoff.on_exception(
-        backoff.constant,
-        Exception,
-        jitter=None,
-        interval=3,
-        max_tries=5,
-    )
-    async def _check_verification_task_status(validator: Validator, task_id: str) -> bool:
-        """
-        Check the GPU verification task status.
-        """
-        async with aiohttp.ClientSession(raise_for_status=True) as session:
-            headers, _ = sign_request(purpose="graval")
-            async with session.get(
-                f"{validator.api}/nodes/verification_status",
-                params={"task_id": task_id},
-                headers=headers,
-            ) as response:
-                data = await response.json()
-                if (status := data.get("status")) == "pending":
-                    return None
-                if status in ["error", "failed"]:
-                    return False
-                return True
     
     @abstractmethod
     async def cleanup(
@@ -294,36 +325,18 @@ class GravalVerificationStrategy(VerificationStrategy):
         # Deploy!
         return await K8sOperator().deploy_graval(node_object, job, service)
 
-    async def gather_gpu_info(
-        self
-    ):
-        """
-        Gather GPU information using the appropriate method.
-        - Graval: Query graval service
-        - TEE: Use TDX quotes and nv trust evidence
-        """
-        self.gpus = await self._gather_gpu_info(
-            self.server.server_id, self.server_args.validator, self.node
-        )
-
-        model_name = self.gpus[0].device_info["name"]
-        await self.emit_message(
-            f"discovered {len(self.gpus)} GPUs [{model_name=}] on node, advertising node to {len(settings.validators)} validator(s)...",
-        )
-
     async def _gather_gpu_info(
         self,
-        server_id: str,
-        validator: str,
-        node_object: V1Node
     ) -> list[GPU]:
         """
         Wait for the graval bootstrap job to be ready, then gather the device info.
         """
+        node_object = self.node
         job_name = self.graval_job.metadata.name
         namespace = self.graval_job.metadata.namespace or "chutes"
         expected_gpu_count = int(node_object.metadata.labels.get("nvidia.com/gpu.count", "0"))
         gpu_short_ref = node_object.metadata.labels.get("gpu-short-ref")
+        
         if not gpu_short_ref:
             raise GraValBootstrapFailure("Node does not have required gpu-short-ref label!")
 
@@ -373,26 +386,8 @@ class GravalVerificationStrategy(VerificationStrategy):
             raise GraValBootstrapFailure(
                 f"Failed to fetch devices from GraVal bootstrap: {node_ip}:{node_port}/devices: {exc}"
             )
-
-        # Store inventory.
-        gpus = []
-        async with get_session() as session:
-            for device_id in range(len(devices)):
-                device_info = devices[device_id]
-                gpu = GPU(
-                    server_id=server_id,
-                    validator=validator,
-                    gpu_id=device_info["uuid"],
-                    device_info=device_info,
-                    model_short_ref=gpu_short_ref,
-                    verified=False,
-                )
-                session.add(gpu)
-                gpus.append(gpu)
-            await session.commit()
-            for idx in range(len(gpus)):
-                await session.refresh(gpus[idx])
-        return gpus
+        
+        return devices        
     
     @backoff.on_exception(
         backoff.constant,
@@ -431,7 +426,7 @@ class GravalVerificationStrategy(VerificationStrategy):
         Returns (task_id, validator_nodes)
         """
         seed = None
-        validator = validator_by_hotkey(self.server_args.validator)
+        validator = self.validator
         await self.emit_message(
             f"advertising node to {validator.hotkey} via {validator.api}...",
         )
@@ -467,7 +462,6 @@ class GravalVerificationStrategy(VerificationStrategy):
 
         self.task_id = task_id
         self.validator_nodes = validator_nodes
-        return task_id, validator_nodes
     
     @backoff.on_exception(
         backoff.constant,
@@ -511,24 +505,41 @@ class GravalVerificationStrategy(VerificationStrategy):
                 )
                 return task_id, nodes
     
-    async def wait_for_verification_task(self):
+    async def _wait_for_verification_task(self):
         """
         Wait for the verification task on the validator to complete
         """
-        # Wait for verification from this validator.
-        while (status := await self._check_verification_task_status(self.validator, self.task_id)) is None:
+        while (status := await self._check_verification_task_status()) is None:
             await self.emit_message(
                 f"waiting for validator {self.validator.hotkey} to finish GPU verification..."
             )
             await asyncio.sleep(1)
-        if status:
-            await self.emit_message(
-                f"validator {self.validator.hotkey} has successfully performed GPU verification"
-            )
-        else:
-            error_message = f"GPU verification failed for {self.validator.hotkey}, aborting!"
-            await self.emit_message(error_message)
-            raise GraValBootstrapFailure(error_message)
+        return status
+
+    @backoff.on_exception(
+        backoff.constant,
+        Exception,
+        jitter=None,
+        interval=3,
+        max_tries=5,
+    )
+    async def _check_verification_task_status(self) -> bool:
+        """
+        Check the GPU verification task status.
+        """
+        async with aiohttp.ClientSession(raise_for_status=True) as session:
+            headers, _ = sign_request(purpose="graval")
+            async with session.get(
+                f"{self.validator.api}/nodes/verification_status",
+                params={"task_id": self.task_id},
+                headers=headers,
+            ) as response:
+                data = await response.json()
+                if (status := data.get("status")) == "pending":
+                    return None
+                if status in ["error", "failed"]:
+                    return False
+                return True
 
     async def cleanup(
         self,
@@ -579,4 +590,200 @@ class GravalVerificationStrategy(VerificationStrategy):
 
 
 class TEEVerificationStrategy(VerificationStrategy):
-    ...
+
+
+    async def prepare_verification_environment(
+        self
+    ):
+        """
+        Prepare the environment for verification.
+        - Graval: Deploy graval job/service
+        - TEE: Verify TEE service availability
+        
+        Returns environment details needed for subsequent steps.
+        """
+        await self._verify_attestation_service
+
+    async def _verify_attestation_service(self):
+        try:
+            async with aiohttp.ClientSession(raise_for_status=True) as http_session:
+                async with http_session.get(
+                    f"https://{self.node_ip}:30443/servers/health"
+                ):
+                    logger.success(
+                        f"Verified attestation service for {self.server.name}"
+                    )
+        except Exception as exc:
+            logger.warning(
+                f"Error verifying attestation services for {self.server.name}: {exc}"
+            )
+            raise TEEBootstrapFailure(f"Failed to verify attestion service for {self.server.name}")
+
+    async def _gather_gpu_info(self):
+        """
+        Wait for the graval bootstrap job to be ready, then gather the device info.
+        """
+        # Query the GPU information.
+        devices = None
+        expected_gpu_count = int(self.node.metadata.labels.get("nvidia.com/gpu.count", "0"))
+        try:
+            async with aiohttp.ClientSession(raise_for_status=True) as http_session:
+                headers, _ = sign_request(purpose="devices")
+                async with http_session.get(
+                    f"https://{self.node_ip}:30443/servers/devices", headers=headers
+                ) as resp:
+                    devices = await resp.json()
+                    logger.success(
+                        f"Retrieved {len(devices)} GPUs from {self.server.name}."
+                    )
+            assert devices
+            assert len(devices) == expected_gpu_count
+        except Exception as exc:
+            raise TEEBootstrapFailure(
+                f"Failed to fetch devices from attestation service: {self.node_ip}:30443/servers/devices: {exc}"
+            )
+        
+        return devices     
+
+    async def _get_devices(self):
+        try:
+            async with aiohttp.ClientSession(raise_for_status=True) as http_session:
+                headers, _ = sign_request(purpose="devices")
+                async with http_session.get(
+                    f"https://{self.node_ip}:30443/servers/devices", headers=headers
+                ) as resp:
+                    devices = await resp.json()
+                    logger.success(
+                        f"Retrieved {len(devices)} GPUs from {self.server.name}."
+                    )
+
+            return devices
+        except Exception as exc:
+            logger.warning(
+                f"Error verifying attestation services for {self.server.name}: {exc}"
+            )
+            raise TEEBootstrapFailure(f"Failed to verify attestion service for {self.server.name}")
+    
+    async def advertise_to_validator(
+        self
+    ):
+        """
+        Advertise nodes to validator using appropriate endpoint.
+        - Graval: POST to /nodes (or current endpoint)
+        - TEE: POST to /nodes/tee (or similar TEE-specific endpoint)
+        
+        Returns (task_id, validator_nodes)
+        """
+        validator = self.validator
+        await self.emit_message(
+            f"advertising server to {validator.hotkey} via {validator.api}...",
+        )
+
+        task_id = None
+        try:
+            task_id  = await self._advertise_server(validator, self.gpus)
+        except Exception as exc:
+            await self.emit_message(
+                f"failed to advertising server to {validator.hotkey} via {validator.api}: {exc}",
+            )
+            raise
+
+        await self.emit_message(
+            f"successfully advertised server {self.server.name} to validator {validator.hotkey}"
+        )
+
+        self.task_id = task_id
+
+    @backoff.on_exception(
+        backoff.constant,
+        Exception,
+        jitter=None,
+        interval=3,
+        max_tries=5,
+    )
+    async def _advertise_server(self):
+        """
+        Post Server information to one validator, with retries.
+        """
+        gpus = self.gpus
+        async with aiohttp.ClientSession() as session:
+            device_infos = [
+                {
+                    **gpus[idx].device_info,
+                    **dict(
+                        device_index=idx,
+                        gpu_identifier=gpus[idx].model_short_ref,
+                        verification_host=self.node_ip,
+                        verification_port="30443",
+                    ),
+                }
+                for idx in range(len(gpus))
+            ]
+            headers, payload_string = sign_request(
+                payload={
+                    "id": self.server.server_id,
+                    "name": self.server.name,
+                    "ip_address": self.node_ip,
+                    "gpus": device_infos,
+                }
+            )
+            async with session.post(
+                f"{self.validator.api}/servers/", data=payload_string, headers=headers
+            ) as response:
+                response_text = await response.text()
+                assert response.status == 202, response_text
+                data = await response.json()
+                task_id = data.get("task_id")
+                assert task_id
+                logger.success(
+                    f"Successfully advertised {self.server.name} with {len(gpus)} GPUs to {self.validator.hotkey} via {self.validator.api}"
+                )
+                return task_id
+
+    async def _wait_for_verification_task(self):
+        """
+        Wait for the verification task on the validator to complete
+        """
+        while (status := await self._check_verification_task_status()) is None:
+            await self.emit_message(
+                f"waiting for validator {self.validator.hotkey} to finish Server verification..."
+            )
+            await asyncio.sleep(1)
+        return status
+
+    @backoff.on_exception(
+        backoff.constant,
+        Exception,
+        jitter=None,
+        interval=3,
+        max_tries=5,
+    )
+    async def _check_verification_task_status(self) -> bool:
+        """
+        Check the Server verification task status.
+        """
+        async with aiohttp.ClientSession(raise_for_status=True) as session:
+            headers, _ = sign_request(purpose="tee")
+            async with session.get(
+                f"{self.validator.api}/servers/verification_status",
+                params={"task_id": self.task_id},
+                headers=headers,
+            ) as response:
+                data = await response.json()
+                if (status := data.get("status")) == "pending":
+                    return None
+                if status in ["error", "failed"]:
+                    return False
+                return True
+    
+    @abstractmethod
+    async def cleanup(
+        self,
+        delete_node: bool = True
+    ) -> None:
+        """
+        Clean up verification-specific resources.
+        - Graval: Remove graval job/service
+        - TEE: Cleanup TEE-specific resources if needed
+        """
+        pass
