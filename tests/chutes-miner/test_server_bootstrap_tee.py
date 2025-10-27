@@ -7,6 +7,10 @@ import pytest
 
 from fixtures.bootstrap_fixtures import * # noqa
 
+@pytest.fixture(autouse=True)
+def mock_strategy_factory(mock_check_attestation_service):
+    mock_check_attestation_service.return_value = True
+    yield mock_check_attestation_service
 
 @pytest.mark.asyncio
 async def test_bootstrap_server_success_without_kubeconfig(
@@ -64,40 +68,10 @@ async def test_bootstrap_server_success_with_agent_api(
 
 
 @pytest.mark.asyncio
-async def test_bootstrap_server_graval_pod_failure(
-    mock_node, mock_server_args, mock_k8s_operator, mock_pod,
-    mock_aiohttp_session, set_mock_db_session_result,
-    mock_server, mock_gpus
-):
-    """Test bootstrap failure due to GPU verification failure"""
-    mock_pod.status.phase = "Failed"
-    mock_k8s_operator.watch_pods.side_effect = [
-        [WatchEvent(type=WatchEventType.MODIFIED, object=mock_pod)]
-    ]
-
-    mock_server.gpus = mock_gpus
-    set_mock_db_session_result([mock_server])
-
-    # Execute test and expect exception
-    from chutes_miner.api.server.util import bootstrap_server
-    from chutes_miner.api.exceptions import GraValBootstrapFailure
-    
-    with pytest.raises(GraValBootstrapFailure):
-        await collect_sse_messages(
-            bootstrap_server(mock_node, mock_server_args, None)
-        )
-    
-    # Verify cleanup was called
-    mock_k8s_operator.cleanup_graval.assert_called()
-    # Verify GPUs were cleaned up from validator
-    assert mock_aiohttp_session.delete.call_count == 2  # Two GPUs
-
-
-@pytest.mark.asyncio
 async def test_bootstrap_server_fetch_devices_failure(
-    mock_node, mock_server_args, mock_k8s_operator, mock_pod,
-    mock_aiohttp_session, set_mock_db_session_result,
-    mock_server, mock_gpus, mock_fetch_devices
+    mock_node, mock_server_args, mock_aiohttp_session, 
+    set_mock_db_session_result, mock_server, mock_gpus, 
+    mock_fetch_devices
 ):
     """Test bootstrap failure due to GPU verification failure"""
     mock_fetch_devices.side_effect = Exception("Failure to fetch.")
@@ -107,22 +81,20 @@ async def test_bootstrap_server_fetch_devices_failure(
 
     # Execute test and expect exception
     from chutes_miner.api.server.util import bootstrap_server
-    from chutes_miner.api.exceptions import GraValBootstrapFailure
+    from chutes_miner.api.exceptions import TEEBootstrapFailure
     
-    with pytest.raises(GraValBootstrapFailure):
+    with pytest.raises(TEEBootstrapFailure):
         await collect_sse_messages(
             bootstrap_server(mock_node, mock_server_args, None)
         )
-    
-    # Verify cleanup was called
-    mock_k8s_operator.cleanup_graval.assert_called()
-    # Verify GPUs were cleaned up from validator
-    assert mock_aiohttp_session.delete.call_count == 2  # Two GPUs
+
+    # Verify server was cleaned up from validator
+    assert mock_aiohttp_session.delete.call_count == 1  # One server
 
 
 @pytest.mark.asyncio
-async def test_bootstrap_server_advertise_nodes_failure(
-    mock_node, mock_server_args, mock_k8s_operator, mock_server,
+async def test_bootstrap_server_advertise_server_failure(
+    mock_node, mock_server_args, mock_server,
     mock_gpus, set_mock_db_session_result, mock_aiohttp_session
 ):
     """Test bootstrap failure during node advertisement"""
@@ -130,7 +102,7 @@ async def test_bootstrap_server_advertise_nodes_failure(
     mock_server.gpus = mock_gpus
     set_mock_db_session_result([mock_server])
 
-    with patch("chutes_miner.api.server.verification.GravalVerificationStrategy._advertise_nodes") as mock_advertise:
+    with patch("chutes_miner.api.server.verification.TEEVerificationStrategy._advertise_server") as mock_advertise:
         mock_advertise.side_effect = Exception("Advertisement failed")
     
         # Execute test and expect exception
@@ -140,16 +112,14 @@ async def test_bootstrap_server_advertise_nodes_failure(
             await collect_sse_messages(
                 bootstrap_server(mock_node, mock_server_args, None)
             )
-        
-    # Verify cleanup was called with delete_node=True
-    mock_k8s_operator.cleanup_graval.assert_called()
-    # Verify GPUs were cleaned up from validator
-    assert mock_aiohttp_session.delete.call_count == 2  # Two GPUs
+
+    # Verify server was cleaned up from validator
+    assert mock_aiohttp_session.delete.call_count == 1  # One server
 
 
 @pytest.mark.asyncio
 async def test_bootstrap_server_track_server_failure(
-    mock_node, mock_server_args, mock_k8s_operator, mock_track_server
+    mock_node, mock_server_args, mock_track_server
 ):
     """Test bootstrap failure during server tracking"""
     # Setup mocks
@@ -159,37 +129,6 @@ async def test_bootstrap_server_track_server_failure(
     from chutes_miner.api.server.util import bootstrap_server
     
     with pytest.raises(Exception, match="Tracking failed"):
-        await collect_sse_messages(
-            bootstrap_server(mock_node, mock_server_args, None)
-        )
-    
-    # Verify cleanup was called
-    mock_k8s_operator.deploy_graval.assert_not_called()
-    mock_k8s_operator.cleanup_graval.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_bootstrap_server_multiple_seeds_assertion_error(
-    mock_node, mock_server_args, mock_aiohttp_response
-):
-    """Test bootstrap failure when validators return different seeds"""
-    # Setup mocks with different seeds
-    mock_aiohttp_response.json = AsyncMock(return_value = {
-        "nodes": [
-            {
-                "seed": "seed1"
-            },
-            {
-                "seed": "seed2"
-            }
-        ],
-        "task_id": "verification-task"
-    })
-    
-    # Execute test and expect assertion error
-    from chutes_miner.api.server.util import bootstrap_server
-    
-    with pytest.raises(AssertionError, match="more than one seed"):
         await collect_sse_messages(
             bootstrap_server(mock_node, mock_server_args, None)
         )
@@ -220,8 +159,7 @@ async def test_bootstrap_server_verification_timeout_simulation(
 
 @pytest.mark.asyncio
 async def test_bootstrap_server_timing_measurement(
-    mock_node, mock_server_args, mock_gpus, mock_server, 
-    mock_validator, mock_validator_nodes, mock_dependencies
+    mock_node, mock_server_args
 ):
     """Test that bootstrap timing is properly measured and reported"""
     
@@ -258,8 +196,8 @@ async def test_bootstrap_server_sse_message_flow(mock_node, mock_server_args):
     # Check that messages appear in expected order
     assert any("attempting to add node" in msg for msg in message_strs)
     assert any("now tracked in database" in msg for msg in message_strs)
-    assert any("graval bootstrap job/service created" in msg for msg in message_strs)
+    # assert any("graval bootstrap job/service created" in msg for msg in message_strs)
     assert any("discovered" in msg and "GPUs" in msg for msg in message_strs)
-    assert any("advertising node" in msg for msg in message_strs)
-    assert any("successfully advertised node" in msg for msg in message_strs)
+    assert any("advertising server" in msg for msg in message_strs)
+    assert any("successfully advertised server" in msg for msg in message_strs)
     assert any("completed server bootstrapping" in msg for msg in message_strs)
