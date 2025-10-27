@@ -11,11 +11,9 @@ import traceback
 from chutes_common.monitoring.requests import StartMonitoringRequest
 from chutes_common.redis import MonitoringRedisClient
 from chutes_miner.api.k8s.config import KubeConfig, MultiClusterKubeConfig
-from chutes_miner.api.server.verification import GravalVerificationStrategy, VerificationStrategy
+from chutes_miner.api.server.verification import VerificationStrategy
 from loguru import logger
-from kubernetes.client import (
-    V1Node
-)
+from kubernetes.client import V1Node
 from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from typing import Optional, Tuple, Dict
@@ -26,9 +24,7 @@ from chutes_miner.api.util import sse_message
 from chutes_miner.api.database import get_session
 from chutes_common.schemas.server import Server, ServerArgs
 from chutes_common.schemas.gpu import GPU
-from chutes_miner.api.exceptions import (
-    DuplicateServer
-)
+from chutes_miner.api.exceptions import DuplicateServer
 import yaml
 
 
@@ -174,6 +170,7 @@ async def track_server(
 
     return node_object, server
 
+
 async def bootstrap_server(
     node_object: V1Node, server_args: ServerArgs, kubeconfig: Optional[KubeConfig]
 ):
@@ -182,7 +179,7 @@ async def bootstrap_server(
     """
     started_at = time.time()
     strategy = None
-    
+
     async def _cleanup(delete_node=False):
         if delete_node and server_args.agent_api:
             # If adding a standalone cluster, need to stop monitoring
@@ -194,7 +191,6 @@ async def bootstrap_server(
     )
 
     try:
-
         if kubeconfig:
             # Make sure this is available for deploying
             MultiClusterKubeConfig().add_config(kubeconfig)

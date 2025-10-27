@@ -12,14 +12,19 @@ from chutes_common.schemas.gpu import GPU
 from chutes_common.schemas.server import Server, ServerArgs
 from chutes_miner.api.config import validator_by_hotkey
 from chutes_miner.api.database import get_session
-from chutes_miner.api.exceptions import GPUlessServer, BootstrapFailure, GraValBootstrapFailure, NonEmptyServer, TEEBootstrapFailure
+from chutes_miner.api.exceptions import (
+    GPUlessServer,
+    BootstrapFailure,
+    GraValBootstrapFailure,
+    NonEmptyServer,
+    TEEBootstrapFailure,
+)
 from chutes_miner.api.k8s.constants import GRAVAL_JOB_PREFIX, GRAVAL_SVC_PREFIX
 from chutes_miner.api.k8s.operator import K8sOperator
 from chutes_miner.api.util import sse_message
 from jsonschema import Validator
 from loguru import logger
 from sqlalchemy import select, update
-from kubernetes.client import V1Node, V1Job, V1Service
 from kubernetes.client import (
     V1Node,
     V1Job,
@@ -39,7 +44,6 @@ from kubernetes.client import (
 
 
 class VerificationStrategy(ABC):
-
     def __init__(self, node: V1Node, server_args: ServerArgs, server: Server):
         self.node = node
         self.node_ip = self.node.metadata.labels.get("chutes/external-ip")
@@ -47,34 +51,32 @@ class VerificationStrategy(ABC):
         self.server = server
         self.validator = validator_by_hotkey(server_args.validator)
         self.queue = asyncio.Queue()
-        self._finished=False
+        self._finished = False
 
     @classmethod
     async def create(cls, node: V1Node, server_args: ServerArgs, server: Server):
         """Async factory method."""
         node_ip = node.metadata.labels.get("chutes/external-ip")
-        
+
         # Run your async check
         has_attestation = await cls._check_attestation_service(node_ip, server)
-        
+
         if has_attestation:
             return TEEVerificationStrategy(node, server_args, server)
         else:
             return GravalVerificationStrategy(node, server_args, server)
-    
+
     @classmethod
     async def _check_attestation_service(cls, node_ip: str, server: Server) -> bool:
         try:
             async with aiohttp.ClientSession(raise_for_status=True) as http_session:
-                async with http_session.get(
-                    f"https://{node_ip}:30443/servers/health"
-                ):
+                async with http_session.get(f"https://{node_ip}:30443/servers/health"):
                     logger.success(f"Verified attestation service for {server.name}")
                     return True
         except Exception as exc:
             logger.warning(f"Attestation service not available: {exc}")
             return False
-        
+
     async def emit_message(self, message: str):
         await self.queue.put(sse_message(message))
 
@@ -108,21 +110,17 @@ class VerificationStrategy(ABC):
                 break
 
     @abstractmethod
-    async def prepare_verification_environment(
-        self
-    ):
+    async def prepare_verification_environment(self):
         """
         Prepare the environment for verification.
         - Graval: Deploy graval job/service
         - TEE: Verify TEE service availability
-        
+
         Returns environment details needed for subsequent steps.
         """
         pass
 
-    async def gather_gpu_info(
-        self
-    ):
+    async def gather_gpu_info(self):
         """
         Gather GPU information using the appropriate method.
         - Graval: Query graval service
@@ -160,27 +158,23 @@ class VerificationStrategy(ABC):
             for idx in range(len(gpus)):
                 await session.refresh(gpus[idx])
         return gpus
-    
+
     @abstractmethod
-    async def _gather_gpu_info(
-        self
-    ):
+    async def _gather_gpu_info(self):
         """
         Gather GPU information using the appropriate method.
         - Graval: Query graval service
         - TEE: Use TDX quotes and nv trust evidence
         """
         pass
-    
+
     @abstractmethod
-    async def advertise_to_validator(
-        self
-    ):
+    async def advertise_to_validator(self):
         """
         Advertise nodes to validator using appropriate endpoint.
         - Graval: POST to /nodes (or current endpoint)
         - TEE: POST to /nodes/tee (or similar TEE-specific endpoint)
-        
+
         Returns (task_id, validator_nodes)
         """
         pass
@@ -199,19 +193,16 @@ class VerificationStrategy(ABC):
             error_message = f"Verification failed for {self.validator.hotkey}, aborting!"
             await self.emit_message(error_message)
             raise BootstrapFailure(error_message)
-        
+
     @abstractmethod
     async def _wait_for_verification_task(self):
         """
         Wait for the final status to come back from the validator
         """
         pass
-    
+
     @abstractmethod
-    async def cleanup(
-        self,
-        delete_node: bool = True
-    ) -> None:
+    async def cleanup(self, delete_node: bool = True) -> None:
         """
         Clean up verification-specific resources.
         - Graval: Remove graval job/service
@@ -219,27 +210,28 @@ class VerificationStrategy(ABC):
         """
         pass
 
-class GravalVerificationStrategy(VerificationStrategy):
 
-    async def prepare_verification_environment(
-        self
-    ):
+class GravalVerificationStrategy(VerificationStrategy):
+    async def prepare_verification_environment(self):
         """
         Prepare the environment for verification.
         - Graval: Deploy graval job/service
         - TEE: Verify TEE service availability
-        
+
         Returns environment details needed for subsequent steps.
         """
         graval_job, graval_svc = await self._deploy_graval(
-            self.node, self.server_args.validator, self.server.cpu_per_gpu, self.server.memory_per_gpu
+            self.node,
+            self.server_args.validator,
+            self.server.cpu_per_gpu,
+            self.server.memory_per_gpu,
         )
 
         self.graval_job = graval_job
         self.graval_svc = graval_svc
 
         await self.emit_message("graval bootstrap job/service created, gathering device info...")
-    
+
     async def _deploy_graval(
         self, node_object: V1Node, validator_hotkey: str, cpu_per_gpu: int, memory_per_gpu: int
     ):
@@ -251,7 +243,9 @@ class GravalVerificationStrategy(VerificationStrategy):
 
         # Double check that we don't already have chute deployments.
         existing_jobs = K8sOperator().get_jobs(label_selector="chute/chute=true,app=graval")
-        if any([job for job in existing_jobs.items if job.spec.template.spec.node_name == node_name]):
+        if any(
+            [job for job in existing_jobs.items if job.spec.template.spec.node_name == node_name]
+        ):
             raise NonEmptyServer(
                 f"Kubernetes node {node_name} already has one or more chute and/or graval jobs."
             )
@@ -361,7 +355,7 @@ class GravalVerificationStrategy(VerificationStrategy):
         namespace = self.graval_job.metadata.namespace or "chutes"
         expected_gpu_count = int(node_object.metadata.labels.get("nvidia.com/gpu.count", "0"))
         gpu_short_ref = node_object.metadata.labels.get("gpu-short-ref")
-        
+
         if not gpu_short_ref:
             raise GraValBootstrapFailure("Node does not have required gpu-short-ref label!")
 
@@ -411,9 +405,9 @@ class GravalVerificationStrategy(VerificationStrategy):
             raise GraValBootstrapFailure(
                 f"Failed to fetch devices from GraVal bootstrap: {node_ip}:{node_port}/devices: {exc}"
             )
-        
-        return devices        
-    
+
+        return devices
+
     @backoff.on_exception(
         backoff.constant,
         Exception,
@@ -438,16 +432,13 @@ class GravalVerificationStrategy(VerificationStrategy):
         async with aiohttp.ClientSession(raise_for_status=True) as session:
             async with session.get(url, headers=headers, timeout=5) as response:
                 return (await response.json())["devices"]
-    
-    
-    async def advertise_to_validator(
-        self
-    ):
+
+    async def advertise_to_validator(self):
         """
         Advertise nodes to validator using appropriate endpoint.
         - Graval: POST to /nodes (or current endpoint)
         - TEE: POST to /nodes/tee (or similar TEE-specific endpoint)
-        
+
         Returns (task_id, validator_nodes)
         """
         seed = None
@@ -487,7 +478,7 @@ class GravalVerificationStrategy(VerificationStrategy):
 
         self.task_id = task_id
         self.validator_nodes = validator_nodes
-    
+
     @backoff.on_exception(
         backoff.constant,
         Exception,
@@ -529,7 +520,7 @@ class GravalVerificationStrategy(VerificationStrategy):
                     f"Successfully advertised {len(gpus)} to {validator.hotkey} via {validator.api}"
                 )
                 return task_id, nodes
-    
+
     async def _wait_for_verification_task(self):
         """
         Wait for the verification task on the validator to complete
@@ -566,10 +557,7 @@ class GravalVerificationStrategy(VerificationStrategy):
                     return False
                 return True
 
-    async def cleanup(
-        self,
-        delete_node: bool = True
-    ) -> None:
+    async def cleanup(self, delete_node: bool = True) -> None:
         """
         Clean up verification-specific resources.
         - Graval: Remove graval job/service
@@ -615,16 +603,12 @@ class GravalVerificationStrategy(VerificationStrategy):
 
 
 class TEEVerificationStrategy(VerificationStrategy):
-
-
-    async def prepare_verification_environment(
-        self
-    ):
+    async def prepare_verification_environment(self):
         """
         Prepare the environment for verification.
         - Graval: Deploy graval job/service
         - TEE: Verify TEE service availability
-        
+
         Returns environment details needed for subsequent steps.
         """
         await self._verify_attestation_service()
@@ -632,17 +616,13 @@ class TEEVerificationStrategy(VerificationStrategy):
     async def _verify_attestation_service(self):
         try:
             async with aiohttp.ClientSession(raise_for_status=True) as http_session:
-                async with http_session.get(
-                    f"https://{self.node_ip}:30443/servers/health"
-                ):
-                    logger.success(
-                        f"Verified attestation service for {self.server.name}"
+                async with http_session.get(f"https://{self.node_ip}:30443/servers/health"):
+                    logger.success(f"Verified attestation service for {self.server.name}")
+                    self.emit_message(
+                        f"Verified attestation service is available for {self.server.name}[{self.node_ip}]"
                     )
-                    self.emit_message(f"Verified attestation service is available for {self.server.name}[{self.node_ip}]")
         except Exception as exc:
-            logger.warning(
-                f"Error verifying attestation services for {self.server.name}: {exc}"
-            )
+            logger.warning(f"Error verifying attestation services for {self.server.name}: {exc}")
             raise TEEBootstrapFailure(f"Failed to verify attestion service for {self.server.name}")
 
     async def _gather_gpu_info(self):
@@ -660,9 +640,9 @@ class TEEVerificationStrategy(VerificationStrategy):
             raise TEEBootstrapFailure(
                 f"Failed to fetch devices from attestation service: {self.node_ip}:30443/servers/devices: {exc}"
             )
-        
-        return devices     
-    
+
+        return devices
+
     @backoff.on_exception(
         backoff.constant,
         Exception,
@@ -681,12 +661,9 @@ class TEEVerificationStrategy(VerificationStrategy):
                 f"https://{self.node_ip}:30443/servers/devices", headers=headers
             ) as resp:
                 devices = await resp.json()
-                logger.success(
-                    f"Retrieved {len(devices)} GPUs from {self.server.name}."
-                )
+                logger.success(f"Retrieved {len(devices)} GPUs from {self.server.name}.")
 
         return devices
-
 
     async def _get_devices(self):
         try:
@@ -696,25 +673,19 @@ class TEEVerificationStrategy(VerificationStrategy):
                     f"https://{self.node_ip}:30443/servers/devices", headers=headers
                 ) as resp:
                     devices = await resp.json()
-                    logger.success(
-                        f"Retrieved {len(devices)} GPUs from {self.server.name}."
-                    )
+                    logger.success(f"Retrieved {len(devices)} GPUs from {self.server.name}.")
 
             return devices
         except Exception as exc:
-            logger.warning(
-                f"Error verifying attestation services for {self.server.name}: {exc}"
-            )
+            logger.warning(f"Error verifying attestation services for {self.server.name}: {exc}")
             raise TEEBootstrapFailure(f"Failed to verify attestion service for {self.server.name}")
-    
-    async def advertise_to_validator(
-        self
-    ):
+
+    async def advertise_to_validator(self):
         """
         Advertise nodes to validator using appropriate endpoint.
         - Graval: POST to /nodes (or current endpoint)
         - TEE: POST to /nodes/tee (or similar TEE-specific endpoint)
-        
+
         Returns (task_id, validator_nodes)
         """
         validator = self.validator
@@ -724,7 +695,7 @@ class TEEVerificationStrategy(VerificationStrategy):
 
         task_id = None
         try:
-            task_id  = await self._advertise_server()
+            task_id = await self._advertise_server()
         except Exception as exc:
             await self.emit_message(
                 f"failed to advertising server to {validator.hotkey} via {validator.api}: {exc}",
@@ -818,11 +789,8 @@ class TEEVerificationStrategy(VerificationStrategy):
                 if status in ["error", "failed"]:
                     return False
                 return True
-    
-    async def cleanup(
-        self,
-        delete_node: bool = True
-    ) -> None:
+
+    async def cleanup(self, delete_node: bool = True) -> None:
         """
         Clean up verification-specific resources.
         - Graval: Remove graval job/service

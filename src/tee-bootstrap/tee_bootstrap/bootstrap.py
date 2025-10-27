@@ -8,6 +8,7 @@ from pathlib import Path
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
 async def get_tdx_quote(nonce: str, socket_path: str = "/var/run/tdx-quote.sock") -> bytes:
     """
     Send a GET request to the TdxQuoteServer over a Unix socket using aiohttp.
@@ -41,7 +42,9 @@ async def get_tdx_quote(nonce: str, socket_path: str = "/var/run/tdx-quote.sock"
                 # Decode the base64 response
                 try:
                     quote = base64.b64decode(response_text)
-                    logger.info(f"Successfully retrieved quote for nonce '{nonce}' (length: {len(quote)} bytes)")
+                    logger.info(
+                        f"Successfully retrieved quote for nonce '{nonce}' (length: {len(quote)} bytes)"
+                    )
                     return quote
                 except base64.binascii.Error as e:
                     logger.error(f"Failed to decode base64 response: {e}")
@@ -56,6 +59,7 @@ async def get_tdx_quote(nonce: str, socket_path: str = "/var/run/tdx-quote.sock"
         logger.error(f"Unexpected error: {e}")
         raise
 
+
 async def main():
     """Main function to demonstrate the quote request."""
     nonce = "test"
@@ -68,6 +72,7 @@ async def main():
         logger.info("Quote saved to quote.bin")
     except Exception as e:
         logger.error(f"Error: {e}")
+
 
 if __name__ == "__main__":
     asyncio.run(main())

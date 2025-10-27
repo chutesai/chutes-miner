@@ -1,7 +1,7 @@
-from abc import abstractmethod
 from fastapi import FastAPI
 from loguru import logger
 import uvicorn
+
 
 class WebServer:
     """Async web server for admission webhook using FastAPI."""
@@ -13,7 +13,7 @@ class WebServer:
     def _setup_routes(self):
         """
         Setup web routes.
-        Example: 
+        Example:
         self.app.add_api_route('/route', self.handle_route, methods=["GET"])
         """
         self.app.add_api_route("/quote", self.get_tdx_quote, methods=["GET"])
@@ -38,11 +38,7 @@ class WebServer:
                 uvicorn_kwargs["ssl_keyfile"] = self.config.tls_key_path
                 logger.info("TLS enabled")
 
-        uvicorn.run(
-            self.app,
-            log_level="debug" if self.config.debug else "info",
-            **uvicorn_kwargs
-        )
+        uvicorn.run(self.app, log_level="debug" if self.config.debug else "info", **uvicorn_kwargs)
 
     async def get_tdx_quote(self):
         pass
