@@ -149,7 +149,7 @@
         - name: Update server addresses in collected kubeconfigs
           ansible.builtin.replace:
             path: "{{ temp_staging_dir }}/{{ hostvars[item.item]['inventory_hostname'] }}.yaml"
-            regexp: "https://127.0.0.1:6443"
+            regexp: "https://127.0.0.1:{{ hostvars[item.item]['k3s_api_port'] | default('6443') }}"
             replace: "https://{{ hostvars[item.item]['ansible_host'] }}:{{ hostvars[item.item]['k3s_api_port'] | default('6443') }}"
           loop: "{{ kubeconfig_contents.results }}"
           when: not item.failed | default(false)
@@ -252,8 +252,8 @@
         - name: Update server addresses for control node
           ansible.builtin.replace:
             path: "{{ controller_kubeconfig | default('~/.kube/config') }}"
-            regexp: "https://127.0.0.1:6443"
-            replace: "https://{{ hostvars[control_node]['ansible_host'] }}:6443"
+            regexp: "https://127.0.0.1:{{ hostvars[control_node]['k3s_api_port'] | default('6443') }}"
+            replace: "https://{{ hostvars[control_node]['ansible_host'] }}:{{ hostvars[control_node]['k3s_api_port'] | default('6443') }}"
           delegate_to: localhost
           become: false
           run_once: true

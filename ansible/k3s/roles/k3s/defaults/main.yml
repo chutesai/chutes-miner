@@ -13,3 +13,4 @@ k3s_server_config_yaml: |-
   node-ip: {{ node_ip }}
   node-external-ip: {{ ansible_host }}
   advertise-address: {{ ansible_host }}
+  https-listen-port: {{ k3s_api_port }}
