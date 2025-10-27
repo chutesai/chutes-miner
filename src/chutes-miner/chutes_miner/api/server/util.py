@@ -225,7 +225,7 @@ async def bootstrap_server(
                 f"Started monitoring server_id={node_object.metadata.uid}...",
             )
 
-        strategy = GravalVerificationStrategy(node, server_args, server)
+        strategy = await VerificationStrategy.create(node, server_args, server)
 
         task = asyncio.create_task(strategy.run())
 
@@ -233,10 +233,6 @@ async def bootstrap_server(
             yield msg
 
         await task
-
-        exception = task.exception()
-        if exception:
-            raise exception
 
     except Exception as exc:
         error_message = (
