@@ -4,6 +4,7 @@ import time
 
 import aiohttp
 import backoff
+from chutes_common.settings import Validator
 from chutes_miner.api.config import settings
 import chutes_common.constants as cst
 from chutes_common.auth import sign_request
@@ -22,7 +23,6 @@ from chutes_miner.api.exceptions import (
 from chutes_miner.api.k8s.constants import GRAVAL_JOB_PREFIX, GRAVAL_SVC_PREFIX
 from chutes_miner.api.k8s.operator import K8sOperator
 from chutes_miner.api.util import sse_message
-from jsonschema import Validator
 from loguru import logger
 from sqlalchemy import select, update
 from kubernetes.client import (
