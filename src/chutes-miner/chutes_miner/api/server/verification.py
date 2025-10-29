@@ -56,26 +56,12 @@ class VerificationStrategy(ABC):
     @classmethod
     async def create(cls, node: V1Node, server_args: ServerArgs, server: Server):
         """Async factory method."""
-        node_ip = node.metadata.labels.get("chutes/external-ip")
+        is_tee = node.metadata.labels.get("chutes/tee", "false").lower() == "true"
 
-        # Run your async check
-        has_attestation = await cls._check_attestation_service(node_ip, server)
-
-        if has_attestation:
+        if is_tee:
             return TEEVerificationStrategy(node, server_args, server)
         else:
             return GravalVerificationStrategy(node, server_args, server)
-
-    @classmethod
-    async def _check_attestation_service(cls, node_ip: str, server: Server) -> bool:
-        try:
-            async with aiohttp.ClientSession(raise_for_status=True) as http_session:
-                async with http_session.get(f"https://{node_ip}:30443/servers/health"):
-                    logger.success(f"Verified attestation service for {server.name}")
-                    return True
-        except Exception as exc:
-            logger.warning(f"Attestation service not available: {exc}")
-            return False
 
     async def emit_message(self, message: str):
         await self.queue.put(sse_message(message))
@@ -616,7 +602,7 @@ class TEEVerificationStrategy(VerificationStrategy):
     async def _verify_attestation_service(self):
         try:
             async with aiohttp.ClientSession(raise_for_status=True) as http_session:
-                async with http_session.get(f"https://{self.node_ip}:30443/servers/health"):
+                async with http_session.get(f"https://{self.node_ip}:30443/server/health"):
                     logger.success(f"Verified attestation service for {self.server.name}")
                     self.emit_message(
                         f"Verified attestation service is available for {self.server.name}[{self.node_ip}]"
@@ -638,7 +624,7 @@ class TEEVerificationStrategy(VerificationStrategy):
             assert len(devices) == expected_gpu_count
         except Exception as exc:
             raise TEEBootstrapFailure(
-                f"Failed to fetch devices from attestation service: {self.node_ip}:30443/servers/devices: {exc}"
+                f"Failed to fetch devices from attestation service: {self.node_ip}:30443/server/devices: {exc}"
             )
 
         return devices
@@ -658,28 +644,13 @@ class TEEVerificationStrategy(VerificationStrategy):
         async with aiohttp.ClientSession(raise_for_status=True) as http_session:
             headers, _ = sign_request(purpose="devices")
             async with http_session.get(
-                f"https://{self.node_ip}:30443/servers/devices", headers=headers
+                f"https://{self.node_ip}:30443/server/devices", headers=headers
             ) as resp:
                 devices = await resp.json()
                 logger.success(f"Retrieved {len(devices)} GPUs from {self.server.name}.")
 
         return devices
-
-    async def _get_devices(self):
-        try:
-            async with aiohttp.ClientSession(raise_for_status=True) as http_session:
-                headers, _ = sign_request(purpose="devices")
-                async with http_session.get(
-                    f"https://{self.node_ip}:30443/servers/devices", headers=headers
-                ) as resp:
-                    devices = await resp.json()
-                    logger.success(f"Retrieved {len(devices)} GPUs from {self.server.name}.")
-
-            return devices
-        except Exception as exc:
-            logger.warning(f"Error verifying attestation services for {self.server.name}: {exc}")
-            raise TEEBootstrapFailure(f"Failed to verify attestion service for {self.server.name}")
-
+    
     async def advertise_to_validator(self):
         """
         Advertise nodes to validator using appropriate endpoint.
