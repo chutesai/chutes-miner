@@ -1,5 +1,7 @@
 from abc import ABC, abstractmethod
 import asyncio
+from contextlib import asynccontextmanager
+import ssl
 import time
 
 import aiohttp
@@ -84,7 +86,7 @@ class VerificationStrategy(ABC):
                 self.queue.task_done()
                 yield message
             except asyncio.TimeoutError:
-                asyncio.sleep(1)
+                await asyncio.sleep(1)
 
         # Drain any remaining messages in the queue after finishing
         while not self.queue.empty():
@@ -124,7 +126,7 @@ class VerificationStrategy(ABC):
     async def _track_gpus(self, devices) -> list[GPU]:
         # Store inventory.
         server_id = self.server.server_id
-        validator = self.validator
+        validator = self.validator.hotkey
         gpu_short_ref = self.node.metadata.labels.get("gpu-short-ref")
         gpus = []
         async with get_session() as session:
@@ -589,6 +591,27 @@ class GravalVerificationStrategy(VerificationStrategy):
 
 
 class TEEVerificationStrategy(VerificationStrategy):
+
+    @asynccontextmanager
+    async def _attestation_session(self):
+        """
+        Creates an aiohttp session configured for the attestation service.
+        
+        SSL verification is disabled because certificate authenticity is verified
+        through TDX quotes, which include a hash of the service's public key.
+        """
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+        
+        connector = aiohttp.TCPConnector(ssl=ssl_context)
+        
+        async with aiohttp.ClientSession(
+            connector=connector,
+            raise_for_status=True
+        ) as session:
+            yield session
+
     async def prepare_verification_environment(self):
         """
         Prepare the environment for verification.
@@ -601,10 +624,10 @@ class TEEVerificationStrategy(VerificationStrategy):
 
     async def _verify_attestation_service(self):
         try:
-            async with aiohttp.ClientSession(raise_for_status=True) as http_session:
+            async with self._attestation_session() as http_session:
                 async with http_session.get(f"https://{self.node_ip}:30443/server/health"):
                     logger.success(f"Verified attestation service for {self.server.name}")
-                    self.emit_message(
+                    await self.emit_message(
                         f"Verified attestation service is available for {self.server.name}[{self.node_ip}]"
                     )
         except Exception as exc:
@@ -619,9 +642,12 @@ class TEEVerificationStrategy(VerificationStrategy):
         devices = None
         expected_gpu_count = int(self.node.metadata.labels.get("nvidia.com/gpu.count", "0"))
         try:
-            devices = await self._fetch_devices()
-            assert devices
-            assert len(devices) == expected_gpu_count
+            raw_devices = await self._fetch_devices()
+            assert raw_devices
+            assert len(raw_devices) == expected_gpu_count
+
+            devices = [device["device_info"] for device in raw_devices]
+
         except Exception as exc:
             raise TEEBootstrapFailure(
                 f"Failed to fetch devices from attestation service: {self.node_ip}:30443/server/devices: {exc}"
@@ -641,7 +667,7 @@ class TEEVerificationStrategy(VerificationStrategy):
         Query the GraVal bootstrap API for device info.
         """
         devices = []
-        async with aiohttp.ClientSession(raise_for_status=True) as http_session:
+        async with self._attestation_session() as http_session:
             headers, _ = sign_request(purpose="devices")
             async with http_session.get(
                 f"https://{self.node_ip}:30443/server/devices", headers=headers
@@ -681,7 +707,8 @@ class TEEVerificationStrategy(VerificationStrategy):
 
     @backoff.on_exception(
         backoff.constant,
-        Exception,
+        (aiohttp.ClientError, asyncio.TimeoutError),
+        giveup=lambda e: isinstance(e, aiohttp.ClientResponseError),
         jitter=None,
         interval=3,
         max_tries=5,
@@ -708,7 +735,7 @@ class TEEVerificationStrategy(VerificationStrategy):
                 payload={
                     "id": self.server.server_id,
                     "name": self.server.name,
-                    "ip_address": self.node_ip,
+                    "host": self.node_ip,
                     "gpus": device_infos,
                 }
             )
@@ -716,7 +743,15 @@ class TEEVerificationStrategy(VerificationStrategy):
                 f"{self.validator.api}/servers/", data=payload_string, headers=headers
             ) as response:
                 response_text = await response.text()
-                assert response.status == 202, response_text
+                if response.status != 202:
+                    # Raise ClientResponseError for bad status codes - won't be retried
+                    raise aiohttp.ClientResponseError(
+                        request_info=response.request_info,
+                        history=response.history,
+                        status=response.status,
+                        message=response_text,
+                        headers=response.headers
+                    )
                 data = await response.json()
                 task_id = data.get("task_id")
                 assert task_id
@@ -787,7 +822,7 @@ class TEEVerificationStrategy(VerificationStrategy):
 
                 try:
                     async with aiohttp.ClientSession(raise_for_status=True) as http_session:
-                        headers, _ = sign_request(purpose="servers")
+                        headers, _ = sign_request(purpose="tee")
                         async with http_session.delete(
                             f"{validator.api}/servers/{server_id}", headers=headers
                         ) as resp:
