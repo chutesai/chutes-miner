@@ -743,7 +743,7 @@ class TEEVerificationStrategy(VerificationStrategy):
                 f"{self.validator.api}/servers/", data=payload_string, headers=headers
             ) as response:
                 response_text = await response.text()
-                if response.status != 202:
+                if response.status != 201:
                     # Raise ClientResponseError for bad status codes - won't be retried
                     raise aiohttp.ClientResponseError(
                         request_info=response.request_info,
