@@ -72,8 +72,7 @@ class VerificationStrategy(ABC):
         try:
             await self.prepare_verification_environment()
             await self.gather_gpu_info()
-            await self.advertise_to_validator()
-            await self.wait_for_verification_task()
+            await self.verify_with_validator()
         finally:
             self._finished = True
 
@@ -157,35 +156,13 @@ class VerificationStrategy(ABC):
         pass
 
     @abstractmethod
-    async def advertise_to_validator(self):
+    async def verify_with_validator(self):
         """
         Advertise nodes to validator using appropriate endpoint.
         - Graval: POST to /nodes (or current endpoint)
         - TEE: POST to /nodes/tee (or similar TEE-specific endpoint)
 
         Returns (task_id, validator_nodes)
-        """
-        pass
-
-    async def wait_for_verification_task(self):
-        """
-        Wait for the verification task on the validator to complete
-        """
-        # Wait for verification from this validator.
-        status = await self._wait_for_verification_task()
-        if status:
-            await self.emit_message(
-                f"validator {self.validator.hotkey} has successfully performed verification"
-            )
-        else:
-            error_message = f"Verification failed for {self.validator.hotkey}, aborting!"
-            await self.emit_message(error_message)
-            raise BootstrapFailure(error_message)
-
-    @abstractmethod
-    async def _wait_for_verification_task(self):
-        """
-        Wait for the final status to come back from the validator
         """
         pass
 
@@ -421,7 +398,29 @@ class GravalVerificationStrategy(VerificationStrategy):
             async with session.get(url, headers=headers, timeout=5) as response:
                 return (await response.json())["devices"]
 
-    async def advertise_to_validator(self):
+    async def verify_with_validator(self):
+        """
+        Advertise nodes to validator using appropriate endpoint.
+        - Graval: POST to /nodes (or current endpoint)
+        - TEE: POST to /nodes/tee (or similar TEE-specific endpoint)
+
+        Returns (task_id, validator_nodes)
+        """
+        await self._advertise_to_validator()
+
+        # Wait for verification from this validator.
+        status = await self._wait_for_verification_task()
+        if status:
+            await self.emit_message(
+                f"validator {self.validator.hotkey} has successfully performed verification"
+            )
+        else:
+            error_message = f"Verification failed for {self.validator.hotkey}, aborting!"
+            await self.emit_message(error_message)
+            raise BootstrapFailure(error_message)
+        
+
+    async def _advertise_to_validator(self):
         """
         Advertise nodes to validator using appropriate endpoint.
         - Graval: POST to /nodes (or current endpoint)
@@ -677,7 +676,7 @@ class TEEVerificationStrategy(VerificationStrategy):
 
         return devices
     
-    async def advertise_to_validator(self):
+    async def verify_with_validator(self):
         """
         Advertise nodes to validator using appropriate endpoint.
         - Graval: POST to /nodes (or current endpoint)
@@ -687,23 +686,20 @@ class TEEVerificationStrategy(VerificationStrategy):
         """
         validator = self.validator
         await self.emit_message(
-            f"advertising server to {validator.hotkey} via {validator.api}...",
+            f"Verifying server with {validator.hotkey} via {validator.api}...",
         )
 
-        task_id = None
         try:
-            task_id = await self._advertise_server()
+            await self._advertise_server()
         except Exception as exc:
             await self.emit_message(
-                f"failed to advertising server to {validator.hotkey} via {validator.api}: {exc}",
+                f"failed to verify server with {validator.hotkey} via {validator.api}: {exc}",
             )
             raise
 
         await self.emit_message(
-            f"successfully advertised server {self.server.name} to validator {validator.hotkey}"
+            f"successfully verifeid server {self.server.name} to validator {validator.hotkey}"
         )
-
-        self.task_id = task_id
 
     @backoff.on_exception(
         backoff.constant,
@@ -734,7 +730,6 @@ class TEEVerificationStrategy(VerificationStrategy):
             headers, payload_string = sign_request(
                 payload={
                     "id": self.server.server_id,
-                    "name": self.server.name,
                     "host": self.node_ip,
                     "gpus": device_infos,
                 }
@@ -752,49 +747,46 @@ class TEEVerificationStrategy(VerificationStrategy):
                         message=response_text,
                         headers=response.headers
                     )
-                data = await response.json()
-                task_id = data.get("task_id")
-                assert task_id
                 logger.success(
                     f"Successfully advertised {self.server.name} with {len(gpus)} GPUs to {self.validator.hotkey} via {self.validator.api}"
                 )
-                return task_id
 
-    async def _wait_for_verification_task(self):
-        """
-        Wait for the verification task on the validator to complete
-        """
-        while (status := await self._check_verification_task_status()) is None:
-            await self.emit_message(
-                f"waiting for validator {self.validator.hotkey} to finish Server verification..."
-            )
-            await asyncio.sleep(1)
-        return status
+    # async def _wait_for_verification_task(self):
+    #     """
+    #     Wait for the verification task on the validator to complete
+    #     """
+    #     while (status := await self._check_verification_task_status()) is None:
+    #         await self.emit_message(
+    #             f"waiting for validator {self.validator.hotkey} to finish Server verification..."
+    #         )
+    #         await asyncio.sleep(1)
+    #     return status
 
-    @backoff.on_exception(
-        backoff.constant,
-        Exception,
-        jitter=None,
-        interval=3,
-        max_tries=5,
-    )
-    async def _check_verification_task_status(self) -> bool:
-        """
-        Check the Server verification task status.
-        """
-        async with aiohttp.ClientSession(raise_for_status=True) as session:
-            headers, _ = sign_request(purpose="tee")
-            async with session.get(
-                f"{self.validator.api}/servers/verification_status",
-                params={"task_id": self.task_id},
-                headers=headers,
-            ) as response:
-                data = await response.json()
-                if (status := data.get("status")) == "pending":
-                    return None
-                if status in ["error", "failed"]:
-                    return False
-                return True
+    # @backoff.on_exception(
+    #     backoff.constant,
+    #     Exception,
+    #     jitter=None,
+    #     interval=3,
+    #     max_tries=5,
+    # )
+    # async def _check_verification_task_status(self) -> bool:
+    #     """
+    #     Check the Server verification task status.
+    #     """
+    #     async with aiohttp.ClientSession(raise_for_status=True) as session:
+    #         headers, _ = sign_request(purpose="tee")
+    #         async with session.get(
+    #             f"{self.validator.api}/servers/verification_status",
+    #             params={"task_id": self.task_id},
+    #             headers=headers,
+    #         ) as response:
+    #             data = await response.json()
+    #             logger.info(f"Verification status: {data}")
+    #             if (status := data.get("status")) == "pending":
+    #                 return None
+    #             if status in ["error", "failed"]:
+    #                 return False
+    #             return True
 
     async def cleanup(self, delete_node: bool = True) -> None:
         """
@@ -807,8 +799,9 @@ class TEEVerificationStrategy(VerificationStrategy):
         if delete_node:
             node_uid = node_object.metadata.uid
             logger.info(f"Purging failed server: {self.server.name=} {node_uid=}")
-            validator = None
+            validator = self.validator
             async with get_session() as session:
+                server_id = None
                 server = (
                     (await session.execute(select(Server).where(Server.server_id == node_uid)))
                     .unique()
@@ -816,7 +809,6 @@ class TEEVerificationStrategy(VerificationStrategy):
                 )
                 if server:
                     server_id = server.server_id
-                    validator = validator_by_hotkey(server.validator)
                     await session.delete(server)
                 await session.commit()
 
