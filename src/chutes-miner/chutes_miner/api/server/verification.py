@@ -418,7 +418,6 @@ class GravalVerificationStrategy(VerificationStrategy):
             error_message = f"Verification failed for {self.validator.hotkey}, aborting!"
             await self.emit_message(error_message)
             raise BootstrapFailure(error_message)
-        
 
     async def _advertise_to_validator(self):
         """
@@ -590,25 +589,21 @@ class GravalVerificationStrategy(VerificationStrategy):
 
 
 class TEEVerificationStrategy(VerificationStrategy):
-
     @asynccontextmanager
     async def _attestation_session(self):
         """
         Creates an aiohttp session configured for the attestation service.
-        
+
         SSL verification is disabled because certificate authenticity is verified
         through TDX quotes, which include a hash of the service's public key.
         """
         ssl_context = ssl.create_default_context()
         ssl_context.check_hostname = False
         ssl_context.verify_mode = ssl.CERT_NONE
-        
+
         connector = aiohttp.TCPConnector(ssl=ssl_context)
-        
-        async with aiohttp.ClientSession(
-            connector=connector,
-            raise_for_status=True
-        ) as session:
+
+        async with aiohttp.ClientSession(connector=connector, raise_for_status=True) as session:
             yield session
 
     async def prepare_verification_environment(self):
@@ -675,7 +670,7 @@ class TEEVerificationStrategy(VerificationStrategy):
                 logger.success(f"Retrieved {len(devices)} GPUs from {self.server.name}.")
 
         return devices
-    
+
     async def verify_with_validator(self):
         """
         Advertise nodes to validator using appropriate endpoint.
@@ -745,7 +740,7 @@ class TEEVerificationStrategy(VerificationStrategy):
                         history=response.history,
                         status=response.status,
                         message=response_text,
-                        headers=response.headers
+                        headers=response.headers,
                     )
                 logger.success(
                     f"Successfully advertised {self.server.name} with {len(gpus)} GPUs to {self.validator.hotkey} via {self.validator.api}"
