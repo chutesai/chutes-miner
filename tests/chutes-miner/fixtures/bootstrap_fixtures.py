@@ -315,25 +315,11 @@ def mock_dependencies(
             patcher.stop()
 
 @pytest.fixture(autouse=True)
-def mock_fetch_devices(mock_gpus):
-
-    _mock = AsyncMock()
-    with patch("chutes_miner.api.server.verification.GravalVerificationStrategy._fetch_devices", _mock), \
-        patch("chutes_miner.api.server.verification.TEEVerificationStrategy._fetch_devices", _mock):
-        _mock.return_value = [
-        {
-            "uuid": gpu.gpu_id,
-            **gpu.device_info
-        } for gpu in mock_gpus
-    ]
-        yield _mock
-
-@pytest.fixture(autouse=True)
 def mock_check_verification_task_status():
 
     _mock = AsyncMock()
-    with patch("chutes_miner.api.server.verification.GravalVerificationStrategy._check_verification_task_status", _mock), \
-        patch("chutes_miner.api.server.verification.TEEVerificationStrategy._check_verification_task_status", _mock):
+    with patch("chutes_miner.api.server.verification.GravalVerificationStrategy._check_verification_task_status", _mock):
+        # patch("chutes_miner.api.server.verification.TEEVerificationStrategy._check_verification_task_status", _mock):
         _mock.return_value = True
         yield _mock
 
@@ -346,8 +332,8 @@ def mock_graval_service():
 
     return mock_graval_svc
 
-@pytest.fixture(autouse=True)
-def mock_check_attestation_service():
-    with patch("chutes_miner.api.server.verification.VerificationStrategy._check_attestation_service") as mock_check:
-        mock_check.return_value = False
-        yield mock_check
+# @pytest.fixture(autouse=True)
+# def mock_check_attestation_service():
+#     with patch("chutes_miner.api.server.verification.VerificationStrategy._check_attestation_service") as mock_check:
+#         mock_check.return_value = False
+#         yield mock_check

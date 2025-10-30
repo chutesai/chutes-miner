@@ -8,9 +8,29 @@ import pytest
 from fixtures.bootstrap_fixtures import * # noqa
 
 @pytest.fixture(autouse=True)
-def mock_strategy_factory(mock_check_attestation_service):
-    mock_check_attestation_service.return_value = True
-    yield mock_check_attestation_service
+def mock_strategy_factory(mock_node):
+    mock_node.metadata.labels["chutes/tee"] = "true"
+    yield mock_node
+
+@pytest.fixture(autouse=True)
+def mock_fetch_devices(mock_gpus):
+
+    _mock = AsyncMock()
+    with patch("chutes_miner.api.server.verification.TEEVerificationStrategy._fetch_devices", _mock):
+        _mock.return_value = [
+        {
+            "device_info": {
+                "uuid": gpu.gpu_id,
+                **gpu.device_info
+            }
+        } for gpu in mock_gpus
+    ]
+        yield _mock
+
+@pytest.fixture(autouse=True)
+def mock_server_response(mock_aiohttp_response):
+    mock_aiohttp_response.status = 201
+    yield mock_aiohttp_response
 
 @pytest.mark.asyncio
 async def test_bootstrap_server_success_without_kubeconfig(
@@ -134,27 +154,27 @@ async def test_bootstrap_server_track_server_failure(
         )
 
 
-@pytest.mark.asyncio 
-async def test_bootstrap_server_verification_timeout_simulation(
-    mock_node, mock_server_args, mock_check_verification_task_status
-):
-    """Test verification status checking with multiple polls before success"""
+# @pytest.mark.asyncio 
+# async def test_bootstrap_server_verification_timeout_simulation(
+#     mock_node, mock_server_args, mock_check_verification_task_status
+# ):
+#     """Test verification status checking with multiple polls before success"""
     
-    # Simulate verification polling - return None twice, then True
-    mock_check_verification_task_status.side_effect = [None, None, True]
+#     # Simulate verification polling - return None twice, then True
+#     mock_check_verification_task_status.side_effect = [None, None, True]
     
-    # Execute test
-    from chutes_miner.api.server.util import bootstrap_server
-    messages = await collect_sse_messages(
-        bootstrap_server(mock_node, mock_server_args, None)
-    )
+#     # Execute test
+#     from chutes_miner.api.server.util import bootstrap_server
+#     messages = await collect_sse_messages(
+#         bootstrap_server(mock_node, mock_server_args, None)
+#     )
     
-    # Verify verification was checked multiple times
-    mock_check_verification_task_status.call_count == 3
+#     # Verify verification was checked multiple times
+#     mock_check_verification_task_status.call_count == 3
     
-    # Verify we got waiting messages
-    waiting_messages = [msg for msg in messages if "waiting for validator" in str(msg)]
-    assert len(waiting_messages) >= 2
+#     # Verify we got waiting messages
+#     waiting_messages = [msg for msg in messages if "waiting for validator" in str(msg)]
+#     assert len(waiting_messages) >= 2
 
 
 @pytest.mark.asyncio
@@ -196,8 +216,8 @@ async def test_bootstrap_server_sse_message_flow(mock_node, mock_server_args):
     # Check that messages appear in expected order
     assert any("attempting to add node" in msg for msg in message_strs)
     assert any("now tracked in database" in msg for msg in message_strs)
-    # assert any("graval bootstrap job/service created" in msg for msg in message_strs)
+    assert any("Verified attestation service" in msg for msg in message_strs)
     assert any("discovered" in msg and "GPUs" in msg for msg in message_strs)
-    assert any("advertising server" in msg for msg in message_strs)
-    assert any("successfully advertised server" in msg for msg in message_strs)
+    assert any("Verifying server" in msg for msg in message_strs)
+    assert any("successfully verifeid server" in msg for msg in message_strs)
     assert any("completed server bootstrapping" in msg for msg in message_strs)

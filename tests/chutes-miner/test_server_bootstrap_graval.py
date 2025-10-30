@@ -7,6 +7,19 @@ import pytest
 
 from fixtures.bootstrap_fixtures import * # noqa
 
+@pytest.fixture(autouse=True)
+def mock_fetch_devices(mock_gpus):
+
+    _mock = AsyncMock()
+    with patch("chutes_miner.api.server.verification.GravalVerificationStrategy._fetch_devices", _mock):
+        _mock.return_value = [
+        {
+            "uuid": gpu.gpu_id,
+            **gpu.device_info
+        } for gpu in mock_gpus
+    ]
+        yield _mock
+
 
 @pytest.mark.asyncio
 async def test_bootstrap_server_success_without_kubeconfig(
