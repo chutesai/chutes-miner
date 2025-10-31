@@ -1,3 +1,6 @@
+from chutes_common.schemas.server import ServerArgs
+from chutes_miner.api.exceptions import GraValBootstrapFailure
+from chutes_miner.api.server.verification import GravalVerificationStrategy
 import pytest
 from unittest.mock import ANY, AsyncMock, MagicMock, Mock, patch
 from kubernetes.client import (
@@ -11,7 +14,7 @@ from kubernetes.client import (
     V1DeploymentSpec,
     V1Job
 )
-from chutes_miner.api.server.util import gather_gpu_info, GPU, GraValBootstrapFailure
+from chutes_miner.api.server.util import GPU
 
 
 @pytest.fixture
@@ -77,10 +80,14 @@ def mock_devices():
         },
     ]
 
+@pytest.fixture
+def mock_strategy(mock_node, mock_server):
+    server_args = ServerArgs()
+    return GravalVerificationStrategy(mock_node, server_args, mock_server)
 
 @pytest.mark.asyncio
 async def test_successful_gpu_gathering(
-    mock_node, mock_job, mock_service, mock_devices
+    mock_strategy, mock_node, mock_job, mock_service, mock_devices
 ):
     """Test successful GPU information gathering"""
     # Mock the deployment watch stream
@@ -116,7 +123,7 @@ async def test_successful_gpu_gathering(
         mock_gpu_class.side_effect = mock_gpu_instances
 
         # Execute
-        result = await gather_gpu_info(
+        result = await mock_strategy.gather_gpu_info(
             server_id="server-123",
             validator="validator-456",
             node_object=mock_node,
