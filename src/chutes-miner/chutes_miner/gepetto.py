@@ -243,7 +243,7 @@ class Gepetto:
                 f"Failed to announce deployment {deployment.deployment_id}: {exc=}"
             )
 
-    async def get_launch_token(self, chute: Chute, job_id: str = None):
+    async def get_launch_token(self, chute: Chute, server_id: str, job_id: str = None):
         """
         Fetch a launch config JWT, if the chutes version supports/requires it.
         """
@@ -257,7 +257,7 @@ class Gepetto:
         try:
             async with aiohttp.ClientSession(raise_for_status=False) as session:
                 headers, _ = sign_request(purpose="launch")
-                params = {"chute_id": chute.chute_id}
+                params = {"chute_id": chute.chute_id, "server_id": server_id}
                 if job_id:
                     params["job_id"] = job_id
                 logger.warning(f"SENDING LAUNCH TOKEN REQUEST WITH {headers=}")
@@ -672,7 +672,7 @@ class Gepetto:
         )
         deployment = None
         try:
-            launch_token = await self.get_launch_token(chute, job_id=job_id)
+            launch_token = await self.get_launch_token(chute, server.server_id, job_id=job_id)
             extra_ports = await self._get_job_extra_services(chute)
             deployment, k8s_dep = await k8s.deploy_chute(
                 chute.chute_id,
@@ -1211,7 +1211,7 @@ class Gepetto:
                 logger.info(f"Attempting to deploy {chute.chute_id=} on {server_id=}")
                 deployment = None
                 try:
-                    launch_token = await self.get_launch_token(chute)
+                    launch_token = await self.get_launch_token(chute, server_id)
                     deployment, _ = await k8s.deploy_chute(
                         chute.chute_id,
                         server_id,
@@ -1533,7 +1533,7 @@ class Gepetto:
         # because only one miner can claim a single job for example, so we don't want to undeploy if we
         # don't actually get the lock.
         try:
-            launch_token = await self.get_launch_token(chute, job_id=job_id)
+            launch_token = await self.get_launch_token(chute, target_server.server_id, job_id=job_id)
         except DeploymentFailure:
             logger.warning(
                 f"Failed to obtain launch token, skipping pre-emption {chute.chute_id=} {job_id=}"
@@ -1636,7 +1636,7 @@ class Gepetto:
                         )
                         deployment = None
                         try:
-                            launch_token = await self.get_launch_token(chute)
+                            launch_token = await self.get_launch_token(chute, server.server_id)
                             deployment, _ = await k8s.deploy_chute(
                                 chute.chute_id,
                                 server.server_id,

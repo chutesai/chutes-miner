@@ -589,6 +589,7 @@ class GravalVerificationStrategy(VerificationStrategy):
 
 
 class TEEVerificationStrategy(VerificationStrategy):
+
     @asynccontextmanager
     async def _attestation_session(self):
         """
