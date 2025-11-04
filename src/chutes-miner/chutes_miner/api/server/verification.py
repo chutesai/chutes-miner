@@ -663,7 +663,7 @@ class TEEVerificationStrategy(VerificationStrategy):
         """
         devices = []
         async with self._attestation_session() as http_session:
-            headers, _ = sign_request(purpose="devices")
+            headers, _ = sign_request(purpose="attest")
             async with http_session.get(
                 f"https://{self.node_ip}:30443/server/devices", headers=headers
             ) as resp:
