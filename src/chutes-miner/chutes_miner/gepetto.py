@@ -871,6 +871,25 @@ class Gepetto:
         except Exception as exc:
             logger.error(f"Error purging {gpu_id=} from validator={validator.hotkey}: {exc}")
 
+    @staticmethod
+    async def remove_server_from_validator(validator: Validator, server_id: str):
+        """
+        Purge a GPU from validator inventory.
+        """
+        try:
+            async with aiohttp.ClientSession(raise_for_status=True) as http_session:
+                headers, _ = sign_request(purpose="tee")
+                async with http_session.delete(
+                    f"{validator.api}/servers/{server_id}", headers=headers
+                ) as resp:
+                    logger.success(
+                        f"Successfully purged {server_id=} from validator={validator.hotkey}: {await resp.json()}"
+                    )
+        except Exception as exc:
+            logger.warning(
+                f"Error purging {server_id=} from validator={validator.hotkey}: {exc}"
+            )
+
     async def gpu_deleted(self, event_data):
         """
         GPU no longer exists in validator inventory for some reason.
@@ -949,9 +968,11 @@ class Gepetto:
                 .scalar_one_or_none()
             )
             if server:
-                await asyncio.gather(
-                    *[self.gpu_deleted({"gpu_id": gpu.gpu_id}) for gpu in server.gpus]
-                )
+                # Remove server once GPUs are removed.  Should probably just switch this
+                # To delete the server and rely on the cascade delete to remove GPUs
+                if (validator := validator_by_hotkey(server.validator)) is not None:
+                    await self.remove_server_from_validator(validator, server.server_id)
+                
                 await session.refresh(server)
                 await session.delete(server)
                 await session.commit()
