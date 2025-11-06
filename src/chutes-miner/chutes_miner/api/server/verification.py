@@ -641,7 +641,7 @@ class TEEVerificationStrategy(VerificationStrategy):
             assert raw_devices
             assert len(raw_devices) == expected_gpu_count
 
-            devices = [device["device_info"] for device in raw_devices]
+            devices = raw_devices
 
         except Exception as exc:
             raise TEEBootstrapFailure(
@@ -746,43 +746,6 @@ class TEEVerificationStrategy(VerificationStrategy):
                 logger.success(
                     f"Successfully advertised {self.server.name} with {len(gpus)} GPUs to {self.validator.hotkey} via {self.validator.api}"
                 )
-
-    # async def _wait_for_verification_task(self):
-    #     """
-    #     Wait for the verification task on the validator to complete
-    #     """
-    #     while (status := await self._check_verification_task_status()) is None:
-    #         await self.emit_message(
-    #             f"waiting for validator {self.validator.hotkey} to finish Server verification..."
-    #         )
-    #         await asyncio.sleep(1)
-    #     return status
-
-    # @backoff.on_exception(
-    #     backoff.constant,
-    #     Exception,
-    #     jitter=None,
-    #     interval=3,
-    #     max_tries=5,
-    # )
-    # async def _check_verification_task_status(self) -> bool:
-    #     """
-    #     Check the Server verification task status.
-    #     """
-    #     async with aiohttp.ClientSession(raise_for_status=True) as session:
-    #         headers, _ = sign_request(purpose="tee")
-    #         async with session.get(
-    #             f"{self.validator.api}/servers/verification_status",
-    #             params={"task_id": self.task_id},
-    #             headers=headers,
-    #         ) as response:
-    #             data = await response.json()
-    #             logger.info(f"Verification status: {data}")
-    #             if (status := data.get("status")) == "pending":
-    #                 return None
-    #             if status in ["error", "failed"]:
-    #                 return False
-    #             return True
 
     async def cleanup(self, delete_node: bool = True) -> None:
         """
