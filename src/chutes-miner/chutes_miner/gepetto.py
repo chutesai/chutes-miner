@@ -886,9 +886,7 @@ class Gepetto:
                         f"Successfully purged {server_id=} from validator={validator.hotkey}: {await resp.json()}"
                     )
         except Exception as exc:
-            logger.warning(
-                f"Error purging {server_id=} from validator={validator.hotkey}: {exc}"
-            )
+            logger.warning(f"Error purging {server_id=} from validator={validator.hotkey}: {exc}")
 
     async def gpu_deleted(self, event_data):
         """
@@ -972,7 +970,7 @@ class Gepetto:
                 # To delete the server and rely on the cascade delete to remove GPUs
                 if (validator := validator_by_hotkey(server.validator)) is not None:
                     await self.remove_server_from_validator(validator, server.server_id)
-                
+
                 await session.refresh(server)
                 await session.delete(server)
                 await session.commit()
@@ -1554,7 +1552,9 @@ class Gepetto:
         # because only one miner can claim a single job for example, so we don't want to undeploy if we
         # don't actually get the lock.
         try:
-            launch_token = await self.get_launch_token(chute, target_server.server_id, job_id=job_id)
+            launch_token = await self.get_launch_token(
+                chute, target_server.server_id, job_id=job_id
+            )
         except DeploymentFailure:
             logger.warning(
                 f"Failed to obtain launch token, skipping pre-emption {chute.chute_id=} {job_id=}"

@@ -119,7 +119,9 @@ def display_local_inventory(inventory):
                 gpu["device_info"]["name"],
                 format_memory(gpu["device_info"]["memory"]),
                 str(int(gpu["device_info"]["clock_rate"] / 1000)),
-                str(gpu["device_info"]["processors"] if "processors" in gpu["device_info"] else "-"),
+                str(
+                    gpu["device_info"]["processors"] if "processors" in gpu["device_info"] else "-"
+                ),
                 status_text,
             )
 
