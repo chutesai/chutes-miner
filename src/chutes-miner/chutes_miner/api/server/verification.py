@@ -557,8 +557,7 @@ class GravalVerificationStrategy(VerificationStrategy):
             node_uid = node_object.metadata.uid
             node_name = node_object.metadata.name
             logger.info(f"Purging failed server: {node_name=} {node_uid=}")
-            gpu_ids = []
-            validator = None
+            validator = self.validator
             async with get_session() as session:
                 server = (
                     (await session.execute(select(Server).where(Server.server_id == node_uid)))
@@ -566,26 +565,23 @@ class GravalVerificationStrategy(VerificationStrategy):
                     .scalar_one_or_none()
                 )
                 if server:
-                    gpu_ids = [gpu.gpu_id for gpu in server.gpus]
-                    validator = validator_by_hotkey(server.validator)
+                    server_id = server.server_id
                     await session.delete(server)
                 await session.commit()
 
-                if gpu_ids:
-                    for gpu_id in gpu_ids:
-                        try:
-                            async with aiohttp.ClientSession(raise_for_status=True) as http_session:
-                                headers, _ = sign_request(purpose="nodes")
-                                async with http_session.delete(
-                                    f"{validator.api}/nodes/{gpu_id}", headers=headers
-                                ) as resp:
-                                    logger.success(
-                                        f"Successfully purged {gpu_id=} from validator={validator.hotkey}: {await resp.json()}"
-                                    )
-                        except Exception as exc:
-                            logger.warning(
-                                f"Error purging {gpu_id=} from validator={validator.hotkey}: {exc}"
+                try:
+                    async with aiohttp.ClientSession(raise_for_status=True) as http_session:
+                        headers, _ = sign_request(purpose="tee")
+                        async with http_session.delete(
+                            f"{validator.api}/servers/{server_id}", headers=headers
+                        ) as resp:
+                            logger.success(
+                                f"Successfully purged {server_id=} from validator={validator.hotkey}: {await resp.json()}"
                             )
+                except Exception as exc:
+                    logger.warning(
+                        f"Error purging {server_id=} from validator={validator.hotkey}: {exc}"
+                    )
 
 
 class TEEVerificationStrategy(VerificationStrategy):
