@@ -557,8 +557,7 @@ class GravalVerificationStrategy(VerificationStrategy):
             node_uid = node_object.metadata.uid
             node_name = node_object.metadata.name
             logger.info(f"Purging failed server: {node_name=} {node_uid=}")
-            gpu_ids = []
-            validator = None
+            validator = self.validator
             async with get_session() as session:
                 server = (
                     (await session.execute(select(Server).where(Server.server_id == node_uid)))
@@ -566,26 +565,23 @@ class GravalVerificationStrategy(VerificationStrategy):
                     .scalar_one_or_none()
                 )
                 if server:
-                    gpu_ids = [gpu.gpu_id for gpu in server.gpus]
-                    validator = validator_by_hotkey(server.validator)
+                    server_id = server.server_id
                     await session.delete(server)
                 await session.commit()
 
-                if gpu_ids:
-                    for gpu_id in gpu_ids:
-                        try:
-                            async with aiohttp.ClientSession(raise_for_status=True) as http_session:
-                                headers, _ = sign_request(purpose="nodes")
-                                async with http_session.delete(
-                                    f"{validator.api}/nodes/{gpu_id}", headers=headers
-                                ) as resp:
-                                    logger.success(
-                                        f"Successfully purged {gpu_id=} from validator={validator.hotkey}: {await resp.json()}"
-                                    )
-                        except Exception as exc:
-                            logger.warning(
-                                f"Error purging {gpu_id=} from validator={validator.hotkey}: {exc}"
+                try:
+                    async with aiohttp.ClientSession(raise_for_status=True) as http_session:
+                        headers, _ = sign_request(purpose="tee")
+                        async with http_session.delete(
+                            f"{validator.api}/servers/{server_id}", headers=headers
+                        ) as resp:
+                            logger.success(
+                                f"Successfully purged {server_id=} from validator={validator.hotkey}: {await resp.json()}"
                             )
+                except Exception as exc:
+                    logger.warning(
+                        f"Error purging {server_id=} from validator={validator.hotkey}: {exc}"
+                    )
 
 
 class TEEVerificationStrategy(VerificationStrategy):
@@ -640,7 +636,7 @@ class TEEVerificationStrategy(VerificationStrategy):
             assert raw_devices
             assert len(raw_devices) == expected_gpu_count
 
-            devices = [device["device_info"] for device in raw_devices]
+            devices = raw_devices
 
         except Exception as exc:
             raise TEEBootstrapFailure(
@@ -662,7 +658,7 @@ class TEEVerificationStrategy(VerificationStrategy):
         """
         devices = []
         async with self._attestation_session() as http_session:
-            headers, _ = sign_request(purpose="devices")
+            headers, _ = sign_request(purpose="attest")
             async with http_session.get(
                 f"https://{self.node_ip}:30443/server/devices", headers=headers
             ) as resp:
@@ -745,43 +741,6 @@ class TEEVerificationStrategy(VerificationStrategy):
                 logger.success(
                     f"Successfully advertised {self.server.name} with {len(gpus)} GPUs to {self.validator.hotkey} via {self.validator.api}"
                 )
-
-    # async def _wait_for_verification_task(self):
-    #     """
-    #     Wait for the verification task on the validator to complete
-    #     """
-    #     while (status := await self._check_verification_task_status()) is None:
-    #         await self.emit_message(
-    #             f"waiting for validator {self.validator.hotkey} to finish Server verification..."
-    #         )
-    #         await asyncio.sleep(1)
-    #     return status
-
-    # @backoff.on_exception(
-    #     backoff.constant,
-    #     Exception,
-    #     jitter=None,
-    #     interval=3,
-    #     max_tries=5,
-    # )
-    # async def _check_verification_task_status(self) -> bool:
-    #     """
-    #     Check the Server verification task status.
-    #     """
-    #     async with aiohttp.ClientSession(raise_for_status=True) as session:
-    #         headers, _ = sign_request(purpose="tee")
-    #         async with session.get(
-    #             f"{self.validator.api}/servers/verification_status",
-    #             params={"task_id": self.task_id},
-    #             headers=headers,
-    #         ) as response:
-    #             data = await response.json()
-    #             logger.info(f"Verification status: {data}")
-    #             if (status := data.get("status")) == "pending":
-    #                 return None
-    #             if status in ["error", "failed"]:
-    #                 return False
-    #             return True
 
     async def cleanup(self, delete_node: bool = True) -> None:
         """
