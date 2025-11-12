@@ -1165,6 +1165,7 @@ class Gepetto:
                 if deployment:
                     server_id = deployment.server.server_id
                     server_gpu_type = deployment.server.gpus[0].model_short_ref
+                    server_is_tee = deployment.server.is_tee
                     await self.undeploy(deployment.deployment_id)
 
             # Make sure the local chute is updated.
@@ -1226,7 +1227,7 @@ class Gepetto:
             logger.info(
                 f"Determining if we can deploy {chute.chute_id=} on {server_id=} with {server_gpu_type=} and supported={chute.supported_gpus}"
             )
-            if server_id and server_gpu_type in chute.supported_gpus:
+            if server_id and server_gpu_type in chute.supported_gpus and server_is_tee == chute.tee:
                 logger.info(f"Attempting to deploy {chute.chute_id=} on {server_id=}")
                 deployment = None
                 try:
@@ -1343,6 +1344,7 @@ class Gepetto:
                     >= chute.gpu_count
                 ),
                 Server.locked.is_(False),
+                Server.is_tee.is_(chute.tee)
             )
             .order_by(Server.hourly_cost.asc(), text("free_gpus ASC"))
         )
@@ -1435,6 +1437,7 @@ class Gepetto:
                 GPU.verified.is_(True),
                 total_gpus_per_server.c.total_gpus >= chute.gpu_count,
                 Server.locked.is_(False),
+                Server.is_tee.is_(chute.tee)
             )
             .order_by(Server.hourly_cost.asc(), text("free_gpus ASC"))
         )

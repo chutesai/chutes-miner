@@ -38,6 +38,7 @@ class Server(Base):
     hourly_cost = Column(Float, nullable=False)
     locked = Column(Boolean, default=False)
     kubeconfig = Column(Text, nullable=True)  # Make this false if enforicng migration
+    is_tee = Column(Boolean, default=False)
 
     gpus = relationship("GPU", back_populates="server", lazy="joined", cascade="all, delete-orphan")
     deployments = relationship(
