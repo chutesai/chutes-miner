@@ -20,6 +20,7 @@ from chutes_miner.api.k8s.operator import K8sOperator
 from chutes_common.schemas.server import Server, ServerArgs
 from chutes_miner.api.server.util import bootstrap_server, get_server_kubeconfig
 from chutes_miner.gepetto import Gepetto
+import yaml
 
 router = APIRouter()
 
@@ -242,3 +243,41 @@ async def purge_server(
         "status": "initiated",
         "deployments_purged": deployments,
     }
+
+@router.get("/kubeconfig")
+async def get_kubeconfig(
+    db: AsyncSession = Depends(get_db_session),
+    _: None = Depends(authorize(allow_miner=True, allow_validator=False, purpose="management")),
+):
+    """
+    Returns a merged kubeconfig for all member clusters.
+    """
+    session = db
+    servers = (await session.execute(select(Server))).unique().scalars().all()
+    
+    # Initialize the base kubeconfig structure
+    merged_kubeconfig = {
+        'apiVersion': 'v1',
+        'kind': 'Config',
+        'clusters': [],
+        'users': [],
+        'contexts': [],
+        'current-context': None
+    }
+    
+    for server in servers:
+        server_config = yaml.safe_load(server.kubeconfig)
+        
+        # Merge clusters
+        if 'clusters' in server_config:
+            merged_kubeconfig['clusters'].extend(server_config['clusters'])
+        
+        # Merge users
+        if 'users' in server_config:
+            merged_kubeconfig['users'].extend(server_config['users'])
+        
+        # Merge contexts
+        if 'contexts' in server_config:
+            merged_kubeconfig['contexts'].extend(server_config['contexts'])
+    
+    return merged_kubeconfig
