@@ -1,5 +1,6 @@
 import json
 import asyncio
+import os
 from typing import Optional
 import aiohttp
 import typer
@@ -9,6 +10,7 @@ from rich import box
 import datetime
 from chutes_miner_cli.util import sign_request
 from loguru import logger
+import yaml
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -465,6 +467,39 @@ def unlock_server(
 
     asyncio.run(_unlock_server())
 
+def sync_kubeconfig(
+    path: str = typer.Option("~/.kube/chutes.config", help="Path to your local kubeconfig to update"),
+    hotkey: str = typer.Option(..., help="Path to the hotkey file for your miner"),
+    miner_api: str = typer.Option("http://127.0.0.1:32000", help="Miner API base URL"),
+):
+    """
+    Unlock a server's deployments.
+    """
+
+    async def _sync_kubeconfig():
+        nonlocal hotkey
+        async with aiohttp.ClientSession(raise_for_status=True) as session:
+            # headers, _ = sign_request(hotkey, purpose="kubeconfig")
+            async with session.get(
+                f"{miner_api.rstrip('/')}/servers/kubeconfig",
+                # headers=headers,
+            ) as resp:
+                kubeconfig = await resp.json()
+
+        # Expand user path (handles ~)
+        expanded_path = os.path.expanduser(path)
+        
+        # Create parent directories if they don't exist
+        os.makedirs(os.path.dirname(expanded_path), exist_ok=True)
+        
+        # Write kubeconfig to file
+        with open(expanded_path, 'w') as f:
+            yaml.dump(kubeconfig, f, default_flow_style=False)
+        
+        typer.echo(f"✓ Kubeconfig synced successfully to {expanded_path}")
+
+    asyncio.run(_sync_kubeconfig())
+
 
 app.command(name="add-node", help="Add a new kubernetes node to your cluster")(add_node)
 app.command(name="delete-node", help="Delete a kubernetes node from your cluster")(delete_node)
@@ -480,6 +515,9 @@ app.command(name="scorch-remote", help="Purge all GPUs/instances/etc. from valid
 )
 app.command(name="delete-remote", help="Remove a single GPU from validator inventory")(
     delete_remote
+)
+app.command(name="sync-kubeconfig", help="Syncs the miner kubeconfig to your kubeconfig")(
+    sync_kubeconfig
 )
 app.command(name="lock", help="Lock a server's deployments")(lock_server)
 app.command(name="unlock", help="Unlock a server's deployments")(unlock_server)

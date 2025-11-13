@@ -3,6 +3,7 @@ Server utility functions.
 """
 
 import asyncio
+import base64
 import json
 import time
 import math
@@ -18,7 +19,7 @@ from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from typing import Optional, Tuple, Dict
 from chutes_common.auth import sign_request
-from chutes_miner.api.config import settings
+from chutes_miner.api.config import k8s_core_client, settings
 from chutes_miner.api.k8s.operator import K8sOperator
 from chutes_miner.api.util import sse_message
 from chutes_miner.api.database import get_session
@@ -26,6 +27,58 @@ from chutes_common.schemas.server import Server, ServerArgs
 from chutes_common.schemas.gpu import GPU
 from chutes_miner.api.exceptions import DuplicateServer
 import yaml
+
+async def populate_control_node_kubeconfig(merged_kubeconfig):
+    try:
+        client = k8s_core_client()
+        nodes = client.list_node()
+
+        # Find the control plane node
+        control_node = None
+        for node in nodes.items:
+            if 'node-role.kubernetes.io/control-plane' in node.metadata.labels:
+                control_node = node
+                break
+            
+        if control_node:
+            node_name = control_node.metadata.name
+            external_ip = control_node.metadata.labels.get('chutes/external-ip')
+            
+            if external_ip:
+                # Read the in-cluster service account credentials
+                with open('/var/run/secrets/kubernetes.io/serviceaccount/ca.crt', 'r') as f:
+                    ca_cert = base64.b64encode(f.read().encode()).decode()
+                
+                with open('/var/run/secrets/kubernetes.io/serviceaccount/token', 'r') as f:
+                    token = f.read().strip()
+                
+                # Create kubeconfig entry for control node
+                merged_kubeconfig['clusters'].append({
+                    'name': node_name,
+                    'cluster': {
+                        'server': f'https://{external_ip}:6443',
+                        'certificate-authority-data': ca_cert
+                    }
+                })
+                
+                merged_kubeconfig['users'].append({
+                    'name': node_name,
+                    'user': {
+                        'token': token
+                    }
+                })
+                
+                merged_kubeconfig['contexts'].append({
+                    'name': node_name,
+                    'context': {
+                        'cluster': node_name,
+                        'user': node_name,
+                        'namespace': 'default'
+                    }
+                })
+    except Exception as e:
+        # Log the error but continue with member clusters
+        print(f"Warning: Could not add control node kubeconfig: {e}")
 
 
 async def get_server_kubeconfig(agent_url: str):

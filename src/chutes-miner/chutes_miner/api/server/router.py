@@ -18,7 +18,7 @@ from chutes_common.auth import authorize
 from chutes_common.schemas.deployment import Deployment
 from chutes_miner.api.k8s.operator import K8sOperator
 from chutes_common.schemas.server import Server, ServerArgs
-from chutes_miner.api.server.util import bootstrap_server, get_server_kubeconfig
+from chutes_miner.api.server.util import bootstrap_server, get_server_kubeconfig, populate_control_node_kubeconfig
 from chutes_miner.gepetto import Gepetto
 import yaml
 
@@ -247,7 +247,7 @@ async def purge_server(
 @router.get("/kubeconfig")
 async def get_kubeconfig(
     db: AsyncSession = Depends(get_db_session),
-    _: None = Depends(authorize(allow_miner=True, allow_validator=False, purpose="management")),
+    _: None = Depends(authorize(allow_miner=True, allow_validator=False, purpose="kubeconfig")),
 ):
     """
     Returns a merged kubeconfig for all member clusters.
@@ -265,6 +265,8 @@ async def get_kubeconfig(
         'current-context': None
     }
     
+    await populate_control_node_kubeconfig(merged_kubeconfig)
+
     for server in servers:
         server_config = yaml.safe_load(server.kubeconfig)
         
