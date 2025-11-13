@@ -18,7 +18,11 @@ from chutes_common.auth import authorize
 from chutes_common.schemas.deployment import Deployment
 from chutes_miner.api.k8s.operator import K8sOperator
 from chutes_common.schemas.server import Server, ServerArgs
-from chutes_miner.api.server.util import bootstrap_server, get_server_kubeconfig, populate_control_node_kubeconfig
+from chutes_miner.api.server.util import (
+    bootstrap_server,
+    get_server_kubeconfig,
+    populate_control_node_kubeconfig,
+)
 from chutes_miner.gepetto import Gepetto
 import yaml
 
@@ -244,6 +248,7 @@ async def purge_server(
         "deployments_purged": deployments,
     }
 
+
 @router.get("/kubeconfig")
 async def get_kubeconfig(
     db: AsyncSession = Depends(get_db_session),
@@ -254,32 +259,32 @@ async def get_kubeconfig(
     """
     session = db
     servers = (await session.execute(select(Server))).unique().scalars().all()
-    
+
     # Initialize the base kubeconfig structure
     merged_kubeconfig = {
-        'apiVersion': 'v1',
-        'kind': 'Config',
-        'clusters': [],
-        'users': [],
-        'contexts': [],
-        'current-context': None
+        "apiVersion": "v1",
+        "kind": "Config",
+        "clusters": [],
+        "users": [],
+        "contexts": [],
+        "current-context": None,
     }
-    
+
     await populate_control_node_kubeconfig(merged_kubeconfig)
 
     for server in servers:
         server_config = yaml.safe_load(server.kubeconfig)
-        
+
         # Merge clusters
-        if 'clusters' in server_config:
-            merged_kubeconfig['clusters'].extend(server_config['clusters'])
-        
+        if "clusters" in server_config:
+            merged_kubeconfig["clusters"].extend(server_config["clusters"])
+
         # Merge users
-        if 'users' in server_config:
-            merged_kubeconfig['users'].extend(server_config['users'])
-        
+        if "users" in server_config:
+            merged_kubeconfig["users"].extend(server_config["users"])
+
         # Merge contexts
-        if 'contexts' in server_config:
-            merged_kubeconfig['contexts'].extend(server_config['contexts'])
-    
+        if "contexts" in server_config:
+            merged_kubeconfig["contexts"].extend(server_config["contexts"])
+
     return merged_kubeconfig

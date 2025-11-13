@@ -467,8 +467,11 @@ def unlock_server(
 
     asyncio.run(_unlock_server())
 
+
 def sync_kubeconfig(
-    path: str = typer.Option("~/.kube/chutes.config", help="Path to your local kubeconfig to update"),
+    path: str = typer.Option(
+        "~/.kube/chutes.config", help="Path to your local kubeconfig to update"
+    ),
     hotkey: str = typer.Option(..., help="Path to the hotkey file for your miner"),
     miner_api: str = typer.Option("http://127.0.0.1:32000", help="Miner API base URL"),
 ):
@@ -488,14 +491,14 @@ def sync_kubeconfig(
 
         # Expand user path (handles ~)
         expanded_path = os.path.expanduser(path)
-        
+
         # Create parent directories if they don't exist
         os.makedirs(os.path.dirname(expanded_path), exist_ok=True)
-        
+
         # Write kubeconfig to file
-        with open(expanded_path, 'w') as f:
+        with open(expanded_path, "w") as f:
             yaml.dump(kubeconfig, f, default_flow_style=False)
-        
+
         typer.echo(f"✓ Kubeconfig synced successfully to {expanded_path}")
 
     asyncio.run(_sync_kubeconfig())
