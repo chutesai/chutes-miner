@@ -247,10 +247,13 @@ images: ##@images Build all docker images
 images: args ?= --network=host --build-arg BUILDKIT_INLINE_CACHE=1
 images:
 	@images=$$(find docker -maxdepth 1 -type d ! -path docker | sort); \
+	projects=$$(find src -maxdepth 1 -type d ! -path docker | sort); \
 	filtered_images=""; \
 	for image_dir in $$images; do \
 		pkg_name=$$(basename $$image_dir); \
-		if ! echo "$(TARGET_NAMES)" | grep -q "$$pkg_name"; then \
+		echo "Processing $$pkg_name"; \
+		if ! echo $$projects | grep -q "$$pkg_name"; then \
+			echo "Found $$image_dir"; \
 			filtered_images="$$filtered_images $$image_dir"; \
 		fi; \
 	done; \
