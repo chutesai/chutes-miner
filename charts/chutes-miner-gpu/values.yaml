@@ -38,7 +38,7 @@ registry:
       defaultUpstream: "registry.chutes.ai"
 
 auth:
-  image: parachutes/registry:k3s-k3s-tee-latest
+  image: parachutes/registry:k3s-latest
   imagePullPolicy: Always
   resources:
     requests:
@@ -50,7 +50,7 @@ auth:
   port: 8000
 
 agent:
-  image: parachutes/chutes-agent:k3s-k3s-tee-latest
+  image: parachutes/chutes-agent:k3s-latest
   imagePullPolicy: Always
   resources:
     requests:
