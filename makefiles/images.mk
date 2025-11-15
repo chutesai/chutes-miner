@@ -135,10 +135,10 @@ sign:
 								target_tag="$$image_tag$$pkg_version"; \
 								src_version=$$pkg_version; \
 							fi; \
-							echo "cosign sign --key $(COSIGN_PRIVATE_KEY) --annotation "org=chutes.ai" $$registry/$$image_name:$$target_tag"; \
-							cosign sign --key $(COSIGN_PRIVATE_KEY) --annotation "org=chutes.ai" $$registry/$$image_name:$$target_tag; \
-							echo "cosign sign --key $(COSIGN_PRIVATE_KEY) --annotation "org=chutes.ai" $$registry/$$image_name:$$latest_tag"; \
-							cosign sign --key $(COSIGN_PRIVATE_KEY) --annotation "org=chutes.ai" $$registry/$$image_name:$$latest_tag; \
+							echo "cosign sign --key $(COSIGN_PRIVATE_KEY) -a \"org=chutes.ai\" $$registry/$$image_name:$$target_tag"; \
+							cosign sign --key $(COSIGN_PRIVATE_KEY) -a \"org=chutes.ai\" $$registry/$$image_name:$$target_tag; \
+							echo "cosign sign --key $(COSIGN_PRIVATE_KEY) -a \"org=chutes.ai\" $$registry/$$image_name:$$latest_tag"; \
+							cosign sign --key $(COSIGN_PRIVATE_KEY) -a \"org=chutes.ai\" $$registry/$$image_name:$$latest_tag; \
 							image_ref="$$registry/$$image_name:$$target_tag"; \
 							latest_ref="$$registry/$$image_name:$$latest_tag"; \
 							echo "Fetching digest for $$image_ref"; \
