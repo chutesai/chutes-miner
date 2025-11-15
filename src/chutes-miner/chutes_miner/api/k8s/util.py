@@ -237,6 +237,10 @@ def build_chute_job(
                                     value=",".join(gpu_uuids),
                                 ),
                                 V1EnvVar(
+                                    name="CHUTES_NVIDIA_DEVICES",
+                                    value=",".join(gpu_uuids),
+                                ),
+                                V1EnvVar(
                                     name="CHUTES_PORT_PRIMARY",
                                     value=str(service.spec.ports[0].node_port),
                                 ),
