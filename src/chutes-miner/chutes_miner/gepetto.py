@@ -1344,7 +1344,7 @@ class Gepetto:
                     >= chute.gpu_count
                 ),
                 Server.locked.is_(False),
-                Server.is_tee.is_(chute.tee)
+                Server.is_tee.is_(chute.tee),
             )
             .order_by(Server.hourly_cost.asc(), text("free_gpus ASC"))
         )
@@ -1437,7 +1437,7 @@ class Gepetto:
                 GPU.verified.is_(True),
                 total_gpus_per_server.c.total_gpus >= chute.gpu_count,
                 Server.locked.is_(False),
-                Server.is_tee.is_(chute.tee)
+                Server.is_tee.is_(chute.tee),
             )
             .order_by(Server.hourly_cost.asc(), text("free_gpus ASC"))
         )
@@ -1555,9 +1555,7 @@ class Gepetto:
         # because only one miner can claim a single job for example, so we don't want to undeploy if we
         # don't actually get the lock.
         try:
-            launch_token = await self.get_launch_token(
-                chute, job_id=job_id
-            )
+            launch_token = await self.get_launch_token(chute, job_id=job_id)
         except DeploymentFailure:
             logger.warning(
                 f"Failed to obtain launch token, skipping pre-emption {chute.chute_id=} {job_id=}"
