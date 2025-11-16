@@ -211,7 +211,7 @@ async def track_server(
             hourly_cost=hourly_cost,
             kubeconfig=_kubeconfig,
             agent_api=agent_api,
-            is_tee=is_tee
+            is_tee=is_tee,
         )
         session.add(server)
         try:
