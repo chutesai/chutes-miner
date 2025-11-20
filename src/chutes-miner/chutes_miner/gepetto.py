@@ -760,6 +760,7 @@ class Gepetto:
                     chutes_version=chute_dict["chutes_version"],
                     ban_reason=None,
                     preemptible=chute_dict["preemptible"],
+                    tee=chute_dict["tee"]
                 )
                 db.add(chute)
             await db.commit()
@@ -1108,6 +1109,7 @@ class Gepetto:
                 chutes_version=chute_dict["chutes_version"],
                 ban_reason=None,
                 preemptible=chute_dict["preemptible"],
+                tee=chute_dict["tee"]
             )
             session.add(chute)
             await session.commit()
@@ -1217,6 +1219,7 @@ class Gepetto:
                             chutes_version=chute_dict["chutes_version"],
                             ban_reason=None,
                             preemptible=chute_dict["preemptible"],
+                            tee=chute_dict["tee"]
                         )
                         db.add(chute)
                     await db.commit()
