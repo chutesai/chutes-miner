@@ -482,10 +482,10 @@ def sync_kubeconfig(
     async def _sync_kubeconfig():
         nonlocal hotkey
         async with aiohttp.ClientSession(raise_for_status=True) as session:
-            # headers, _ = sign_request(hotkey, purpose="kubeconfig")
+            headers, _ = sign_request(hotkey, purpose="kubeconfig")
             async with session.get(
                 f"{miner_api.rstrip('/')}/servers/kubeconfig",
-                # headers=headers,
+                headers=headers,
             ) as resp:
                 kubeconfig = await resp.json()
 

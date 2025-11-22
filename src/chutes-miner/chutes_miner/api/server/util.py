@@ -76,6 +76,8 @@ async def populate_control_node_kubeconfig(merged_kubeconfig):
                         },
                     }
                 )
+
+                merged_kubeconfig["current-context"] = node_name
     except Exception as e:
         # Log the error but continue with member clusters
         print(f"Warning: Could not add control node kubeconfig: {e}")
@@ -159,6 +161,7 @@ async def track_server(
     name = node_object.metadata.name
     server_id = node_object.metadata.uid
     ip_address = node_object.metadata.labels.get("chutes/external-ip")
+    is_tee = node_object.metadata.labels.get("chutes/tee", "false").lower() == "true"
 
     # Determine node status.
     status = "Unknown"
@@ -208,6 +211,7 @@ async def track_server(
             hourly_cost=hourly_cost,
             kubeconfig=_kubeconfig,
             agent_api=agent_api,
+            is_tee=is_tee,
         )
         session.add(server)
         try:

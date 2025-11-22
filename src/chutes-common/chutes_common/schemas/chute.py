@@ -27,5 +27,6 @@ class Chute(Base):
     ban_reason = Column(String, nullable=True)
     chutes_version = Column(String)
     preemptible = Column(Boolean, default=True)
+    tee = Column(Boolean, default=False)
 
     deployments = relationship("Deployment", back_populates="chute", cascade="all, delete-orphan")
