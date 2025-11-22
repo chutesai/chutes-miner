@@ -20,10 +20,12 @@ from loguru import logger
 from tenacity import (
     retry,
     stop_after_attempt,
+    stop_never,
     wait_exponential,
     retry_if_exception_type,
     before_sleep_log,
     after_log,
+    wait_fixed,
 )
 
 
@@ -174,14 +176,10 @@ class ResourceMonitor:
             logger.info(f"Skipping restart, monitoring state {self.state=}")
 
     @retry(
-        stop=stop_after_attempt(10),
-        wait=wait_exponential(
-            multiplier=1,
-            min=1,
-            max=300,  # 5 minutes max
-            exp_base=2,
-        ),
+        stop=stop_never,  # Never give up
+        wait=wait_fixed(30),  # Wait 30 seconds between attempts (configurable)
         retry=retry_if_exception_type((Exception,)),
+        reraise=False,  # Don't reraise after giving up (though we never give up)
         before_sleep=before_sleep_log(logger, logger.level("INFO").no),
         after=after_log(logger, logger.level("INFO").no),
     )
