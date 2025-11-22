@@ -194,7 +194,6 @@ class HealthChecker:
                             error_message="Cluster offline for more than 1 hour.",
                         )
                         await self.redis_client.update_cluster_status(new_status)
-                        await self.redis_client.clear_cluster_resources(cluster_name)
                 except Exception as e:
                     # Invalid timestamp format
                     logger.warning(f"Failed to cleanup stale cluster {cluster_name}: {e}")
