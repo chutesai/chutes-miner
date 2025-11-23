@@ -76,6 +76,8 @@ async def populate_control_node_kubeconfig(merged_kubeconfig):
                         },
                     }
                 )
+
+                merged_kubeconfig["current-context"] = node_name
     except Exception as e:
         # Log the error but continue with member clusters
         print(f"Warning: Could not add control node kubeconfig: {e}")
