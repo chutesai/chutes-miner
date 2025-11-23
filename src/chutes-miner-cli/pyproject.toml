@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "chutes-miner-cli"
-version = "0.2.2"
+version = "0.2.3"
 description = "Chutes miner CLI"
 readme = "README.md"
 license = "MIT"
@@ -23,6 +23,7 @@ rich = ">13.0.0"
 typer = "^0.14.0"
 click = ">8.1.0,<8.2.0"
 aiohttp = {extras = ["speedups"], version = ">3.10,<4"}
+pyyaml = "^6.0.3"
 
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.12.2"
