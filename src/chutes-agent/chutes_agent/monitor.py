@@ -111,6 +111,7 @@ class ResourceMonitor:
                 logger.info("Server does not exist in remote inventory, stopping monitoring.")
                 await self.stop()
             except Exception as e:
+                self.state = MonitoringState.ERROR
                 logger.error(f"Failed to auto-start monitoring:\n{str(e)}")
         else:
             logger.info(
