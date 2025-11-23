@@ -112,6 +112,9 @@ spec:
           volumeMounts:
             - name: shared-data
               mountPath: /shared
+            - name: chutes-token
+              mountPath: /var/run/secrets/chutes-sa-token
+              readOnly: true
           {{- end }}
           ports:
             - name: http
@@ -123,4 +126,7 @@ spec:
       volumes:
         - name: shared-data
           emptyDir: {}
+        - name: chutes-token
+          secret:
+            secretName: chutes-sa-token
       {{- end }}
