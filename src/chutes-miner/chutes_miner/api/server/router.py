@@ -283,8 +283,9 @@ async def get_kubeconfig(
         if "users" in server_config:
             merged_kubeconfig["users"].extend(server_config["users"])
 
-        # Merge contexts
-        if "contexts" in server_config:
-            merged_kubeconfig["contexts"].extend(server_config["contexts"])
+        # Merge contexts with namespace set
+        for context in server_config.get("contexts", []):
+            context.setdefault("context", {})["namespace"] = "chutes"
+        merged_kubeconfig["contexts"].extend(server_config.get("contexts", []))
 
     return merged_kubeconfig
