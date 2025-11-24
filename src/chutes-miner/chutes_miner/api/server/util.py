@@ -72,7 +72,7 @@ async def populate_control_node_kubeconfig(merged_kubeconfig):
                         "context": {
                             "cluster": node_name,
                             "user": node_name,
-                            "namespace": "default",
+                            "namespace": "chutes",
                         },
                     }
                 )
