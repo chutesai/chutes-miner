@@ -1,0 +1,276 @@
+---
+- name: Setup kubectl for individual nodes
+  vars:
+    users:
+      - "root"
+      - "{{ ansible_user }}"
+      - "{{ user }}"
+  block:
+    - name: Check if k3s is installed on node
+      ansible.builtin.stat:
+        path: /etc/rancher/k3s/k3s.yaml
+      register: k3s_config_exists
+
+    - name: Skip kubectl setup if k3s not installed
+      ansible.builtin.debug:
+        msg: "Skipping kubectl setup on {{ inventory_hostname }} - k3s not yet installed"
+      when: not k3s_config_exists.stat.exists
+
+    - name: Configure kubectl for users
+      when: k3s_config_exists.stat.exists
+      block:
+        - name: Check if kubeconfig already exists for users
+          ansible.builtin.stat:
+            path: ~{{ item }}/.kube/config
+          loop: "{{ users }}"
+          register: kubeconfig_exists
+
+        - name: Create directory .kube for users (only if config doesn't exist)
+          ansible.builtin.file:
+            path: ~{{ item.item }}/.kube
+            state: directory
+            owner: "{{ item.item }}"
+            group: "{{ item.item }}"
+            mode: u=rwx,g=rx,o=
+          loop: "{{ kubeconfig_exists.results }}"
+          when: not item.stat.exists
+
+        - name: Copy individual node config to user home directory (only if doesn't exist)
+          ansible.builtin.copy:
+            src: /etc/rancher/k3s/k3s.yaml
+            dest: ~{{ item.item }}/.kube/config
+            remote_src: true
+            owner: "{{ item.item }}"
+            group: "{{ item.item }}"
+            mode: u=rw,g=,o=
+          loop: "{{ kubeconfig_exists.results }}"
+          when: not item.stat.exists
+
+        - name: "Update context name in individual kubeconfig (only if newly created)"
+          ansible.builtin.replace:
+            path: "~{{ item.item }}/.kube/config"
+            regexp: ": default"
+            replace: ": {{ inventory_hostname }}"
+          loop: "{{ kubeconfig_exists.results }}"
+          when: not item.stat.exists
+
+        - name: "Update default namespace in individual kubeconfig (only if newly created)"
+          ansible.builtin.shell: |
+            HOME_DIR=$(getent passwd "{{ item.item }}" | cut -d: -f6)
+            kubectl --kubeconfig="${HOME_DIR}/.kube/config" config set-context --current --namespace=chutes
+          loop: "{{ kubeconfig_exists.results }}"
+          when: not item.stat.exists
+
+        - name: "Configure default KUBECONFIG for {{ item }}"
+          ansible.builtin.lineinfile:
+            path: ~{{ item }}/.bashrc
+            regexp: "export KUBECONFIG="
+            line: "export KUBECONFIG=~{{ item }}/.kube/config # Added by k3s-ansible"
+            state: present
+          loop: "{{ users }}"
+
+        - name: "Configure kubectl autocomplete for {{ item }}"
+          ansible.builtin.lineinfile:
+            path: ~{{ item }}/.bashrc
+            regexp: "\\. <\\(kubectl completion bash\\)"
+            line: ". <(kubectl completion bash)  # Added by k3s-ansible"
+          loop: "{{ users }}"
+
+- name: Build merged kubeconfig on control node
+  vars:
+    control_node: "{{ groups['control'][0] }}"
+    control_node_users:
+      - "root"
+      - "{{ hostvars[control_node]['ansible_user'] }}"
+      - "{{ user }}"
+    temp_staging_dir: "/tmp/k3s-kubeconfig-staging"
+  delegate_to: "{{ control_node }}"
+  run_once: true
+  block:
+    - name: Check which nodes have k3s installed
+      ansible.builtin.stat:
+        path: /etc/rancher/k3s/k3s.yaml
+      delegate_to: "{{ item }}"
+      loop: "{{ ansible_play_hosts_all | default(groups['all']) | difference([control_node]) }}"
+      register: k3s_installed_check
+      become: false
+
+    - name: Build list of nodes with k3s installed
+      ansible.builtin.set_fact:
+        nodes_with_k3s: "{{ k3s_installed_check.results | selectattr('stat.exists') | map(attribute='item') | list }}"
+
+    - name: Display k3s installation status
+      ansible.builtin.debug:
+        msg: |
+          Worker nodes with k3s installed: {{ nodes_with_k3s | join(', ') }}
+          {% set missing = (ansible_play_hosts_all | default(groups['all'])) | difference(nodes_with_k3s) | difference([control_node]) %}
+          {% if missing | length > 0 %}
+          Worker nodes without k3s (skipping): {{ missing | join(', ') }}
+          {% endif %}
+
+    - name: Skip merged kubeconfig if no nodes have k3s
+      ansible.builtin.fail:
+        msg: "No worker nodes in the play have k3s installed yet. Skipping merged kubeconfig creation."
+      when: nodes_with_k3s | length == 0
+      ignore_errors: true
+
+    - name: Create merged kubeconfig when k3s nodes exist
+      when: nodes_with_k3s | length > 0
+      block:
+        - name: Create temporary staging directory on control node
+          ansible.builtin.file:
+            path: "{{ temp_staging_dir }}"
+            state: directory
+            mode: "0750"
+
+        - name: Read kubeconfigs from nodes with k3s installed
+          ansible.builtin.slurp:
+            src: /etc/rancher/k3s/k3s.yaml
+          delegate_to: "{{ item }}"
+          loop: "{{ nodes_with_k3s }}"
+          register: kubeconfig_contents
+
+        - name: Write collected kubeconfigs to staging directory
+          ansible.builtin.copy:
+            content: "{{ item.content | b64decode }}"
+            dest: "{{ temp_staging_dir }}/{{ hostvars[item.item]['inventory_hostname'] }}.yaml"
+            mode: "0600"
+          loop: "{{ kubeconfig_contents.results }}"
+          when: not item.failed | default(false)
+
+        - name: Update context names in collected kubeconfigs
+          ansible.builtin.replace:
+            path: "{{ temp_staging_dir }}/{{ hostvars[item.item]['inventory_hostname'] }}.yaml"
+            regexp: ": default"
+            replace: ": {{ hostvars[item.item]['inventory_hostname'] }}"
+          loop: "{{ kubeconfig_contents.results }}"
+          when: not item.failed | default(false)
+
+        - name: Update server addresses in collected kubeconfigs
+          ansible.builtin.replace:
+            path: "{{ temp_staging_dir }}/{{ hostvars[item.item]['inventory_hostname'] }}.yaml"
+            regexp: "https://127.0.0.1:6443"
+            replace: "https://{{ hostvars[item.item]['ansible_host'] }}:{{ hostvars[item.item]['k3s_api_port'] | default('6443') }}"
+          loop: "{{ kubeconfig_contents.results }}"
+          when: not item.failed | default(false)
+
+        - name: Set namespace in collected kubeconfigs
+          ansible.builtin.shell: |
+            kubectl --kubeconfig="{{ temp_staging_dir }}/{{ hostvars[item.item]['inventory_hostname'] }}.yaml" \
+              config set-context --current --namespace=chutes
+          loop: "{{ kubeconfig_contents.results }}"
+          when: not item.failed | default(false)
+          changed_when: true
+
+        - name: Copy kubeconfig merge script to control node
+          ansible.builtin.copy:
+            src: merge_kubeconfigs.sh
+            dest: "{{ temp_staging_dir }}/merge_kubeconfigs.sh"
+            mode: "0755"
+
+        - name: Generate fresh merged kubeconfig for each control node user
+          ansible.builtin.command:
+            cmd: "{{ temp_staging_dir }}/merge_kubeconfigs.sh {{ temp_staging_dir }} {{ item }}"
+          loop: "{{ control_node_users }}"
+          register: merge_result
+          changed_when: merge_result.rc == 0
+
+        - name: Display merge summary
+          ansible.builtin.debug:
+            msg: |
+              Fresh kubeconfig generated on control node {{ control_node }}
+              {% for result in merge_result.results %}
+              {{ result.stdout }}
+              {% endfor %}
+
+        - name: Clean up temporary staging directory
+          ansible.builtin.file:
+            path: "{{ temp_staging_dir }}"
+            state: absent
+
+- name: Copy final kubeconfig from control node to ansible controller
+  when: setup_local_kubeconfig | default(false)
+  vars:
+    control_node: "{{ groups['control'][0] }}"
+    control_node_user: "{{ hostvars[control_node]['ansible_user'] }}"
+  delegate_to: "{{ control_node }}"
+  run_once: true
+  block:
+
+    - name: Set kubeconfig source path
+      ansible.builtin.shell: |
+        HOME_DIR=$(getent passwd "{{ control_node_user }}" | cut -d: -f6)
+        echo "${HOME_DIR}/.kube/config"
+      register: control_kubeconfig_lookup
+      changed_when: false
+
+    - name: Set kubeconfig source variable
+      ansible.builtin.set_fact:
+        control_kubeconfig_source: "{{ control_kubeconfig_lookup.stdout }}"
+
+    - name: debug
+      ansible.builtin.debug:
+        msg: "{{ control_kubeconfig_source }}"
+
+    - name: debug
+      ansible.builtin.shell: |
+        echo hostname
+
+    - name: Check if merged kubeconfig exists on control node
+      ansible.builtin.stat:
+        path: "{{ control_kubeconfig_source }}"
+      register: control_kubeconfig_exists
+
+    - name: Copy kubeconfig to ansible controller
+      when: control_kubeconfig_exists.stat.exists
+      block:
+
+        - name: Verify kubectl is available on ansible controller
+          ansible.builtin.command: kubectl version --client
+          delegate_to: localhost
+          become: false
+          register: kubectl_check
+          ignore_errors: true
+          changed_when: false
+          run_once: true
+
+        - name: Fetch merged kubeconfig from control node
+          ansible.builtin.fetch:
+            src: "{{ control_kubeconfig_source }}"
+            dest: "{{ controller_kubeconfig | default('~/.kube/config') }}"
+            flat: true
+          run_once: true
+
+        - name: Set permissions on kubeconfig
+          ansible.builtin.file:
+            path: "{{ controller_kubeconfig | default('~/.kube/config') }}"
+            mode: '0600'
+          delegate_to: localhost
+          become: false
+          run_once: true
+
+        - name: Update server addresses for control node
+          ansible.builtin.replace:
+            path: "{{ controller_kubeconfig | default('~/.kube/config') }}"
+            regexp: "https://127.0.0.1:6443"
+            replace: "https://{{ hostvars[control_node]['ansible_host'] }}:6443"
+          delegate_to: localhost
+          become: false
+          run_once: true
+
+        - name: Display kubectl setup status
+          ansible.builtin.debug:
+            msg: |
+              {% if kubectl_check.rc == 0 %}
+              ✅ kubectl successfully configured on ansible controller
+              Available contexts: Use 'kubectl config get-contexts' to see all cluster contexts
+              {% else %}
+              ⚠️  kubectl not found on ansible controller. Install kubectl to use the copied kubeconfig.
+              {% endif %}
+          delegate_to: localhost
+          run_once: true
+
+    - name: Warn if no kubeconfig available to copy
+      ansible.builtin.debug:
+        msg: "⚠️  No merged kubeconfig found on control node. Ensure k3s is installed on at least one node."
+      when: not control_kubeconfig_exists.stat.exists
