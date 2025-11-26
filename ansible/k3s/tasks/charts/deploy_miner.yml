@@ -19,7 +19,6 @@
     helm upgrade --install chutes chutes/chutes-miner
     --namespace chutes
     --kube-context {{ inventory_hostname }}
-    --kubeconfig=/etc/rancher/k3s/k3s.yaml
     --create-namespace
     -f /tmp/chutes-miner.yaml
     --set-string minerCredentials.ss58Address="{{ miner_ss58_address }}"
