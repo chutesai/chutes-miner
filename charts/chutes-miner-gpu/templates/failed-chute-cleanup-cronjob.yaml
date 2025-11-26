@@ -19,7 +19,7 @@ spec:
           containers:
           - name: cleanup
             image: {{ .Values.failedChuteCleanup.image }}
-            imagePullPolicy: Always
+            imagePullPolicy: IfNotPresent
             command: ["/bin/sh", "-c"]
             args:
             - |
@@ -30,4 +30,11 @@ spec:
                   kubectl delete svc ${svc} -n chutes;
                 fi
               done
+            resources:
+              requests:
+                cpu: "250m"
+                memory: "256Mi"
+              limits:
+                cpu: "500m"
+                memory: "512Mi"
           restartPolicy: OnFailure
