@@ -741,7 +741,7 @@ class Gepetto:
                     "supported_gpus",
                     "chutes_version",
                     "preemptible",
-                    "tee"
+                    "tee",
                 ):
                     setattr(chute, key, chute_dict.get(key))
                 chute.gpu_count = chute_dict["node_selector"]["gpu_count"]
