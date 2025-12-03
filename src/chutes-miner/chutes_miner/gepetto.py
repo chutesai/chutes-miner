@@ -243,7 +243,7 @@ class Gepetto:
                 f"Failed to announce deployment {deployment.deployment_id}: {exc=}"
             )
 
-    async def get_launch_token(self, chute: Chute, server_id: str, job_id: str = None):
+    async def get_launch_token(self, chute: Chute, job_id: str = None):
         """
         Fetch a launch config JWT, if the chutes version supports/requires it.
         """
@@ -257,7 +257,7 @@ class Gepetto:
         try:
             async with aiohttp.ClientSession(raise_for_status=False) as session:
                 headers, _ = sign_request(purpose="launch")
-                params = {"chute_id": chute.chute_id, "server_id": server_id}
+                params = {"chute_id": chute.chute_id}
                 if job_id:
                     params["job_id"] = job_id
                 logger.warning(f"SENDING LAUNCH TOKEN REQUEST WITH {headers=}")
@@ -672,7 +672,7 @@ class Gepetto:
         )
         deployment = None
         try:
-            launch_token = await self.get_launch_token(chute, server.server_id, job_id=job_id)
+            launch_token = await self.get_launch_token(chute, job_id=job_id)
             extra_ports = await self._get_job_extra_services(chute)
             deployment, k8s_dep = await k8s.deploy_chute(
                 chute.chute_id,
@@ -741,6 +741,7 @@ class Gepetto:
                     "supported_gpus",
                     "chutes_version",
                     "preemptible",
+                    "tee",
                 ):
                     setattr(chute, key, chute_dict.get(key))
                 chute.gpu_count = chute_dict["node_selector"]["gpu_count"]
@@ -760,6 +761,7 @@ class Gepetto:
                     chutes_version=chute_dict["chutes_version"],
                     ban_reason=None,
                     preemptible=chute_dict["preemptible"],
+                    tee=chute_dict["tee"],
                 )
                 db.add(chute)
             await db.commit()
@@ -1108,6 +1110,7 @@ class Gepetto:
                 chutes_version=chute_dict["chutes_version"],
                 ban_reason=None,
                 preemptible=chute_dict["preemptible"],
+                tee=chute_dict["tee"],
             )
             session.add(chute)
             await session.commit()
@@ -1165,6 +1168,7 @@ class Gepetto:
                 if deployment:
                     server_id = deployment.server.server_id
                     server_gpu_type = deployment.server.gpus[0].model_short_ref
+                    server_is_tee = deployment.server.is_tee
                     await self.undeploy(deployment.deployment_id)
 
             # Make sure the local chute is updated.
@@ -1216,6 +1220,7 @@ class Gepetto:
                             chutes_version=chute_dict["chutes_version"],
                             ban_reason=None,
                             preemptible=chute_dict["preemptible"],
+                            tee=chute_dict["tee"],
                         )
                         db.add(chute)
                     await db.commit()
@@ -1226,11 +1231,11 @@ class Gepetto:
             logger.info(
                 f"Determining if we can deploy {chute.chute_id=} on {server_id=} with {server_gpu_type=} and supported={chute.supported_gpus}"
             )
-            if server_id and server_gpu_type in chute.supported_gpus:
+            if server_id and server_gpu_type in chute.supported_gpus and server_is_tee == chute.tee:
                 logger.info(f"Attempting to deploy {chute.chute_id=} on {server_id=}")
                 deployment = None
                 try:
-                    launch_token = await self.get_launch_token(chute, server_id)
+                    launch_token = await self.get_launch_token(chute)
                     deployment, _ = await k8s.deploy_chute(
                         chute.chute_id,
                         server_id,
@@ -1343,6 +1348,7 @@ class Gepetto:
                     >= chute.gpu_count
                 ),
                 Server.locked.is_(False),
+                Server.is_tee.is_(chute.tee),
             )
             .order_by(Server.hourly_cost.asc(), text("free_gpus ASC"))
         )
@@ -1435,6 +1441,7 @@ class Gepetto:
                 GPU.verified.is_(True),
                 total_gpus_per_server.c.total_gpus >= chute.gpu_count,
                 Server.locked.is_(False),
+                Server.is_tee.is_(chute.tee),
             )
             .order_by(Server.hourly_cost.asc(), text("free_gpus ASC"))
         )
@@ -1552,9 +1559,7 @@ class Gepetto:
         # because only one miner can claim a single job for example, so we don't want to undeploy if we
         # don't actually get the lock.
         try:
-            launch_token = await self.get_launch_token(
-                chute, target_server.server_id, job_id=job_id
-            )
+            launch_token = await self.get_launch_token(chute, job_id=job_id)
         except DeploymentFailure:
             logger.warning(
                 f"Failed to obtain launch token, skipping pre-emption {chute.chute_id=} {job_id=}"
@@ -1657,7 +1662,7 @@ class Gepetto:
                         )
                         deployment = None
                         try:
-                            launch_token = await self.get_launch_token(chute, server.server_id)
+                            launch_token = await self.get_launch_token(chute)
                             deployment, _ = await k8s.deploy_chute(
                                 chute.chute_id,
                                 server.server_id,
