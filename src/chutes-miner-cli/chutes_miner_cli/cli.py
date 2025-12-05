@@ -1,6 +1,7 @@
 import json
 import asyncio
 import os
+import copy
 from typing import Optional
 import aiohttp
 import typer
@@ -13,6 +14,95 @@ from loguru import logger
 import yaml
 
 app = typer.Typer(no_args_is_help=True)
+
+
+class KubeconfigMergeError(Exception):
+    """Raised when kubeconfig merging fails due to validation errors."""
+
+
+def ensure_kubeconfig_structure(config: dict | None) -> dict:
+    config = config or {}
+    if not isinstance(config, dict):
+        raise KubeconfigMergeError("Invalid kubeconfig structure returned from agent.")
+    config.setdefault("apiVersion", "v1")
+    config.setdefault("kind", "Config")
+    config.setdefault("preferences", config.get("preferences", {}))
+    for key in ("clusters", "contexts", "users"):
+        value = config.get(key)
+        if not isinstance(value, list):
+            config[key] = []
+    return config
+
+
+def ensure_parent_directory(path: str):
+    directory = os.path.dirname(path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+
+
+def extract_context_bundle(source_config: dict, context_name: str) -> dict:
+    contexts = source_config.get("contexts") or []
+    target_context = next((copy.deepcopy(ctx) for ctx in contexts if ctx.get("name") == context_name), None)
+    if not target_context:
+        raise KubeconfigMergeError(
+            f"Context '{context_name}' not found in kubeconfig returned by agent."
+        )
+
+    cluster_name = target_context.get("context", {}).get("cluster")
+    user_name = target_context.get("context", {}).get("user")
+
+    clusters = source_config.get("clusters") or []
+    users = source_config.get("users") or []
+
+    target_cluster = next((copy.deepcopy(clu) for clu in clusters if clu.get("name") == cluster_name), None)
+    if not target_cluster:
+        raise KubeconfigMergeError(
+            f"Cluster '{cluster_name}' referenced by context '{context_name}' was not found."
+        )
+
+    target_user = next((copy.deepcopy(user) for user in users if user.get("name") == user_name), None)
+    if not target_user:
+        raise KubeconfigMergeError(
+            f"User '{user_name}' referenced by context '{context_name}' was not found."
+        )
+
+    return {
+        "clusters": [target_cluster],
+        "contexts": [target_context],
+        "users": [target_user],
+        "current-context": context_name,
+    }
+
+
+def merge_context_bundle(
+    destination: dict,
+    bundle: dict,
+    overwrite: bool,
+    context_name: str,
+    target_path: str,
+):
+    for section in ("clusters", "users", "contexts"):
+        destination.setdefault(section, [])
+        existing_items = destination[section]
+        for item in bundle.get(section, []):
+            name = item.get("name")
+            idx = next((i for i, existing in enumerate(existing_items) if existing.get("name") == name), None)
+            if idx is not None:
+                if not overwrite:
+                    raise KubeconfigMergeError(
+                        f"{section[:-1].capitalize()} '{name}' already exists in {target_path}. "
+                        "Re-run with --overwrite to replace it."
+                    )
+                existing_items[idx] = item
+            else:
+                existing_items.append(item)
+
+    if not destination.get("current-context"):
+        destination["current-context"] = bundle.get("current-context")
+    elif overwrite and destination.get("current-context") == context_name:
+        destination["current-context"] = bundle.get("current-context")
+
+    return destination
 
 
 def format_memory(memory_bytes):
@@ -476,7 +566,7 @@ def sync_kubeconfig(
     miner_api: str = typer.Option("http://127.0.0.1:32000", help="Miner API base URL"),
 ):
     """
-    Unlock a server's deployments.
+    Fetch the merged kubeconfig from the miner API and write it locally.
     """
 
     async def _sync_kubeconfig():
@@ -493,7 +583,7 @@ def sync_kubeconfig(
         expanded_path = os.path.expanduser(path)
 
         # Create parent directories if they don't exist
-        os.makedirs(os.path.dirname(expanded_path), exist_ok=True)
+        ensure_parent_directory(expanded_path)
 
         # Write kubeconfig to file
         with open(expanded_path, "w") as f:
@@ -502,6 +592,77 @@ def sync_kubeconfig(
         typer.echo(f"✓ Kubeconfig synced successfully to {expanded_path}")
 
     asyncio.run(_sync_kubeconfig())
+
+
+def sync_node_kubeconfig(
+    agent_api: str = typer.Option(..., help="Base URL of the target node's agent"),
+    context_name: str = typer.Option(
+        ..., help="Name of the context to import from the node's kubeconfig"
+    ),
+    path: str = typer.Option(
+        "~/.kube/chutes.config", help="Path to your local kubeconfig to update"
+    ),
+    hotkey: str = typer.Option(..., help="Path to the hotkey file for your miner"),
+    overwrite: bool = typer.Option(
+        False,
+        "--overwrite",
+        help="Replace the existing context, cluster, and user entries if they already exist",
+    ),
+):
+    """Fetch kubeconfig directly from a node and merge a single context locally."""
+
+    async def _fetch_agent_kubeconfig():
+        headers, _ = sign_request(hotkey, purpose="registration", management=True)
+        async with aiohttp.ClientSession(raise_for_status=True) as session:
+            async with session.get(
+                f"{agent_api.rstrip('/')}/config/kubeconfig",
+                headers=headers,
+            ) as resp:
+                return await resp.json()
+
+    try:
+        agent_payload = asyncio.run(_fetch_agent_kubeconfig())
+        raw_kubeconfig = agent_payload.get("kubeconfig")
+        if raw_kubeconfig is None:
+            raise KubeconfigMergeError("Agent response did not include a 'kubeconfig' key.")
+
+        if isinstance(raw_kubeconfig, str):
+            source_config = yaml.safe_load(raw_kubeconfig)
+        else:
+            source_config = raw_kubeconfig
+
+        source_config = ensure_kubeconfig_structure(source_config)
+        bundle = extract_context_bundle(source_config, context_name)
+
+        expanded_path = os.path.expanduser(path)
+        ensure_parent_directory(expanded_path)
+
+        if os.path.exists(expanded_path):
+            with open(expanded_path, "r") as fh:
+                local_config = yaml.safe_load(fh) or {}
+        else:
+            local_config = {}
+
+        local_config = ensure_kubeconfig_structure(local_config)
+        if not overwrite and any(
+            ctx.get("name") == context_name for ctx in local_config.get("contexts", [])
+        ):
+            raise KubeconfigMergeError(
+                f"Context '{context_name}' already exists in {expanded_path}. "
+                "Re-run with --overwrite to replace it."
+            )
+        merged_config = merge_context_bundle(local_config, bundle, overwrite, context_name, expanded_path)
+
+        with open(expanded_path, "w") as fh:
+            yaml.safe_dump(merged_config, fh, default_flow_style=False)
+
+        typer.echo(
+            f"✓ Context '{context_name}' synced successfully from {agent_api.rstrip('/')} into {expanded_path}"
+        )
+
+    except KubeconfigMergeError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED)
+        raise typer.Exit(code=1) from exc
 
 
 app.command(name="add-node", help="Add a new kubernetes node to your cluster")(add_node)
@@ -522,6 +683,10 @@ app.command(name="delete-remote", help="Remove a single GPU from validator inven
 app.command(name="sync-kubeconfig", help="Syncs the miner kubeconfig to your kubeconfig")(
     sync_kubeconfig
 )
+app.command(
+    name="sync-node-kubeconfig",
+    help="Fetch a kubeconfig context directly from a node and merge it locally",
+)(sync_node_kubeconfig)
 app.command(name="lock", help="Lock a server's deployments")(lock_server)
 app.command(name="unlock", help="Unlock a server's deployments")(unlock_server)
 

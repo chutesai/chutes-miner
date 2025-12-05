@@ -41,6 +41,7 @@ def sign_request(
     payload: Dict[str, Any] | str | None = None,
     purpose: str = None,
     remote: bool = False,
+    management: bool = False,
 ):
     """
     Generate a signed request (for miner requests to validators).
@@ -53,6 +54,8 @@ def sign_request(
     }
     if remote:
         headers[HOTKEY_HEADER] = headers.pop(MINER_HEADER)
+    elif management:
+        headers[VALIDATOR_HEADER] = headers[MINER_HEADER]
     signature_string = None
     payload_string = None
     if payload is not None:
@@ -73,7 +76,12 @@ def sign_request(
         )
     if not remote:
         signature_string = hotkey_data["ss58Address"] + ":" + signature_string
-        headers[VALIDATOR_HEADER] = headers[MINER_HEADER]
+        if management:
+            headers.pop(VALIDATOR_HEADER, None)
+            headers[MINER_HEADER] = hotkey_data["ss58Address"]
+            headers[VALIDATOR_HEADER] = headers[MINER_HEADER]
+        else:
+            headers[VALIDATOR_HEADER] = headers[MINER_HEADER]
     keypair = Keypair.create_from_seed(hotkey_data["secretSeed"])
     headers[SIGNATURE_HEADER] = keypair.sign(signature_string.encode()).hex()
     return headers, payload_string
