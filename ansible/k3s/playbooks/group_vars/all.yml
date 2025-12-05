@@ -44,8 +44,8 @@ infiniband: false
 # Flag to enable/disable IPv6. Some hosts may require IPv6 to be on.
 ipv6_enabled: true
 
-# Kubectl config
-controller_kubeconfig: ~/.kube/chutes.config
+# K3s kubeconfig used by Ansible tasks
+k3s_kubeconfig_path: /etc/rancher/k3s/k3s.yaml
 
 # Chart variables
 monitoring_namespace: monitoring

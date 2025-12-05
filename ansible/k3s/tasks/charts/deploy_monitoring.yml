@@ -29,7 +29,7 @@
       ansible.builtin.command: >
         helm upgrade --install monitoring chutes/chutes-monitoring
         --namespace {{ monitoring_namespace }}
-        --kube-context {{ inventory_hostname }}
+        --kubeconfig {{ k3s_kubeconfig_path }}
         --create-namespace
         -f /tmp/monitoring-values.yaml
         {{ ('--version ' + monitoring_charts_version) if monitoring_charts_version is defined else '' }}
@@ -38,7 +38,7 @@
 
     - name: Wait for Monitoring components to be ready on host
       ansible.builtin.command: >
-        kubectl -n {{ monitoring_namespace }} wait --for=condition=Ready pod
+        kubectl --kubeconfig {{ k3s_kubeconfig_path }} -n {{ monitoring_namespace }} wait --for=condition=Ready pod
         --selector="app.kubernetes.io/component=server,app.kubernetes.io/name=prometheus" --timeout=30s
       register: monitoring_wait
       changed_when: false

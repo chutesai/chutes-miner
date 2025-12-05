@@ -20,8 +20,8 @@
 
     - name: Create gepetto-cm on control cluster
       kubernetes.core.k8s:
+        kubeconfig: "{{ k3s_kubeconfig_path }}"
         state: present # Ensures it exists and matches this definition. Updates if different.
-        context: "{{ inventory_hostname }}"
         definition:
           apiVersion: v1
           kind: ConfigMap

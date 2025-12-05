@@ -220,10 +220,6 @@ all:
     # The username you want to use to login to those machines (and your public key will be added to).
     user: billybob
 
-    # Local kubectl setup
-    setup_local_kubeconfig: false # Set to true to setup kubeconfig on the ansible controller
-    controller_kubeconfig: ~/.kube/chutes.config # Path to the ansible controller kubeconfig file you want to use
-
     hotkey_path: "~/.bittensor/wallets/[WALLET]/hotkeys/[HOTKEY]"
 
     chart_values: "~/chutes/values.yaml"
@@ -246,13 +242,13 @@ cache:
 
 #### Kubernetes CLI
 
-The easiest way to interact with kubernetes would be from within the primary node, but you can alternatively set it up on your local machine or other server.  To do so:
+Each node keeps its authoritative kubeconfig at `/etc/rancher/k3s/k3s.yaml`. Ansible now executes all Kubernetes actions directly on the node using that file, which avoids merging kubeconfigs or copying credentials around.
+
+If you want to interact with the clusters from your laptop or another machine:
+
 - install [kubectl](https://kubernetes.io/docs/reference/kubectl/)
-- Set the `setup_local_kubeconfig` flag in `ansible/k3s/inventory.yml` to `true`
-    - Optionally you can update the kubeconfig file/dir to use as well
-    ```yaml
-    controller_kubeconfig: ~/.kube/chutes.config
-    ```
+- either copy the kubeconfig from any node (e.g. `scp user@node:/etc/rancher/k3s/k3s.yaml ~/.kube/<node>.yaml`) or use the `chutes-miner-cli sync-kubeconfig` command, which calls the `/servers/kubeconfig` API endpoint to assemble a read-only merged config
+- export `KUBECONFIG` (or pass `--kubeconfig`) when running `kubectl`
 
 #### Miner credentials
 

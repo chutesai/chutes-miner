@@ -18,7 +18,7 @@
   ansible.builtin.command: >
     helm upgrade --install chutes chutes/chutes-miner
     --namespace chutes
-    --kube-context {{ inventory_hostname }}
+    --kubeconfig {{ k3s_kubeconfig_path }}
     --create-namespace
     -f /tmp/chutes-miner.yaml
     --set-string minerCredentials.ss58Address="{{ miner_ss58_address }}"
