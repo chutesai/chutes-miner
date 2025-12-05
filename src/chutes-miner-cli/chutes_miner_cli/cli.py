@@ -42,7 +42,9 @@ def ensure_parent_directory(path: str):
 
 def extract_context_bundle(source_config: dict, context_name: str) -> dict:
     contexts = source_config.get("contexts") or []
-    target_context = next((copy.deepcopy(ctx) for ctx in contexts if ctx.get("name") == context_name), None)
+    target_context = next(
+        (copy.deepcopy(ctx) for ctx in contexts if ctx.get("name") == context_name), None
+    )
     if not target_context:
         raise KubeconfigMergeError(
             f"Context '{context_name}' not found in kubeconfig returned by agent."
@@ -54,13 +56,17 @@ def extract_context_bundle(source_config: dict, context_name: str) -> dict:
     clusters = source_config.get("clusters") or []
     users = source_config.get("users") or []
 
-    target_cluster = next((copy.deepcopy(clu) for clu in clusters if clu.get("name") == cluster_name), None)
+    target_cluster = next(
+        (copy.deepcopy(clu) for clu in clusters if clu.get("name") == cluster_name), None
+    )
     if not target_cluster:
         raise KubeconfigMergeError(
             f"Cluster '{cluster_name}' referenced by context '{context_name}' was not found."
         )
 
-    target_user = next((copy.deepcopy(user) for user in users if user.get("name") == user_name), None)
+    target_user = next(
+        (copy.deepcopy(user) for user in users if user.get("name") == user_name), None
+    )
     if not target_user:
         raise KubeconfigMergeError(
             f"User '{user_name}' referenced by context '{context_name}' was not found."
@@ -86,7 +92,10 @@ def merge_context_bundle(
         existing_items = destination[section]
         for item in bundle.get(section, []):
             name = item.get("name")
-            idx = next((i for i, existing in enumerate(existing_items) if existing.get("name") == name), None)
+            idx = next(
+                (i for i, existing in enumerate(existing_items) if existing.get("name") == name),
+                None,
+            )
             if idx is not None:
                 if not overwrite:
                     raise KubeconfigMergeError(
@@ -651,7 +660,9 @@ def sync_node_kubeconfig(
                 f"Context '{context_name}' already exists in {expanded_path}. "
                 "Re-run with --overwrite to replace it."
             )
-        merged_config = merge_context_bundle(local_config, bundle, overwrite, context_name, expanded_path)
+        merged_config = merge_context_bundle(
+            local_config, bundle, overwrite, context_name, expanded_path
+        )
 
         with open(expanded_path, "w") as fh:
             yaml.safe_dump(merged_config, fh, default_flow_style=False)
