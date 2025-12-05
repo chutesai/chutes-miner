@@ -90,5 +90,14 @@ class Settings(CommonSettings):
 
     reconcile_clusters: bool = os.getenv("RECONCILE_CLUSTERS", "false").lower() == "true"
 
+    service_account_token_path: str = os.getenv(
+        "SERVICE_ACCOUNT_TOKEN_PATH",
+        "/var/run/secrets/kubernetes.io/serviceaccount/token",
+    )
+    service_account_ca_path: str = os.getenv(
+        "SERVICE_ACCOUNT_CA_PATH",
+        "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt",
+    )
+
 
 settings = Settings()
