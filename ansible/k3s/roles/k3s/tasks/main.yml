@@ -7,10 +7,6 @@
   ansible.builtin.include_tasks: setup_node.yml
   tags: k3s-node
 
-- name: Setup k3s kubectl
-  ansible.builtin.include_tasks: "{{ playbook_dir }}/../tasks/k8s/setup_kubectl.yml"
-  tags: k3s-kubectl
-
 - name: Setup namespaces
   ansible.builtin.include_tasks: setup_namespaces.yml
   tags: namespaces
@@ -19,10 +15,10 @@
   block:
     - name: Add IP label
       kubernetes.core.k8s:
+        kubeconfig: "{{ k3s_kubeconfig_path }}"
         state: present
         kind: Node
         name: "{{ inventory_hostname }}"
-        context: "{{ inventory_hostname }}"
         definition:
           metadata:
             labels:
@@ -34,10 +30,10 @@
   block:
     - name: Add worker label
       kubernetes.core.k8s:
+        kubeconfig: "{{ k3s_kubeconfig_path }}"
         state: present
         kind: Node
         name: "{{ inventory_hostname }}"
-        context: "{{ inventory_hostname }}"
         definition:
           metadata:
             labels:

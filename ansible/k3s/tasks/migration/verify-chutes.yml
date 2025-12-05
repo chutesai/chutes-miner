@@ -96,8 +96,8 @@
     - name: Verify gepetto on k3s cluster
       when: inventory_hostname in groups['control']
       kubernetes.core.k8s:
+        kubeconfig: "{{ k3s_kubeconfig_path }}"
         state: present # Ensures it exists and matches this definition. Updates if different.
-        context: "{{ inventory_hostname }}"
         definition:
           apiVersion: v1
           kind: ConfigMap
@@ -112,17 +112,17 @@
       when: 
         - inventory_hostname in groups['control']
         - k3s_configmap_result.changed
-      ansible.builtin.shell: kubectl rollout restart deployment/gepetto -n chutes --context={{ inventory_hostname }}
+      ansible.builtin.shell: kubectl --kubeconfig {{ k3s_kubeconfig_path }} rollout restart deployment/gepetto -n chutes
 
 - name: Verify miner secrets exist
   when: inventory_hostname == groups['control'][0]
   block:
     - name: Verify miner credentials exist in host context
       kubernetes.core.k8s_info:
+        kubeconfig: "{{ k3s_kubeconfig_path }}"
         api_version: v1
         kind: Secret
         name: miner-credentials
         namespace: chutes
-        context: "{{ groups['control'][0] }}"
       register: host_secret_check
       failed_when: host_secret_check.resources | length == 0

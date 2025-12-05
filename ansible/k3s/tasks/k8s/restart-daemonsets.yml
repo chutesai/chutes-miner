@@ -1,5 +1,5 @@
 - name: Restart Deployments
   ansible.builtin.command: >
-    kubectl --context {{ inventory_hostname }} rollout restart ds -n chutes
+    kubectl --kubeconfig {{ k3s_kubeconfig_path }} rollout restart ds -n chutes
   register: restart_result
   changed_when: restart_result.rc == 0

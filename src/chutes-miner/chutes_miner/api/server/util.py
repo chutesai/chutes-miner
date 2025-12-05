@@ -46,11 +46,14 @@ async def populate_control_node_kubeconfig(merged_kubeconfig):
             external_ip = control_node.metadata.labels.get("chutes/external-ip")
 
             if external_ip:
+                token_path = settings.service_account_token_path
+                ca_path = settings.service_account_ca_path
+
                 # Read the in-cluster service account credentials
-                with open("/var/run/secrets/kubernetes.io/serviceaccount/ca.crt", "r") as f:
+                with open(ca_path, "r") as f:
                     ca_cert = base64.b64encode(f.read().encode()).decode()
 
-                with open("/var/run/secrets/kubernetes.io/serviceaccount/token", "r") as f:
+                with open(token_path, "r") as f:
                     token = f.read().strip()
 
                 # Create kubeconfig entry for control node

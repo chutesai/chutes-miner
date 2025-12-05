@@ -20,10 +20,6 @@ all:
     # The username you want to use to login to those machines (and your public key will be added to).
     user: billybob
 
-    # Local kubectl setup
-    setup_local_kubeconfig: false
-    controller_kubeconfig: ~/.kube/chutes.config
-
     hotkey_path: "~/.bittensor/wallets/[WALLET]/hotkeys/[HOTKEY]"
 
     chart_values: "~/chutes/values.yaml"

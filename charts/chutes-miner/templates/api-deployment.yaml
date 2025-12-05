@@ -101,12 +101,17 @@ spec:
               value: {{ .Values.validators | toJson | quote }}
             - name: REGISTRY_PROXY_PORT
               value: "{{ .Values.registry.service.nodePort }}"
-            {{ if not .Values.multiCluster }}
+            {{- if not .Values.multiCluster }}
             - name: NVIDIA_RUNTIME
               value: nvidia-container-runtime
-            {{ else }}
+            {{- end }}
+            {{- if .Values.multiCluster }}
             - name: MONITORING_NAMESPACE
               value: "monitoring"
+            - name: SERVICE_ACCOUNT_TOKEN_PATH
+              value: "/var/run/secrets/chutes-sa-token/token"
+            - name: SERVICE_ACCOUNT_CA_PATH
+              value: "/var/run/secrets/chutes-sa-token/ca.crt"
             {{- end }}
           {{ if .Values.multiCluster }}
           volumeMounts:

@@ -30,7 +30,7 @@
           --set prometheus-pushgateway.persistentVolume.enabled=false \
           --set prometheus-server.persistentVolume.enabled=false \
           --set alertmanager.persistence.enabled=false \
-          --kubeconfig=/etc/rancher/k3s/k3s.yaml
+          --kubeconfig={{ k3s_kubeconfig_path }}
 
     - name: Install kubernetes dashboard
       shell: |
@@ -38,4 +38,4 @@
           --create-namespace \
           --namespace kubernetes-dashboard \
           --set persistence.enabled=false \
-          --kubeconfig=/etc/rancher/k3s/k3s.yaml
+          --kubeconfig={{ k3s_kubeconfig_path }}

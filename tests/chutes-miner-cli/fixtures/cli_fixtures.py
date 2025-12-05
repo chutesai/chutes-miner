@@ -31,3 +31,22 @@ def mock_client_session():
         return mock_session
 
     return _session_factory
+
+
+@pytest.fixture
+def mock_get_client_session():
+    """Mock aiohttp ClientSession for GET requests."""
+
+    def _session_factory(mock_response):
+        mock_session = MagicMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=None)
+
+        mock_get_cm = MagicMock()
+        mock_get_cm.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_get_cm.__aexit__ = AsyncMock(return_value=None)
+        mock_session.get = MagicMock(return_value=mock_get_cm)
+
+        return mock_session
+
+    return _session_factory

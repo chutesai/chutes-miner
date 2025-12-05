@@ -263,7 +263,7 @@ Set `run_cli_locally: true` to:
 
 ```bash
 # Check Chutes components
-kubectl --context chutes-miner-cpu-0 get pods -n chutes
+kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml get pods -n chutes
 ```
 
 ### Verify Worker Nodes
@@ -312,18 +312,9 @@ If migration fails and rollback to MicroK8s is needed:
 
 ## Kubectl and Cluster Management Setup
 
-The migration playbook automatically configures kubectl access and cluster management utilities on both the Ansible controller and target hosts.
+The migration playbook no longer copies kubeconfigs around. Each cluster keeps its canonical configuration at `/etc/rancher/k3s/k3s.yaml`, and Ansible (plus any validation checks) interact with the API by passing that path directly to kubectl/helm.
 
-### Kubectl Configuration
-
-**On Ansible Controller:**
-- Kubeconfigs stored in `~/.kube/chutes/` directory
-- Each cluster gets its own config file: `~/.kube/chutes/<hostname>`
-- Configs are merged into `~/.kube/config` for easy access
-
-**On Control Node Host:**
-- User kubeconfig: `~/.kube/config` (for ansible_user, user and root)
-- Auto-completion enabled for kubectl and k3s commands
+If you want a consolidated kubeconfig on your workstation or controller, run `chutes-miner-cli sync-kubeconfig` or manually copy the individual files via `scp user@node:/etc/rancher/k3s/k3s.yaml ~/chutes/<node>.yaml` and set `KUBECONFIG` accordingly.
 
 ### Cluster Management Utilities
 
@@ -345,10 +336,9 @@ The playbook installs additional utilities to simplify multi-cluster operations:
 ### Available Contexts After Migration
 
 ```bash
-# List available contexts
+# List available contexts in a merged kubeconfig (if you synced one locally)
 kubectl config get-contexts
 
-# Typical contexts available:
-# - chutes-miner-cpu-0 (control plane K3s cluster)
-# - chutes-miner-gpu-X (Chutes GPU cluster contexts)
+# Otherwise, pass --kubeconfig explicitly:
+kubectl --kubeconfig ~/chutes/chutes-miner-gpu-0.yaml get nodes
 ```
