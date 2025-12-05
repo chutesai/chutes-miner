@@ -247,7 +247,7 @@ Each node keeps its authoritative kubeconfig at `/etc/rancher/k3s/k3s.yaml`. Ans
 If you want to interact with the clusters from your laptop or another machine:
 
 - install [kubectl](https://kubernetes.io/docs/reference/kubectl/)
-- either copy the kubeconfig from any node (e.g. `scp user@node:/etc/rancher/k3s/k3s.yaml ~/.kube/<node>.yaml`) or use the `chutes-miner-cli sync-kubeconfig` command, which calls the `/servers/kubeconfig` API endpoint to assemble a read-only merged config
+- follow the authoritative kubeconfig guide in [`src/chutes-miner-cli/README.md`](src/chutes-miner-cli/README.md) for details on `sync-kubeconfig`, `sync-node-kubeconfig`, and copying files between machines
 - export `KUBECONFIG` (or pass `--kubeconfig`) when running `kubectl`
 
 #### Miner credentials
