@@ -6,7 +6,7 @@ This CLI ships with helpers for managing kubeconfigs when operating miner cluste
 
 | Question | Answer |
 | --- | --- |
-| Where do the commands run? | On the machine where you execute `chutes-miner-cli`. Nothing is copied anywhere else automatically. |
+| Where do the commands run? | On the machine where you execute `chutes-miner`. Nothing is copied anywhere else automatically. |
 | Default output path | `~/.kube/chutes.config` unless you pass `--path`. |
 | How do I point `kubectl` at it? | `export KUBECONFIG=~/.kube/chutes.config` or `kubectl --kubeconfig ~/.kube/chutes.config ...`. |
 | Can I push it to another host? | Yes, but you must copy it yourself (example below). |
@@ -18,7 +18,7 @@ This CLI ships with helpers for managing kubeconfigs when operating miner cluste
 Fetches the merged kubeconfig for **all** nodes that have already been registered with the miner API.
 
 ```bash
-chutes-miner-cli sync-kubeconfig \
+chutes-miner sync-kubeconfig \
 	--hotkey ~/.bittensor/wallets/<wallet>/hotkeys/<hotkey>.json \
 	--miner-api http://127.0.0.1:32000 \
 	--path ~/.kube/chutes.config   # optional, defaults to this value
@@ -43,7 +43,7 @@ kubectl --namespace chutes get pods
 Fetches a **single** context directly from a node before it has been added to the miner database. The CLI talks to the agent on that node at `/config/kubeconfig`, extracts the requested context, and merges it into your local kubeconfig.
 
 ```bash
-chutes-miner-cli sync-node-kubeconfig \
+chutes-miner sync-node-kubeconfig \
 	--agent-api https://10.0.0.5:8443 \
 	--context-name chutes-miner-gpu-0 \
 	--hotkey ~/.bittensor/wallets/<wallet>/hotkeys/<hotkey>.json \
@@ -90,7 +90,7 @@ Feel free to swap `scp` for `rsync`, add SSH options, or integrate with your aut
 
 ## Verification checklist
 
-- `chutes-miner-cli sync-kubeconfig ...` or `sync-node-kubeconfig ...` exits successfully.
+- `chutes-miner sync-kubeconfig ...` or `sync-node-kubeconfig ...` exits successfully.
 - `stat ~/.kube/chutes.config` shows a recent timestamp.
 - `KUBECONFIG` (or `--kubeconfig`) points to the path you just wrote.
 - `kubectl config get-contexts` lists the expected contexts (control plane + all tracked nodes, plus any manual additions).
