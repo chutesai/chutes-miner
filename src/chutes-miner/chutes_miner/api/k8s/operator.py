@@ -1546,6 +1546,98 @@ class MultiClusterK8sOperator(K8sOperator):
         if status and not status.is_healthy:
             raise ApiException(status=503, reason=f"Node {name} is not healthy, check the agent.")
 
+    def _read_live_deployment(
+        self, cluster: str, namespace: Optional[str], name: str, timeout_seconds: int
+    ):
+        client = self._manager.get_app_client(cluster)
+        if client is None:
+            return None
+
+        return client.read_namespaced_deployment(
+            name=name,
+            namespace=namespace,
+            _request_timeout=self._get_request_timeout(timeout_seconds),
+        )
+
+    def _read_live_service(
+        self, cluster: str, namespace: Optional[str], name: str, timeout_seconds: int
+    ):
+        client = self._manager.get_core_client(cluster)
+        if client is None:
+            return None
+
+        return client.read_namespaced_service(
+            name=name,
+            namespace=namespace,
+            _request_timeout=self._get_request_timeout(timeout_seconds),
+        )
+
+    def _read_live_job(
+        self, cluster: str, namespace: Optional[str], name: str, timeout_seconds: int
+    ):
+        client = self._manager.get_batch_client(cluster)
+        if client is None:
+            return None
+
+        return client.read_namespaced_job(
+            name=name,
+            namespace=namespace,
+            _request_timeout=self._get_request_timeout(timeout_seconds),
+        )
+
+    def _is_resource_stale(
+        self,
+        *,
+        cluster: str,
+        cached_resource=None,
+        read_live_resource=None,
+        timeout_seconds: int = 120,
+    ) -> bool:
+        is_stale = False
+
+        metadata = getattr(cached_resource, "metadata", None) if cached_resource else None
+        cached_version = getattr(metadata, "resource_version", None) if metadata else None
+        name = getattr(metadata, "name", "unknown") if metadata else "unknown"
+        namespace = getattr(metadata, "namespace", "unknown") if metadata else "unknown"
+        resource_label = (
+            getattr(cached_resource, "kind", "resource").lower() if cached_resource else "resource"
+        )
+
+        can_check_live = bool(cached_resource and cached_version and read_live_resource)
+        live_resource = None
+
+        if can_check_live:
+            try:
+                live_resource = read_live_resource(cluster, namespace, name, timeout_seconds)
+            except ApiException as exc:
+                if exc.status != 404:
+                    is_stale = True
+                    reason = f"Failed to read {resource_label} {namespace}/{name} in cluster {cluster}: {exc}"
+                    self._redis.mark_cluster_unhealthy(cluster, reason)
+                    logger.warning(reason)
+                can_check_live = False
+            except Exception as exc:
+                is_stale = True
+                reason = f"Unexpected error reading {resource_label} {namespace}/{name} in cluster {cluster}: {exc}"
+                self._redis.mark_cluster_unhealthy(cluster, reason)
+                logger.error(reason)
+                can_check_live = False
+
+        if can_check_live and not is_stale and live_resource is not None:
+            live_metadata = getattr(live_resource, "metadata", None)
+            live_version = getattr(live_metadata, "resource_version", None)
+
+            if live_version and live_version != cached_version:
+                is_stale = True
+                reason = (
+                    f"Resource version mismatch for {resource_label} {namespace}/{name} in cluster {cluster}: "
+                    f"cache={cached_version}, cluster={live_version}"
+                )
+                self._redis.mark_cluster_unhealthy(cluster, reason)
+                logger.warning(reason)
+
+        return is_stale
+
     async def get_deployment(self, deployment_id: str) -> Dict:
         """Get a single Chute deployment by ID."""
         deployment_name = f"{CHUTE_DEPLOY_PREFIX}-{deployment_id}"
@@ -1587,30 +1679,44 @@ class MultiClusterK8sOperator(K8sOperator):
             )
 
     def _delete_deployment(self, name, namespace=settings.namespace, timeout_seconds: int = 120):
-        context = self._redis.get_resource_cluster(
-            resource_name=name, resource_type=ResourceType.DEPLOYMENT, namespace=namespace
+        context, cached_deployment = self._redis.get_resource_with_context(
+            resource_type=ResourceType.DEPLOYMENT,
+            resource_name=name,
+            namespace=namespace,
         )
 
-        if context:
-            client = self._manager.get_app_client(context)
-
-            try:
-                client.delete_namespaced_deployment(
-                    name=name,
-                    namespace=namespace,
-                    _request_timeout=self._get_request_timeout(timeout_seconds),
-                )
-            except ApiException as e:
-                if e.status == 404:
-                    # Not found, remove from redis
-                    self._redis.delete_resource(name, context, ResourceType.DEPLOYMENT, namespace)
-                    logger.warning(
-                        f"Attempted to delete deployment {name}, but appears to have disappeared.  Removed from redis cache."
-                    )
-                else:
-                    raise
-        else:
+        if not context:
             logger.warning(f"Attempted to delete deployment {name}, but deployment not found.")
+            return
+
+        if self._is_resource_stale(
+            cluster=context,
+            cached_resource=cached_deployment,
+            read_live_resource=self._read_live_deployment,
+            timeout_seconds=timeout_seconds,
+        ):
+            logger.warning(
+                f"Refusing to delete deployment {namespace}/{name} on cluster {context} due to cache mismatch."
+            )
+            return
+
+        client = self._manager.get_app_client(context)
+
+        try:
+            client.delete_namespaced_deployment(
+                name=name,
+                namespace=namespace,
+                _request_timeout=self._get_request_timeout(timeout_seconds),
+            )
+        except ApiException as e:
+            if e.status == 404:
+                # Not found, remove from redis
+                self._redis.delete_resource(name, context, ResourceType.DEPLOYMENT, namespace)
+                logger.warning(
+                    f"Attempted to delete deployment {name}, but appears to have disappeared.  Removed from redis cache."
+                )
+            else:
+                raise
 
     def _deploy_service(
         self, service, server_name, namespace=settings.namespace, timeout_seconds: int = 60
@@ -1627,53 +1733,57 @@ class MultiClusterK8sOperator(K8sOperator):
 
     def _delete_service(self, name, namespace=settings.namespace, timeout_seconds: int = 60):
         svc_name = name
-        if CHUTE_SVC_PREFIX in name:
-            # Legacy check to cleanup services with legacy prefix
-            # TODO: Remove this once legacy deployments are not found
-            resources = self._redis.get_resources(resource_type=ResourceType.SERVICE)
-            all_services = resources.services
-
-            # Find service by new or legacy name in one pass
-            target_service = None
-            legacy_name = name.replace(CHUTE_SVC_PREFIX, "chute-svc")
-            for svc in all_services:
-                svc_name = svc.metadata.name
-                if svc_name in (name, legacy_name):
-                    target_service = svc
-                    break
-
-            if not target_service:
-                logger.warning(
-                    f"Service {name} (or legacy {legacy_name}) not found in namespace {namespace}"
-                )
-                return
-
-            svc_name = target_service.metadata.name
-
-        context = self._redis.get_resource_cluster(
-            resource_name=svc_name, resource_type=ResourceType.SERVICE, namespace=namespace
+        context, cached_service = self._redis.get_resource_with_context(
+            resource_type=ResourceType.SERVICE,
+            resource_name=svc_name,
+            namespace=namespace,
         )
 
-        if context:
-            client = self._manager.get_core_client(context)
+        if not context and CHUTE_SVC_PREFIX in name:
+            legacy_name = name.replace(CHUTE_SVC_PREFIX, "chute-svc")
+            context, cached_service = self._redis.get_resource_with_context(
+                resource_type=ResourceType.SERVICE,
+                resource_name=legacy_name,
+                namespace=namespace,
+            )
+            if context:
+                svc_name = legacy_name
 
-            try:
-                client.delete_namespaced_service(
-                    name=svc_name,
-                    namespace=namespace,
-                    _request_timeout=self._get_request_timeout(timeout_seconds),
-                )
-            except ApiException as e:
-                if e.status == 404:
-                    # Not found, remove from redis
-                    self._redis.delete_resource(svc_name, context, ResourceType.SERVICE, namespace)
-                    logger.warning(
-                        f"Attempted to delete service {svc_name}, but appears to have disappeared.  Removed from redis cache."
-                    )
-                else:
-                    raise
-        else:
+        if not context:
             logger.warning(f"Attempted to delete service {svc_name}, but context not found.")
+            return
+
+        if cached_service is not None and cached_service.metadata:
+            svc_name = cached_service.metadata.name
+
+        if self._is_resource_stale(
+            cluster=context,
+            cached_resource=cached_service,
+            read_live_resource=self._read_live_service,
+            timeout_seconds=timeout_seconds,
+        ):
+            logger.warning(
+                f"Refusing to delete service {namespace}/{svc_name} on cluster {context} due to cache mismatch."
+            )
+            return
+
+        client = self._manager.get_core_client(context)
+
+        try:
+            client.delete_namespaced_service(
+                name=svc_name,
+                namespace=namespace,
+                _request_timeout=self._get_request_timeout(timeout_seconds),
+            )
+        except ApiException as e:
+            if e.status == 404:
+                # Not found, remove from redis
+                self._redis.delete_resource(svc_name, context, ResourceType.SERVICE, namespace)
+                logger.warning(
+                    f"Attempted to delete service {svc_name}, but appears to have disappeared.  Removed from redis cache."
+                )
+            else:
+                raise
 
     def delete_config_map(self, name, namespace=settings.namespace, timeout_seconds: int = 60):
         # Create CM on all clusters
@@ -1812,9 +1922,27 @@ class MultiClusterK8sOperator(K8sOperator):
         )
 
     def _delete_job(self, name, namespace=settings.namespace, timeout_seconds: int = 120):
-        context = self._redis.get_resource_cluster(
-            resource_name=name, resource_type=ResourceType.JOB, namespace=namespace
+        context, cached_job = self._redis.get_resource_with_context(
+            resource_type=ResourceType.JOB,
+            resource_name=name,
+            namespace=namespace,
         )
+
+        if not context:
+            logger.warning(f"Attempted to delete job {name}, but context not found.")
+            return
+
+        if self._is_resource_stale(
+            cluster=context,
+            cached_resource=cached_job,
+            read_live_resource=self._read_live_job,
+            timeout_seconds=timeout_seconds,
+        ):
+            logger.warning(
+                f"Refusing to delete job {namespace}/{name} on cluster {context} due to cache mismatch."
+            )
+            return
+
         client = self._manager.get_batch_client(context)
 
         try:

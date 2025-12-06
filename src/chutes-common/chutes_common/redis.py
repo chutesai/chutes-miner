@@ -12,7 +12,7 @@ from chutes_common.monitoring.models import (
     ResourceType,
 )
 import json
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 from chutes_common.settings import RedisSettings
 from loguru import logger
 
@@ -284,6 +284,36 @@ class MonitoringRedisClient:
 
         return ClusterResources.from_dict(_results)
 
+    def get_resource_with_context(
+        self,
+        *,
+        resource_type: ResourceType,
+        resource_name: str,
+        namespace: Optional[str] = None,
+    ) -> Tuple[Optional[str], Optional[Any]]:
+        """Return the cluster name and cached resource for the provided identifiers."""
+        cluster = self.get_resource_cluster(
+            resource_name=resource_name,
+            resource_type=resource_type,
+            namespace=namespace,
+        )
+
+        if not cluster:
+            return None, None
+
+        resources = self.get_resources(
+            cluster_name=cluster,
+            resource_type=resource_type,
+            resource_name=resource_name,
+            namespace=namespace,
+        )
+
+        attr_name = f"{resource_type.value}s"
+        resource_list = getattr(resources, attr_name, [])
+        resource = resource_list[0] if resource_list else None
+
+        return cluster, resource
+
     def _filter_resources(
         self,
         resources: dict[str, Any],
@@ -391,6 +421,34 @@ class MonitoringRedisClient:
             )
 
         return cluster_status
+
+    def mark_cluster_unhealthy(self, cluster_name: str, reason: str) -> None:
+        """Mark a cluster as unhealthy to trigger a resync from the agent."""
+        try:
+            health_key = f"clusters:{cluster_name}:health"
+            current_status = self.redis.hgetall(health_key) or {}
+
+            last_heartbeat = current_status.get("last_heartbeat")
+            if not last_heartbeat:
+                last_heartbeat = datetime.now(timezone.utc).isoformat()
+
+            heartbeat_failures = current_status.get("heartbeat_failures", "0")
+
+            self.redis.hset(
+                health_key,
+                mapping={
+                    "cluster_name": cluster_name,
+                    "state": ClusterState.UNHEALTHY.value,
+                    "last_heartbeat": last_heartbeat,
+                    "error_message": reason,
+                    "heartbeat_failures": heartbeat_failures,
+                },
+            )
+            logger.warning(
+                f"Cluster {cluster_name} marked unhealthy via cache reconciliation guard: {reason}"
+            )
+        except Exception as exc:
+            logger.error(f"Failed to mark cluster {cluster_name} unhealthy: {exc}")
 
     async def get_all_cluster_statuses(self) -> List[ClusterStatus]:
         """Get all cluster health information"""
