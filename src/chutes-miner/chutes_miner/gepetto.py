@@ -266,20 +266,29 @@ class Gepetto:
                     headers=headers,
                     params=params,
                 ) as resp:
+                    if resp.status == 200:
+                        return await resp.json()
+
+                    error_body = await resp.text()
                     if resp.status == 423:
-                        logger.warning(
-                            f"Unable to scale up {chute.chute_id} at this time, "
-                            f"at capacity or blocked for another reason: {await resp.text()}"
+                        message = (
+                            f"Unable to scale up {chute.chute_id} at this time. "
+                            f"Validator reported capacity issue: {error_body}"
                         )
-                    elif resp.status != 200:
-                        logger.error(
-                            f"Failed to fetch launch token: {resp.status=} -> {await resp.text()}"
+                        logger.warning(message)
+                    else:
+                        message = (
+                            f"Failed to fetch launch token for {chute.chute_id}: "
+                            f"status={resp.status}, body={error_body}"
                         )
-                    resp.raise_for_status()
-                    return await resp.json()
+                        logger.error(message)
+
+                    raise DeploymentFailure(message)
+        except DeploymentFailure:
+            raise
         except Exception as exc:
             logger.warning(f"Unable to fetch launch config token: {exc}")
-            raise DeploymentFailure(f"Failed to fetch JWT for launch: {exc}")
+            raise DeploymentFailure(f"Failed to fetch JWT for launch: {exc}") from exc
 
     async def activate(self, deployment: Deployment):
         """
