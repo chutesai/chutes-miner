@@ -19,10 +19,8 @@ def mock_fetch_devices(mock_gpus):
     with patch("chutes_miner.api.server.verification.TEEVerificationStrategy._fetch_devices", _mock):
         _mock.return_value = [
         {
-            "device_info": {
-                "uuid": gpu.gpu_id,
-                **gpu.device_info
-            }
+            "uuid": gpu.gpu_id,
+            **gpu.device_info
         } for gpu in mock_gpus
     ]
         yield _mock
