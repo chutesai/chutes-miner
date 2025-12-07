@@ -59,6 +59,11 @@ async def undeploy(deployment_id: str, timeout_seconds: int = 120):
     return await K8sOperator().undeploy(deployment_id, timeout_seconds=timeout_seconds)
 
 
+async def delete_preflight(deployment_id: str, timeout_seconds: int = 120) -> bool:
+    """Verify it's safe to delete a deployment before touching local state."""
+    return await K8sOperator().delete_preflight(deployment_id, timeout_seconds=timeout_seconds)
+
+
 async def create_code_config_map(chute: Chute, force=False):
     """
     Create a ConfigMap to store the chute code.

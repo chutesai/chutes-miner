@@ -555,6 +555,10 @@ class K8sOperator(abc.ABC):
         if node_name:
             self.invalidate_node_disk_cache(node_name)
 
+    async def delete_preflight(self, deployment_id: str, timeout_seconds: int = 120) -> bool:
+        """Hook for subclasses to veto undeploy when cache data is stale."""
+        return True
+
     @abc.abstractmethod
     def _deploy_service(
         self,
@@ -1353,7 +1357,7 @@ class MultiClusterK8sOperator(K8sOperator):
     """Kubernetes operations for multi-cluster setup."""
 
     # This class will implement the K8sOperator interface but translate operations
-    # to work with Karmada's multi-cluster orchestration
+    # to work with k3s multi-cluster orchestration
     def __init__(self):
         self._initialize()
 
@@ -1373,6 +1377,89 @@ class MultiClusterK8sOperator(K8sOperator):
 
     def _get_request_timeout(self, read_timeout: int) -> Tuple[int, int]:
         return (5, read_timeout)
+
+    async def delete_preflight(self, deployment_id: str, timeout_seconds: int = 120) -> bool:
+        deployment_name = f"{CHUTE_DEPLOY_PREFIX}-{deployment_id}"
+        should_allow_delete = True
+
+        server_binding = await self._get_deployment_server_context(deployment_id)
+        context: Optional[str] = None
+        cached_job = None
+
+        if not server_binding:
+            logger.warning(
+                f"Preflight delete for {deployment_name} blocked: deployment not found in DB, unable to determine server context."
+            )
+            should_allow_delete = False
+        else:
+            server_id, server_name = server_binding
+
+            if not server_name:
+                logger.warning(
+                    f"Preflight delete for {deployment_name} blocked: server record {server_id} missing name."
+                )
+                should_allow_delete = False
+            else:
+                context, cached_job = self._redis.get_resource_with_context(
+                    resource_type=ResourceType.JOB,
+                    resource_name=deployment_name,
+                    namespace=settings.namespace,
+                )
+
+                if context and context != server_name:
+                    logger.error(
+                        f"Preflight delete for {deployment_name} blocked: cache context {context} does not match DB server {server_name}."
+                    )
+                    should_allow_delete = False
+                elif not self._cluster_is_healthy(server_name):
+                    logger.warning(
+                        f"Preflight delete for {deployment_name} blocked: cluster {server_name} unhealthy or offline."
+                    )
+                    should_allow_delete = False
+                elif cached_job and self._is_resource_stale(
+                    cluster=server_name,
+                    cached_resource=cached_job,
+                    read_live_resource=self._read_live_job,
+                    timeout_seconds=timeout_seconds,
+                ):
+                    logger.warning(
+                        f"Preflight delete for {deployment_name} on cluster {server_name} failed due to cache mismatch."
+                    )
+                    should_allow_delete = False
+                elif not context or not cached_job:
+                    logger.debug(
+                        f"Preflight bypassed for {deployment_name}: resource not found in cache but server {server_name} is healthy."
+                    )
+
+        return should_allow_delete
+
+    async def _get_deployment_server_context(self, deployment_id: str) -> Optional[Tuple[str, Optional[str]]]:
+        async with get_session() as session:
+            query = (
+                select(Deployment.server_id, Server.name)
+                .select_from(Deployment)
+                .join(Server, Deployment.server_id == Server.server_id, isouter=True)
+                .where(Deployment.deployment_id == deployment_id)
+            )
+
+            result = await session.execute(query)
+            row = result.one_or_none()
+
+            if not row:
+                return None
+
+            server_id, server_name = row
+            return server_id, server_name
+
+    def _cluster_is_healthy(self, cluster: str) -> bool:
+        status = self._redis.get_cluster_status(cluster)
+        if not status or not status.is_healthy:
+            logger.warning(
+                f"Cluster {cluster} health status is {'unknown' if not status else status.state}, treating as unhealthy."
+            )
+            return False
+
+        return True
 
     async def _watch_clusters(self):
         try:
@@ -1593,8 +1680,6 @@ class MultiClusterK8sOperator(K8sOperator):
         read_live_resource=None,
         timeout_seconds: int = 120,
     ) -> bool:
-        is_stale = False
-
         metadata = getattr(cached_resource, "metadata", None) if cached_resource else None
         cached_version = getattr(metadata, "resource_version", None) if metadata else None
         name = getattr(metadata, "name", "unknown") if metadata else "unknown"
@@ -1605,36 +1690,41 @@ class MultiClusterK8sOperator(K8sOperator):
 
         can_check_live = bool(cached_resource and cached_version and read_live_resource)
         live_resource = None
+        is_stale = False
 
         if can_check_live:
             try:
                 live_resource = read_live_resource(cluster, namespace, name, timeout_seconds)
             except ApiException as exc:
                 if exc.status != 404:
-                    is_stale = True
-                    reason = f"Failed to read {resource_label} {namespace}/{name} in cluster {cluster}: {exc}"
+                    reason = (
+                        f"Failed to read {resource_label} {namespace}/{name} in cluster {cluster}: {exc}"
+                    )
                     self._redis.mark_cluster_unhealthy(cluster, reason)
                     logger.warning(reason)
+                    is_stale = True
                 can_check_live = False
             except Exception as exc:
-                is_stale = True
-                reason = f"Unexpected error reading {resource_label} {namespace}/{name} in cluster {cluster}: {exc}"
+                reason = (
+                    f"Unexpected error reading {resource_label} {namespace}/{name} in cluster {cluster}: {exc}"
+                )
                 self._redis.mark_cluster_unhealthy(cluster, reason)
                 logger.error(reason)
+                is_stale = True
                 can_check_live = False
 
-        if can_check_live and not is_stale and live_resource is not None:
+        if can_check_live and live_resource is not None:
             live_metadata = getattr(live_resource, "metadata", None)
             live_version = getattr(live_metadata, "resource_version", None)
 
             if live_version and live_version != cached_version:
-                is_stale = True
                 reason = (
                     f"Resource version mismatch for {resource_label} {namespace}/{name} in cluster {cluster}: "
                     f"cache={cached_version}, cluster={live_version}"
                 )
                 self._redis.mark_cluster_unhealthy(cluster, reason)
                 logger.warning(reason)
+                is_stale = True
 
         return is_stale
 
@@ -1687,17 +1777,6 @@ class MultiClusterK8sOperator(K8sOperator):
 
         if not context:
             logger.warning(f"Attempted to delete deployment {name}, but deployment not found.")
-            return
-
-        if self._is_resource_stale(
-            cluster=context,
-            cached_resource=cached_deployment,
-            read_live_resource=self._read_live_deployment,
-            timeout_seconds=timeout_seconds,
-        ):
-            logger.warning(
-                f"Refusing to delete deployment {namespace}/{name} on cluster {context} due to cache mismatch."
-            )
             return
 
         client = self._manager.get_app_client(context)
@@ -1755,17 +1834,6 @@ class MultiClusterK8sOperator(K8sOperator):
 
         if cached_service is not None and cached_service.metadata:
             svc_name = cached_service.metadata.name
-
-        if self._is_resource_stale(
-            cluster=context,
-            cached_resource=cached_service,
-            read_live_resource=self._read_live_service,
-            timeout_seconds=timeout_seconds,
-        ):
-            logger.warning(
-                f"Refusing to delete service {namespace}/{svc_name} on cluster {context} due to cache mismatch."
-            )
-            return
 
         client = self._manager.get_core_client(context)
 
@@ -1930,17 +1998,6 @@ class MultiClusterK8sOperator(K8sOperator):
 
         if not context:
             logger.warning(f"Attempted to delete job {name}, but context not found.")
-            return
-
-        if self._is_resource_stale(
-            cluster=context,
-            cached_resource=cached_job,
-            read_live_resource=self._read_live_job,
-            timeout_seconds=timeout_seconds,
-        ):
-            logger.warning(
-                f"Refusing to delete job {namespace}/{name} on cluster {context} due to cache mismatch."
-            )
             return
 
         client = self._manager.get_batch_client(context)

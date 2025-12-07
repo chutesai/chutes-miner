@@ -545,7 +545,14 @@ class Gepetto:
         """
         logger.info(f"Removing all traces of deployment: {deployment_id}")
 
-        # Clean up the database.
+        preflight_ok = await k8s.delete_preflight(deployment_id)
+        if not preflight_ok:
+            logger.warning(
+                f"Skipping undeploy for {deployment_id} because cache preflight failed; will retry later"
+            )
+            return
+
+    # Clean up the database (safe now that preflight succeeded).
         chute_id = None
         validator_hotkey = None
         async with get_session() as session:

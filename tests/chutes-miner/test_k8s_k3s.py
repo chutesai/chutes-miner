@@ -1002,7 +1002,7 @@ async def test_deploy_graval_api_exception(
     mock_k8s_core_client.delete_namespaced_service.assert_called_once()
 
 
-def test_delete_deployment_skips_on_resource_version_mismatch(
+def test_delete_deployment_proceeds_even_when_versions_diverge(
     mock_redis_client,
     mock_k8s_client_manager,
     mock_k8s_app_client,
@@ -1027,11 +1027,13 @@ def test_delete_deployment_skips_on_resource_version_mismatch(
 
     operator._delete_deployment(name="dealer", namespace="chutes", timeout_seconds=30)
 
-    mock_k8s_app_client.delete_namespaced_deployment.assert_not_called()
-    mock_redis_client.mark_cluster_unhealthy.assert_called_once()
+    mock_k8s_app_client.delete_namespaced_deployment.assert_called_once_with(
+        name="dealer", namespace="chutes", _request_timeout=(5, 30)
+    )
+    mock_redis_client.mark_cluster_unhealthy.assert_not_called()
 
 
-def test_delete_job_marks_cluster_unhealthy_when_versions_diverge(
+def test_delete_job_still_deletes_when_versions_diverge(
     mock_redis_client,
     mock_k8s_client_manager,
     mock_k8s_batch_client,
@@ -1055,5 +1057,136 @@ def test_delete_job_marks_cluster_unhealthy_when_versions_diverge(
 
     operator._delete_job(name="job-123", namespace="chutes", timeout_seconds=45)
 
-    mock_k8s_batch_client.delete_namespaced_job.assert_not_called()
+    mock_k8s_batch_client.delete_namespaced_job.assert_called_once_with(
+        name="job-123",
+        namespace="chutes",
+        propagation_policy="Foreground",
+        _request_timeout=(5, 45),
+    )
+    mock_redis_client.mark_cluster_unhealthy.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_delete_preflight_uses_db_server_context_when_cache_missing(
+    mock_redis_client, mock_db_session
+):
+    mock_result = MagicMock()
+    mock_result.one_or_none.return_value = ("server-1", "cluster-a")
+    mock_db_session.execute.return_value = mock_result
+
+    healthy_status = MagicMock()
+    healthy_status.is_healthy = True
+    mock_redis_client.get_cluster_status.return_value = healthy_status
+    mock_redis_client.get_resource_with_context.return_value = (None, None)
+
+    with patch("chutes_miner.api.k8s.operator.asyncio.create_task"), patch.object(
+        MultiClusterK8sOperator, "_watch_clusters", new=lambda self: None
+    ), patch.object(MultiClusterK8sOperator, "_watch_cluster_connections", new=lambda self: None):
+        operator = MultiClusterK8sOperator()
+
+    assert await operator.delete_preflight("deploy-1") is True
+    mock_redis_client.get_cluster_status.assert_called_with("cluster-a")
+
+
+@pytest.mark.asyncio
+async def test_delete_preflight_blocks_when_cluster_unhealthy(mock_redis_client, mock_db_session):
+    mock_result = MagicMock()
+    mock_result.one_or_none.return_value = ("server-2", "cluster-b")
+    mock_db_session.execute.return_value = mock_result
+
+    unhealthy_status = MagicMock()
+    unhealthy_status.is_healthy = False
+    unhealthy_status.state = "offline"
+    mock_redis_client.get_cluster_status.return_value = unhealthy_status
+    mock_redis_client.get_resource_with_context.return_value = ("cluster-b", MagicMock())
+
+    with patch("chutes_miner.api.k8s.operator.asyncio.create_task"), patch.object(
+        MultiClusterK8sOperator, "_watch_clusters", new=lambda self: None
+    ), patch.object(MultiClusterK8sOperator, "_watch_cluster_connections", new=lambda self: None):
+        operator = MultiClusterK8sOperator()
+
+    assert await operator.delete_preflight("deploy-2") is False
+    mock_redis_client.get_cluster_status.assert_called_with("cluster-b")
+
+
+@pytest.mark.asyncio
+async def test_delete_preflight_blocks_on_context_mismatch(mock_redis_client, mock_db_session):
+    mock_result = MagicMock()
+    mock_result.one_or_none.return_value = ("server-3", "cluster-c")
+    mock_db_session.execute.return_value = mock_result
+
+    mock_redis_client.get_resource_with_context.return_value = ("cluster-d", MagicMock())
+
+    with patch("chutes_miner.api.k8s.operator.asyncio.create_task"), patch.object(
+        MultiClusterK8sOperator, "_watch_clusters", new=lambda self: None
+    ), patch.object(MultiClusterK8sOperator, "_watch_cluster_connections", new=lambda self: None):
+        operator = MultiClusterK8sOperator()
+
+    assert await operator.delete_preflight("deploy-3") is False
+    mock_redis_client.get_cluster_status.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_delete_preflight_blocks_on_stale_resource(
+    mock_redis_client, mock_db_session, mock_k8s_batch_client
+):
+    mock_result = MagicMock()
+    mock_result.one_or_none.return_value = ("server-4", "cluster-e")
+    mock_db_session.execute.return_value = mock_result
+
+    healthy_status = MagicMock()
+    healthy_status.is_healthy = True
+    mock_redis_client.get_cluster_status.return_value = healthy_status
+
+    cached_job = MagicMock()
+    cached_job.metadata = MagicMock()
+    cached_job.metadata.name = "job-456"
+    cached_job.metadata.namespace = "chutes"
+    cached_job.metadata.resource_version = "15"
+    mock_redis_client.get_resource_with_context.return_value = ("cluster-e", cached_job)
+
+    live_job = MagicMock()
+    live_job.metadata = MagicMock()
+    live_job.metadata.resource_version = "150"
+    mock_k8s_batch_client.read_namespaced_job.return_value = live_job
+
+    with patch("chutes_miner.api.k8s.operator.asyncio.create_task"), patch.object(
+        MultiClusterK8sOperator, "_watch_clusters", new=lambda self: None
+    ), patch.object(MultiClusterK8sOperator, "_watch_cluster_connections", new=lambda self: None):
+        operator = MultiClusterK8sOperator()
+
+    assert await operator.delete_preflight("deploy-4") is False
     mock_redis_client.mark_cluster_unhealthy.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_delete_preflight_allows_when_versions_match(
+    mock_redis_client, mock_db_session, mock_k8s_batch_client
+):
+    mock_result = MagicMock()
+    mock_result.one_or_none.return_value = ("server-5", "cluster-f")
+    mock_db_session.execute.return_value = mock_result
+
+    healthy_status = MagicMock()
+    healthy_status.is_healthy = True
+    mock_redis_client.get_cluster_status.return_value = healthy_status
+
+    cached_job = MagicMock()
+    cached_job.metadata = MagicMock()
+    cached_job.metadata.name = "job-789"
+    cached_job.metadata.namespace = "chutes"
+    cached_job.metadata.resource_version = "33"
+    mock_redis_client.get_resource_with_context.return_value = ("cluster-f", cached_job)
+
+    live_job = MagicMock()
+    live_job.metadata = MagicMock()
+    live_job.metadata.resource_version = "33"
+    mock_k8s_batch_client.read_namespaced_job.return_value = live_job
+
+    with patch("chutes_miner.api.k8s.operator.asyncio.create_task"), patch.object(
+        MultiClusterK8sOperator, "_watch_clusters", new=lambda self: None
+    ), patch.object(MultiClusterK8sOperator, "_watch_cluster_connections", new=lambda self: None):
+        operator = MultiClusterK8sOperator()
+
+    assert await operator.delete_preflight("deploy-5") is True
+    mock_redis_client.mark_cluster_unhealthy.assert_not_called()
