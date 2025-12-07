@@ -946,6 +946,7 @@ async def test_deploy_graval_port_mismatch(
     mock_service = MagicMock()
     mock_service.spec.ports = [MagicMock(node_port=30000)]
 
+
     mock_k8s_app_client.create_namespaced_deployment.return_value = mock_deployment
     mock_k8s_core_client.create_namespaced_service.return_value = mock_service
 
@@ -999,3 +1000,60 @@ async def test_deploy_graval_api_exception(
 
     # Verify cleanup was attempted
     mock_k8s_core_client.delete_namespaced_service.assert_called_once()
+
+
+def test_delete_deployment_skips_on_resource_version_mismatch(
+    mock_redis_client,
+    mock_k8s_client_manager,
+    mock_k8s_app_client,
+):
+    cached_deployment = MagicMock()
+    cached_deployment.metadata = MagicMock()
+    cached_deployment.metadata.resource_version = "10"
+    cached_deployment.metadata.namespace = "chutes"
+    cached_deployment.metadata.name = "dealer"
+
+    mock_redis_client.get_resource_with_context.return_value = ("cluster-a", cached_deployment)
+
+    live_deployment = MagicMock()
+    live_deployment.metadata = MagicMock()
+    live_deployment.metadata.resource_version = "9999"
+    mock_k8s_app_client.read_namespaced_deployment.return_value = live_deployment
+
+    with patch("chutes_miner.api.k8s.operator.asyncio.create_task"), patch.object(
+        MultiClusterK8sOperator, "_watch_clusters", new=lambda self: None
+    ), patch.object(MultiClusterK8sOperator, "_watch_cluster_connections", new=lambda self: None):
+        operator = MultiClusterK8sOperator()
+
+    operator._delete_deployment(name="dealer", namespace="chutes", timeout_seconds=30)
+
+    mock_k8s_app_client.delete_namespaced_deployment.assert_not_called()
+    mock_redis_client.mark_cluster_unhealthy.assert_called_once()
+
+
+def test_delete_job_marks_cluster_unhealthy_when_versions_diverge(
+    mock_redis_client,
+    mock_k8s_client_manager,
+    mock_k8s_batch_client,
+):
+    cached_job = MagicMock()
+    cached_job.metadata = MagicMock()
+    cached_job.metadata.resource_version = "5"
+    cached_job.metadata.namespace = "chutes"
+    cached_job.metadata.name = "job-123"
+    mock_redis_client.get_resource_with_context.return_value = ("cluster-b", cached_job)
+
+    live_job = MagicMock()
+    live_job.metadata = MagicMock()
+    live_job.metadata.resource_version = "999"
+    mock_k8s_batch_client.read_namespaced_job.return_value = live_job
+
+    with patch("chutes_miner.api.k8s.operator.asyncio.create_task"), patch.object(
+        MultiClusterK8sOperator, "_watch_clusters", new=lambda self: None
+    ), patch.object(MultiClusterK8sOperator, "_watch_cluster_connections", new=lambda self: None):
+        operator = MultiClusterK8sOperator()
+
+    operator._delete_job(name="job-123", namespace="chutes", timeout_seconds=45)
+
+    mock_k8s_batch_client.delete_namespaced_job.assert_not_called()
+    mock_redis_client.mark_cluster_unhealthy.assert_called_once()
