@@ -186,9 +186,13 @@ async def test_cleanup_stale_clusters(mock_settings, mock_redis_client):
     mock_redis_client.get_all_cluster_statuses.return_value = [old_cluster, recent_cluster]
     
     await health_checker._cleanup_stale_clusters()
-    
-    # Should only clear the old cluster
-    mock_redis_client.clear_cluster_resources.assert_called_once_with("old-cluster")
+
+    mock_redis_client.update_cluster_status.assert_called_once()
+    updated_status = mock_redis_client.update_cluster_status.call_args[0][0]
+    assert updated_status.cluster_name == "old-cluster"
+    assert updated_status.state == ClusterState.ERROR
+    assert updated_status.error_message == "Cluster offline for more than 1 hour."
+    mock_redis_client.clear_cluster_resources.assert_not_called()
 
 
 @patch('chutes_monitor.cluster_monitor.settings')
@@ -335,9 +339,13 @@ async def test_cleanup_stale_clusters_with_invalid_timestamps(mock_settings, moc
     mock_redis_client.get_all_cluster_statuses.return_value = [invalid_cluster, old_cluster]
     
     await health_checker._cleanup_stale_clusters()
-    
-    # Should only clear the old cluster, not the invalid one
-    mock_redis_client.clear_cluster_resources.assert_called_once_with("old-cluster")
+
+    mock_redis_client.update_cluster_status.assert_called_once()
+    updated_status = mock_redis_client.update_cluster_status.call_args[0][0]
+    assert updated_status.cluster_name == "old-cluster"
+    assert updated_status.state == ClusterState.ERROR
+    assert updated_status.error_message == "Cluster offline for more than 1 hour."
+    mock_redis_client.clear_cluster_resources.assert_not_called()
 
 
 @patch('chutes_monitor.cluster_monitor.settings')
