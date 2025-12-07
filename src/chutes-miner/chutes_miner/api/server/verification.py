@@ -558,6 +558,8 @@ class GravalVerificationStrategy(VerificationStrategy):
             node_name = node_object.metadata.name
             logger.info(f"Purging failed server: {node_name=} {node_uid=}")
             validator = self.validator
+            server_id = None
+
             async with get_session() as session:
                 server = (
                     (await session.execute(select(Server).where(Server.server_id == node_uid)))
@@ -569,6 +571,7 @@ class GravalVerificationStrategy(VerificationStrategy):
                     await session.delete(server)
                 await session.commit()
 
+            if server_id:
                 try:
                     async with aiohttp.ClientSession(raise_for_status=True) as http_session:
                         headers, _ = sign_request(purpose="tee")
@@ -582,6 +585,10 @@ class GravalVerificationStrategy(VerificationStrategy):
                     logger.warning(
                         f"Error purging {server_id=} from validator={validator.hotkey}: {exc}"
                     )
+            else:
+                logger.warning(
+                    "Unable to purge validator server entry because server record was not found",
+                )
 
 
 class TEEVerificationStrategy(VerificationStrategy):
