@@ -270,6 +270,42 @@ def mock_batch_client_class(mock_batch_client):
         yield mock_client
 
 @pytest.fixture(autouse=True)
+def mock_networking_client():
+    mock_client = AsyncMock()
+    mock_client.api_client.close = AsyncMock()
+    yield mock_client
+
+@pytest.fixture(autouse=True)
+def mock_networking_client_class(mock_networking_client):
+    with patch('kubernetes_asyncio.client.NetworkingV1Api') as mock_client:
+        mock_client.return_value = mock_networking_client
+        yield mock_client
+
+@pytest.fixture(autouse=True)
+def mock_rbac_client():
+    mock_client = AsyncMock()
+    mock_client.api_client.close = AsyncMock()
+    yield mock_client
+
+@pytest.fixture(autouse=True)
+def mock_rbac_client_class(mock_rbac_client):
+    with patch('kubernetes_asyncio.client.RbacAuthorizationV1Api') as mock_client:
+        mock_client.return_value = mock_rbac_client
+        yield mock_client
+
+@pytest.fixture(autouse=True)
+def mock_storage_client():
+    mock_client = AsyncMock()
+    mock_client.api_client.close = AsyncMock()
+    yield mock_client
+
+@pytest.fixture(autouse=True)
+def mock_storage_client_class(mock_storage_client):
+    with patch('kubernetes_asyncio.client.StorageV1Api') as mock_client:
+        mock_client.return_value = mock_storage_client
+        yield mock_client
+
+@pytest.fixture(autouse=True)
 def mock_api_client():
     mock_client = AsyncMock()
     mock_client.close = AsyncMock()
