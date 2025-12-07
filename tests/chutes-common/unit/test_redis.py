@@ -280,6 +280,52 @@ def test_get_resource_cluster_multiple_clusters_error(redis_client, mock_redis):
         redis_client.get_resource_cluster(resource_name, resource_type, namespace)
 
 
+def test_get_resource_with_context_found(redis_client):
+    resource_name = "test-deployment"
+    namespace = "default"
+    resource_type = ResourceType.DEPLOYMENT
+    cached_resource = Mock()
+
+    redis_client.get_resource_cluster = Mock(return_value="cluster-a")
+    redis_client.get_resources = Mock(
+        return_value=Mock(
+            deployments=[cached_resource], services=[], pods=[], nodes=[], jobs=[]
+        )
+    )
+
+    cluster, resource = redis_client.get_resource_with_context(
+        resource_type=resource_type,
+        resource_name=resource_name,
+        namespace=namespace,
+    )
+
+    assert cluster == "cluster-a"
+    assert resource is cached_resource
+    redis_client.get_resources.assert_called_once_with(
+        cluster_name="cluster-a",
+        resource_type=resource_type,
+        resource_name=resource_name,
+        namespace=namespace,
+    )
+
+
+def test_get_resource_with_context_missing(redis_client):
+    resource_name = "missing-deployment"
+    namespace = "default"
+    resource_type = ResourceType.DEPLOYMENT
+
+    redis_client.get_resource_cluster = Mock(return_value=None)
+
+    cluster, resource = redis_client.get_resource_with_context(
+        resource_type=resource_type,
+        resource_name=resource_name,
+        namespace=namespace,
+    )
+
+    assert cluster is None
+    assert resource is None
+
+
 @pytest.mark.asyncio
 async def test_clear_cluster_resources(redis_client, mock_redis):
     """Test clearing all resources for a cluster"""
@@ -359,7 +405,7 @@ async def test_get_cluster_status_exists(redis_client, mock_redis):
         "heartbeat_failures": "0"
     }
     
-    result = await redis_client.get_cluster_status(cluster_name)
+    result = redis_client.get_cluster_status(cluster_name)
     
     assert result is not None
     assert result.cluster_name == cluster_name
@@ -373,7 +419,7 @@ async def test_get_cluster_status_not_exists(redis_client, mock_redis):
     cluster_name = "test-cluster"
     mock_redis.hgetall.return_value = {}
     
-    result = await redis_client.get_cluster_status(cluster_name)
+    result = redis_client.get_cluster_status(cluster_name)
     
     assert result is None
 
