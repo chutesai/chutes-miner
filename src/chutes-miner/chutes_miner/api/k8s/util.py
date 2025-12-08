@@ -30,6 +30,20 @@ from chutes_miner.api.k8s.constants import (
 )
 from chutes_common.schemas.server import Server
 from chutes_miner.api.config import settings
+from semver import VersionInfo
+
+
+CODE_VOLUME_CUTOFF_VERSION = VersionInfo.parse("0.3.61")
+
+
+def _requires_code_volume(chute: Chute) -> bool:
+    version_str = (chute.chutes_version or chute.version or "0.0.0")
+    try:
+        version = VersionInfo.parse(version_str)
+    except ValueError:
+        # Unknown versions default to legacy behavior to remain safe.
+        return True
+    return version < CODE_VOLUME_CUTOFF_VERSION
 
 
 def build_chute_job(
@@ -46,13 +60,14 @@ def build_chute_job(
 ) -> V1Job:
     cpu = str(server.cpu_per_gpu * chute.gpu_count)
     ram = str(server.memory_per_gpu * chute.gpu_count) + "Gi"
-    code_uuid = str(uuid.uuid5(uuid.NAMESPACE_OID, f"{chute.chute_id}::{chute.version}"))
     deployment_labels = {
         "chutes/deployment-id": deployment_id,
         "chutes/chute": "true",
         "chutes/chute-id": chute.chute_id,
         "chutes/version": chute.version,
     }
+
+    attach_code_volume = _requires_code_volume(chute)
 
     if config_id:
         deployment_labels["chutes/config-id"] = config_id
@@ -104,6 +119,26 @@ def build_chute_job(
         server.validator,
     ]
 
+    code_volumes = []
+    code_volume_mounts = []
+    if attach_code_volume:
+        code_uuid = str(uuid.uuid5(uuid.NAMESPACE_OID, f"{chute.chute_id}::{chute.version}"))
+        code_volumes = [
+            V1Volume(
+                name="code",
+                config_map=V1ConfigMapVolumeSource(
+                    name=f"{CHUTE_CODE_CM_PREFIX}-{code_uuid}",
+                ),
+            )
+        ]
+        code_volume_mounts = [
+            V1VolumeMount(
+                name="code",
+                mount_path=f"/app/{chute.filename}",
+                sub_path=chute.filename,
+            )
+        ]
+
     return V1Job(
         metadata=V1ObjectMeta(
             name=f"{CHUTE_DEPLOY_PREFIX}-{deployment_id}",
@@ -128,12 +163,7 @@ def build_chute_job(
                     node_name=server.name,  ## Start here
                     runtime_class_name=settings.nvidia_runtime,
                     volumes=[
-                        V1Volume(
-                            name="code",
-                            config_map=V1ConfigMapVolumeSource(
-                                name=f"{CHUTE_CODE_CM_PREFIX}-{code_uuid}",
-                            ),
-                        ),
+                        *code_volumes,
                         V1Volume(
                             name="cache",
                             host_path=V1HostPathVolumeSource(
@@ -285,11 +315,7 @@ def build_chute_job(
                                 },
                             ),
                             volume_mounts=[
-                                V1VolumeMount(
-                                    name="code",
-                                    mount_path=f"/app/{chute.filename}",
-                                    sub_path=chute.filename,
-                                ),
+                                *code_volume_mounts,
                                 V1VolumeMount(name="cache", mount_path="/cache"),
                                 V1VolumeMount(name="tmp", mount_path="/tmp"),
                                 V1VolumeMount(name="shm", mount_path="/dev/shm"),
