@@ -85,6 +85,15 @@ class ConfigMapDeployRequest:
     enqueued_at: datetime = field(default_factory=_utc_now)
 
 
+@dataclass(slots=True)
+class ConfigMapSyncRequest:
+    cluster: str
+    enqueued_at: datetime = field(default_factory=_utc_now)
+
+
+ConfigMapWorkerRequest = Union[ConfigMapDeployRequest, ConfigMapSyncRequest]
+
+
 class ConfigMapWorker:
     """Background worker that fan-outs ConfigMap updates across clusters."""
 
@@ -105,6 +114,7 @@ class ConfigMapWorker:
         manager: KubernetesMultiClusterClientManager,
         verify_node_health: Callable[[str], None],
         get_request_timeout: Callable[[int], Tuple[int, int]],
+        build_code_config_map: Callable[[Chute], V1ConfigMap],
     ):
         if getattr(self, "_initialized", False):
             return
@@ -113,9 +123,10 @@ class ConfigMapWorker:
         self._manager = manager
         self._verify_node_health = verify_node_health
         self._get_request_timeout = get_request_timeout
+        self._build_code_config_map = build_code_config_map
 
         self._loop: Optional[asyncio.AbstractEventLoop] = None
-        self._queue: Optional[asyncio.Queue[ConfigMapDeployRequest]] = None
+        self._queue: Optional[asyncio.Queue[ConfigMapWorkerRequest]] = None
         self._thread: Optional[threading.Thread] = None
         self._worker_task: Optional[asyncio.Task] = None
         self._queue_ready = threading.Event()
@@ -184,7 +195,7 @@ class ConfigMapWorker:
         self._thread = None
         self._started = False
 
-    def submit(self, request: ConfigMapDeployRequest) -> bool:
+    def enqueue_deploy(self, request: ConfigMapDeployRequest) -> bool:
         self._ensure_running()
         if not self._started:
             return False
@@ -210,8 +221,34 @@ class ConfigMapWorker:
             )
             return False
 
-    def process_request_sync(self, request: ConfigMapDeployRequest) -> Dict[str, str]:
-        return self._handle_request(request)
+    def sync_cluster_configmaps(self, cluster: str) -> bool:
+        self._ensure_running()
+        if not self._started:
+            return False
+
+        if not self._loop or not self._queue:
+            logger.error("Config map worker loop unavailable after start; cannot enqueue sync request.")
+            return False
+
+        request = ConfigMapSyncRequest(cluster=cluster)
+
+        def _put_request():
+            try:
+                self._queue.put_nowait(request)
+            except Exception as exc:
+                logger.error(f"Failed to enqueue configmap sync for cluster {cluster}: {exc}")
+
+        try:
+            self._loop.call_soon_threadsafe(_put_request)
+            return True
+        except RuntimeError as exc:
+            logger.error(
+                f"Config map worker loop is not running; unable to enqueue sync request for {cluster}: {exc}"
+            )
+            return False
+
+    def process_deploy_sync(self, request: ConfigMapDeployRequest) -> Dict[str, str]:
+        return self._handle_deploy_request(request)
 
     async def _worker(self):
         logger.info("Config map deployment worker loop started.")
@@ -221,22 +258,25 @@ class ConfigMapWorker:
 
         while True:
             try:
-                request: ConfigMapDeployRequest = await self._queue.get()
+                request: ConfigMapWorkerRequest = await self._queue.get()
             except asyncio.CancelledError:
                 break
 
             try:
-                self._handle_request(request)
+                if isinstance(request, ConfigMapDeployRequest):
+                    self._handle_deploy_request(request)
+                elif isinstance(request, ConfigMapSyncRequest):
+                    self._handle_sync_request(request)
+                else:
+                    logger.error(f"Unknown config map worker request type: {type(request)}")
             except Exception as exc:
-                logger.error(
-                    f"Unexpected error processing configmap {request.config_map.metadata.name}: {exc}"
-                )
+                logger.error(f"Unexpected error processing config map worker request {request}: {exc}")
             finally:
                 self._queue.task_done()
 
         logger.info("Config map deployment worker loop stopped.")
 
-    def _handle_request(self, request: ConfigMapDeployRequest) -> Dict[str, str]:
+    def _handle_deploy_request(self, request: ConfigMapDeployRequest) -> Dict[str, str]:
         failures = self._deploy_config_map_to_all_clusters(
             config_map=request.config_map,
             namespace=request.namespace,
@@ -250,6 +290,9 @@ class ConfigMapWorker:
             self._redis.mark_cluster_unhealthy(cluster, reason)
 
         return failures
+
+    def _handle_sync_request(self, request: ConfigMapSyncRequest) -> None:
+        self._sync_cluster_configmaps(request.cluster)
 
     def _deploy_config_map_to_all_clusters(
         self,
@@ -340,6 +383,58 @@ class ConfigMapWorker:
             reason = f"Failed to deploy configmap {cm_name} to cluster {cluster}: {e}"
             logger.error(reason)
             return False, reason
+
+    def _delete_config_map_from_cluster(
+        self,
+        *,
+        cluster: str,
+        name: str,
+        namespace: str,
+        timeout_seconds: int = 60,
+    ) -> None:
+        client = self._manager.get_core_client(cluster)
+        try:
+            client.delete_namespaced_config_map(
+                name=name,
+                namespace=namespace,
+                _request_timeout=self._get_request_timeout(timeout_seconds),
+            )
+        except (MaxRetryError, ConnectionTimeoutError):
+            # Cluster is unreachable, CMs will reconcile on reconnect
+            logger.debug(
+                f"Cluster {cluster} unreachable while deleting configmap {name}; will reconcile on reconnect."
+            )
+        except ApiException as e:
+            if e.status != 404:
+                raise
+
+    def _sync_cluster_configmaps(self, cluster_name: str) -> None:
+        try:
+            with get_sync_session() as session:
+                client = self._manager.get_core_client(cluster_name)
+                chute_cms: V1ConfigMapList = client.list_namespaced_config_map(
+                    settings.namespace, label_selector="chutes/code=true"
+                )
+
+                for cm in chute_cms.items:
+                    self._delete_config_map_from_cluster(
+                        cluster=cluster_name,
+                        name=cm.metadata.name,
+                        namespace=settings.namespace,
+                    )
+
+                chutes = (session.execute(select(Chute))).unique().scalars()
+                for chute in chutes:
+                    config_map = self._build_code_config_map(chute)
+                    self._deploy_config_map_to_cluster(
+                        cluster=cluster_name,
+                        config_map=config_map,
+                        namespace=settings.namespace,
+                    )
+
+            logger.info(f"Successfully synced chute configmaps for {cluster_name}")
+        except Exception as e:
+            logger.error(f"Unexpected exception syncing chute configmaps for {cluster_name}:\n{e}")
 
 
 # Abstract base class for all Kubernetes operations
@@ -1648,13 +1743,15 @@ class MultiClusterK8sOperator(K8sOperator):
         if settings.reconcile_clusters:
             if not hasattr(self, "_watch_reconnects_task"):
                 self.watch_cluster_connections()
-            
-            self._config_map_worker = ConfigMapWorker(
-                redis_client=self._redis,
-                manager=self._manager,
-                verify_node_health=self._verify_node_health,
-                get_request_timeout=self._get_request_timeout,
-            )
+
+            if not self._config_map_worker:
+                self._config_map_worker = ConfigMapWorker(
+                    redis_client=self._redis,
+                    manager=self._manager,
+                    verify_node_health=self._verify_node_health,
+                    get_request_timeout=self._get_request_timeout,
+                    build_code_config_map=self._build_code_config_map,
+                )
 
     def _get_request_timeout(self, read_timeout: int) -> Tuple[int, int]:
         return (5, read_timeout)
@@ -1791,8 +1888,14 @@ class MultiClusterK8sOperator(K8sOperator):
                                 KubeConfig.from_dict(yaml.safe_load(server.kubeconfig))
                             )
 
-                            if settings.reconcile_clusters:
-                                self._sync_chute_configmaps(message.cluster)
+                            if (
+                                settings.reconcile_clusters
+                                and self._config_map_worker
+                                and not self._config_map_worker.sync_cluster_configmaps(message.cluster)
+                            ):
+                                logger.error(
+                                    f"Failed to enqueue configmap sync for cluster {message.cluster}."
+                                )
                         else:
                             logger.warning(
                                 f"Received add event for cluster {message.cluster} but no kubeconfig is set in DB."
@@ -1845,37 +1948,21 @@ class MultiClusterK8sOperator(K8sOperator):
             if not settings.reconcile_clusters:
                 return
 
+            if not self._config_map_worker:
+                logger.warning(
+                    f"Cluster {message.cluster} reconnected but config map worker is unavailable; skipping sync."
+                )
+                return
+
             logger.info(f"Cluster {message.cluster} reconnected.  Refreshing Chutes config maps.")
 
-            # Don't block in case there was a mass restart,
-            # instead dump each cluster to a thread
-            asyncio.create_task(asyncio.to_thread(self._sync_chute_configmaps, message.cluster))
+            if not self._config_map_worker.sync_cluster_configmaps(message.cluster):
+                logger.error(
+                    f"Failed to enqueue configmap sync for cluster {message.cluster} after reconnect."
+                )
 
         except Exception as e:
             logger.error(f"Unexpected exception while handling cluster change:\n{e}")
-
-    def _sync_chute_configmaps(self, cluster_name: str):
-        try:
-            with get_sync_session() as session:
-                # Get all existing CMs
-                client = self._manager.get_core_client(cluster_name)
-                chute_cms: V1ConfigMapList = client.list_namespaced_config_map(
-                    settings.namespace, label_selector="chutes/code=true"
-                )
-
-                # Delete all Chute CMs
-                for cm in chute_cms.items:
-                    self._delete_config_map_from_cluster(cluster_name, name=cm.metadata.name)
-
-                # Propagate existing Chute CMs to the cluster
-                chutes = (session.execute(select(Chute))).unique().scalars()
-                for chute in chutes:
-                    config_map = self._build_code_config_map(chute)
-                    self._deploy_config_map_to_cluster(cluster_name, config_map)
-
-            logger.info(f"Successfully synced chute configmaps for {cluster_name}")
-        except Exception as e:
-            logger.error(f"Unexpected exception syncing chute configmaps for {cluster_name}:\n{e}")
 
     def get_node(
         self, name: str, kubeconfig: Optional[KubeConfig] = None, timeout_seconds=15
@@ -2181,7 +2268,7 @@ class MultiClusterK8sOperator(K8sOperator):
             )
             return
 
-        if not self._config_map_worker.submit(request):
+        if not self._config_map_worker.enqueue_deploy(request):
             logger.error(f"ConfigMap worker failed to deploy CM for {config_map.metadata.name}.")
 
     def _deploy_config_map_to_all_clusters(
