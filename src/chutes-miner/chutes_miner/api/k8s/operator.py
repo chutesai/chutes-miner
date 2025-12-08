@@ -1,5 +1,6 @@
 import asyncio
-from datetime import datetime, timedelta
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 import json
 import math
@@ -8,6 +9,7 @@ import time
 import uuid
 import traceback
 import abc
+import threading
 from aiohttp import ConnectionTimeoutError
 import semver
 from chutes_common.monitoring.messages import (
@@ -20,7 +22,7 @@ from chutes_common.redis import MonitoringRedisClient
 from chutes_miner.api.k8s.client import KubernetesMultiClusterClientManager
 from chutes_miner.api.k8s.config import KubeConfig
 from loguru import logger
-from typing import Generator, List, Dict, Any, Optional, Tuple, Union
+from typing import Callable, Generator, List, Dict, Any, Optional, Tuple, Union
 from kubernetes import watch
 from kubernetes.client import (
     V1Deployment,
@@ -68,6 +70,375 @@ import yaml
 # Cache disk stats.
 _disk_info_cache: dict[str, tuple[dict[str, float], datetime]] = {}
 _disk_info_locks: dict[str, asyncio.Lock] = {}
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+@dataclass(slots=True)
+class ConfigMapDeployRequest:
+    config_map: V1ConfigMap
+    namespace: str
+    timeout_seconds: int = 60
+    force: bool = False
+    enqueued_at: datetime = field(default_factory=_utc_now)
+
+
+@dataclass(slots=True)
+class ConfigMapSyncRequest:
+    cluster: str
+    enqueued_at: datetime = field(default_factory=_utc_now)
+
+
+ConfigMapWorkerRequest = Union[ConfigMapDeployRequest, ConfigMapSyncRequest]
+
+
+class ConfigMapWorker:
+    """Background worker that fan-outs ConfigMap updates across clusters."""
+
+    _instance: Optional["ConfigMapWorker"] = None
+    _instance_lock = threading.Lock()
+
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            with cls._instance_lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def __init__(
+        self,
+        *,
+        redis_client: MonitoringRedisClient,
+        manager: KubernetesMultiClusterClientManager,
+        verify_node_health: Callable[[str], None],
+        get_request_timeout: Callable[[int], Tuple[int, int]],
+        build_code_config_map: Callable[[Chute], V1ConfigMap],
+    ):
+        if getattr(self, "_initialized", False):
+            return
+
+        self._redis = redis_client
+        self._manager = manager
+        self._verify_node_health = verify_node_health
+        self._get_request_timeout = get_request_timeout
+        self._build_code_config_map = build_code_config_map
+
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._queue: Optional[asyncio.Queue[ConfigMapWorkerRequest]] = None
+        self._thread: Optional[threading.Thread] = None
+        self._worker_task: Optional[asyncio.Task] = None
+        self._queue_ready = threading.Event()
+        self._started = False
+        self._start_lock = threading.Lock()
+
+        self._initialized = True
+        self._ensure_running()
+
+    def _ensure_running(self):
+        if self._started:
+            return
+
+        with self._start_lock:
+            if self._started:
+                return
+
+            self._loop = asyncio.new_event_loop()
+            self._queue_ready.clear()
+
+            def _run_loop():
+                asyncio.set_event_loop(self._loop)
+                self._queue = asyncio.Queue()
+                self._worker_task = self._loop.create_task(self._worker())
+                self._queue_ready.set()
+                try:
+                    self._loop.run_forever()
+                except Exception as exc:
+                    logger.error(f"ConfigMapWorker loop encountered an error: {exc}")
+                finally:
+                    pending = asyncio.all_tasks()
+                    for task in pending:
+                        task.cancel()
+                    if pending:
+                        self._loop.run_until_complete(
+                            asyncio.gather(*pending, return_exceptions=True)
+                        )
+                    self._loop.close()
+                    self._started = False
+
+            self._thread = threading.Thread(
+                target=_run_loop,
+                name="ChutesConfigMapWorker",
+                daemon=True,
+            )
+            self._thread.start()
+
+            if not self._queue_ready.wait(timeout=5):
+                logger.error(
+                    "Failed to start config map worker loop; falling back to synchronous deploys."
+                )
+                self._stop_loop()
+                return
+
+            self._started = True
+
+    def _stop_loop(self):
+        try:
+            if self._loop:
+                self._loop.call_soon_threadsafe(self._loop.stop)
+        except Exception:
+            pass
+        self._loop = None
+        self._queue = None
+        self._worker_task = None
+        self._thread = None
+        self._started = False
+
+    def enqueue_deploy(self, request: ConfigMapDeployRequest) -> bool:
+        self._ensure_running()
+        if not self._started:
+            return False
+
+        if not self._loop or not self._queue:
+            logger.error("Config map worker loop unavailable after start; cannot submit request.")
+            return False
+
+        def _put_request():
+            try:
+                self._queue.put_nowait(request)
+            except Exception as exc:
+                logger.error(
+                    f"Failed to enqueue configmap {request.config_map.metadata.name}: {exc}"
+                )
+
+        try:
+            self._loop.call_soon_threadsafe(_put_request)
+            return True
+        except RuntimeError as exc:
+            logger.error(
+                f"Config map worker loop is not running; unable to enqueue {request.config_map.metadata.name}: {exc}"
+            )
+            return False
+
+    def sync_cluster_configmaps(self, cluster: str) -> bool:
+        self._ensure_running()
+        if not self._started:
+            return False
+
+        if not self._loop or not self._queue:
+            logger.error(
+                "Config map worker loop unavailable after start; cannot enqueue sync request."
+            )
+            return False
+
+        request = ConfigMapSyncRequest(cluster=cluster)
+
+        def _put_request():
+            try:
+                self._queue.put_nowait(request)
+            except Exception as exc:
+                logger.error(f"Failed to enqueue configmap sync for cluster {cluster}: {exc}")
+
+        try:
+            self._loop.call_soon_threadsafe(_put_request)
+            return True
+        except RuntimeError as exc:
+            logger.error(
+                f"Config map worker loop is not running; unable to enqueue sync request for {cluster}: {exc}"
+            )
+            return False
+
+    def process_deploy_sync(self, request: ConfigMapDeployRequest) -> Dict[str, str]:
+        return self._handle_deploy_request(request)
+
+    async def _worker(self):
+        logger.info("Config map deployment worker loop started.")
+        if not self._queue:
+            logger.error("Config map worker queue not initialized; terminating worker loop.")
+            return
+
+        while True:
+            try:
+                request: ConfigMapWorkerRequest = await self._queue.get()
+            except asyncio.CancelledError:
+                break
+
+            try:
+                if isinstance(request, ConfigMapDeployRequest):
+                    self._handle_deploy_request(request)
+                elif isinstance(request, ConfigMapSyncRequest):
+                    self._handle_sync_request(request)
+                else:
+                    logger.error(f"Unknown config map worker request type: {type(request)}")
+            except Exception as exc:
+                logger.error(
+                    f"Unexpected error processing config map worker request {request}: {exc}"
+                )
+            finally:
+                self._queue.task_done()
+
+        logger.info("Config map deployment worker loop stopped.")
+
+    def _handle_deploy_request(self, request: ConfigMapDeployRequest) -> Dict[str, str]:
+        failures = self._deploy_config_map_to_all_clusters(
+            config_map=request.config_map,
+            namespace=request.namespace,
+            timeout_seconds=request.timeout_seconds,
+            force=request.force,
+        )
+        for cluster, reason in failures.items():
+            logger.warning(
+                f"Marking cluster {cluster} unhealthy after configmap {request.config_map.metadata.name} failure: {reason}"
+            )
+            self._redis.mark_cluster_unhealthy(cluster, reason)
+
+        return failures
+
+    def _handle_sync_request(self, request: ConfigMapSyncRequest) -> None:
+        self._sync_cluster_configmaps(request.cluster)
+
+    def _deploy_config_map_to_all_clusters(
+        self,
+        *,
+        config_map: V1ConfigMap,
+        namespace: str,
+        timeout_seconds: int = 60,
+        force: bool = False,
+    ) -> Dict[str, str]:
+        clusters = self._redis.get_all_cluster_names()
+        failures: Dict[str, str] = {}
+        for cluster in clusters:
+            success, reason = self._deploy_config_map_to_cluster(
+                cluster=cluster,
+                config_map=config_map,
+                namespace=namespace,
+                timeout_seconds=timeout_seconds,
+                force=force,
+            )
+            if not success:
+                failures[cluster] = reason or "Unknown error"
+
+        return failures
+
+    def _deploy_config_map_to_cluster(
+        self,
+        *,
+        cluster: str,
+        config_map: V1ConfigMap,
+        namespace: str,
+        timeout_seconds: int = 60,
+        force: bool = False,
+    ) -> Tuple[bool, Optional[str]]:
+        cm_name = config_map.metadata.name
+        client: Optional[CoreV1Api] = None
+        try:
+            self._verify_node_health(cluster)
+            client = self._manager.get_core_client(cluster)
+            if client is None:
+                raise RuntimeError(f"No core client available for cluster {cluster}")
+
+            client.create_namespaced_config_map(
+                namespace=namespace,
+                body=config_map,
+                _request_timeout=self._get_request_timeout(timeout_seconds),
+            )
+            return True, None
+        except (MaxRetryError, ConnectionTimeoutError) as exc:
+            reason = f"Failed to deploy {cm_name} on cluster {cluster}, unable to connect: {exc}. CMs will reconcile on reconnect."
+            logger.warning(reason)
+            return False, reason
+        except ApiException as e:
+            if e.status == 409:
+                if not force:
+                    logger.debug(
+                        f"Configmap {cm_name} already exists on cluster {cluster}; skipping because force=False."
+                    )
+                    return True, None
+
+                logger.warning(f"Replacing configmap {cm_name} on cluster {cluster}.")
+                try:
+                    if client is None:
+                        client = self._manager.get_core_client(cluster)
+                    client.delete_namespaced_config_map(
+                        name=cm_name,
+                        namespace=namespace,
+                        _request_timeout=self._get_request_timeout(timeout_seconds),
+                    )
+                    client.create_namespaced_config_map(
+                        namespace=namespace,
+                        body=config_map,
+                        _request_timeout=self._get_request_timeout(timeout_seconds),
+                    )
+                    return True, None
+                except ApiException as replace_exc:
+                    reason = f"Failed to force replace configmap {cm_name} on cluster {cluster}: {replace_exc}"
+                    logger.error(reason)
+                    return False, reason
+            elif e.status == 503:
+                reason = f"Cluster {cluster} returned 503 when deploying configmap {cm_name}: {e}"
+                logger.warning(reason)
+                return False, reason
+            else:
+                reason = f"Failed to deploy configmap {cm_name} to cluster {cluster}: {e}"
+                logger.error(reason)
+                return False, reason
+        except Exception as e:
+            reason = f"Failed to deploy configmap {cm_name} to cluster {cluster}: {e}"
+            logger.error(reason)
+            return False, reason
+
+    def _delete_config_map_from_cluster(
+        self,
+        *,
+        cluster: str,
+        name: str,
+        namespace: str,
+        timeout_seconds: int = 60,
+    ) -> None:
+        client = self._manager.get_core_client(cluster)
+        try:
+            client.delete_namespaced_config_map(
+                name=name,
+                namespace=namespace,
+                _request_timeout=self._get_request_timeout(timeout_seconds),
+            )
+        except (MaxRetryError, ConnectionTimeoutError):
+            # Cluster is unreachable, CMs will reconcile on reconnect
+            logger.debug(
+                f"Cluster {cluster} unreachable while deleting configmap {name}; will reconcile on reconnect."
+            )
+        except ApiException as e:
+            if e.status != 404:
+                raise
+
+    def _sync_cluster_configmaps(self, cluster_name: str) -> None:
+        try:
+            with get_sync_session() as session:
+                client = self._manager.get_core_client(cluster_name)
+                chute_cms: V1ConfigMapList = client.list_namespaced_config_map(
+                    settings.namespace, label_selector="chutes/code=true"
+                )
+
+                for cm in chute_cms.items:
+                    self._delete_config_map_from_cluster(
+                        cluster=cluster_name,
+                        name=cm.metadata.name,
+                        namespace=settings.namespace,
+                    )
+
+                chutes = (session.execute(select(Chute))).unique().scalars()
+                for chute in chutes:
+                    config_map = self._build_code_config_map(chute)
+                    self._deploy_config_map_to_cluster(
+                        cluster=cluster_name,
+                        config_map=config_map,
+                        namespace=settings.namespace,
+                    )
+
+            logger.info(f"Successfully synced chute configmaps for {cluster_name}")
+        except Exception as e:
+            logger.error(f"Unexpected exception syncing chute configmaps for {cluster_name}:\n{e}")
 
 
 # Abstract base class for all Kubernetes operations
@@ -554,6 +925,10 @@ class K8sOperator(abc.ABC):
 
         if node_name:
             self.invalidate_node_disk_cache(node_name)
+
+    async def delete_preflight(self, deployment_id: str, timeout_seconds: int = 120) -> bool:
+        """Hook for subclasses to veto undeploy when cache data is stale."""
+        return True
 
     @abc.abstractmethod
     def _deploy_service(
@@ -1353,8 +1728,9 @@ class MultiClusterK8sOperator(K8sOperator):
     """Kubernetes operations for multi-cluster setup."""
 
     # This class will implement the K8sOperator interface but translate operations
-    # to work with Karmada's multi-cluster orchestration
+    # to work with k3s multi-cluster orchestration
     def __init__(self):
+        self._config_map_worker: Optional[ConfigMapWorker] = None
         self._initialize()
 
     def _initialize(self):
@@ -1368,11 +1744,106 @@ class MultiClusterK8sOperator(K8sOperator):
         if not hasattr(self, "_redis"):
             self._redis = MonitoringRedisClient()
 
-        if settings.reconcile_clusters and not hasattr(self, "_watch_reconnects_task"):
-            self.watch_cluster_connections()
+        if settings.reconcile_clusters:
+            if not hasattr(self, "_watch_reconnects_task"):
+                self.watch_cluster_connections()
+
+            if not self._config_map_worker:
+                self._config_map_worker = ConfigMapWorker(
+                    redis_client=self._redis,
+                    manager=self._manager,
+                    verify_node_health=self._verify_node_health,
+                    get_request_timeout=self._get_request_timeout,
+                    build_code_config_map=self._build_code_config_map,
+                )
 
     def _get_request_timeout(self, read_timeout: int) -> Tuple[int, int]:
         return (5, read_timeout)
+
+    async def delete_preflight(self, deployment_id: str, timeout_seconds: int = 120) -> bool:
+        deployment_name = f"{CHUTE_DEPLOY_PREFIX}-{deployment_id}"
+        should_allow_delete = True
+
+        server_binding = await self._get_deployment_server_context(deployment_id)
+        context: Optional[str] = None
+        cached_job = None
+
+        if not server_binding:
+            logger.warning(
+                f"Preflight delete for {deployment_name} blocked: deployment not found in DB, unable to determine server context."
+            )
+            should_allow_delete = False
+        else:
+            server_id, server_name = server_binding
+
+            if not server_name:
+                logger.warning(
+                    f"Preflight delete for {deployment_name} blocked: server record {server_id} missing name."
+                )
+                should_allow_delete = False
+            else:
+                context, cached_job = self._redis.get_resource_with_context(
+                    resource_type=ResourceType.JOB,
+                    resource_name=deployment_name,
+                    namespace=settings.namespace,
+                )
+
+                if context and context != server_name:
+                    logger.error(
+                        f"Preflight delete for {deployment_name} blocked: cache context {context} does not match DB server {server_name}."
+                    )
+                    should_allow_delete = False
+                elif not self._cluster_is_healthy(server_name):
+                    logger.warning(
+                        f"Preflight delete for {deployment_name} blocked: cluster {server_name} unhealthy or offline."
+                    )
+                    should_allow_delete = False
+                elif cached_job and self._is_resource_stale(
+                    cluster=server_name,
+                    cached_resource=cached_job,
+                    read_live_resource=self._read_live_job,
+                    timeout_seconds=timeout_seconds,
+                ):
+                    logger.warning(
+                        f"Preflight delete for {deployment_name} on cluster {server_name} failed due to cache mismatch."
+                    )
+                    should_allow_delete = False
+                elif not context or not cached_job:
+                    logger.debug(
+                        f"Preflight bypassed for {deployment_name}: resource not found in cache but server {server_name} is healthy."
+                    )
+
+        return should_allow_delete
+
+    async def _get_deployment_server_context(
+        self, deployment_id: str
+    ) -> Optional[Tuple[str, Optional[str]]]:
+        async with get_session() as session:
+            query = (
+                select(Deployment.server_id, Server.name)
+                .select_from(Deployment)
+                .join(Server, Deployment.server_id == Server.server_id, isouter=True)
+                .where(Deployment.deployment_id == deployment_id)
+            )
+
+            result = await session.execute(query)
+            row = result.one_or_none()
+
+            if not row:
+                return None
+
+            server_id, server_name = row
+            return server_id, server_name
+
+    def _cluster_is_healthy(self, cluster: str) -> bool:
+        status = self._redis.get_cluster_status(cluster)
+        if not status or not status.is_healthy:
+            logger.warning(
+                f"Cluster {cluster} health status is {'unknown' if not status else status.state}, treating as unhealthy."
+            )
+            return False
+
+        return True
 
     async def _watch_clusters(self):
         try:
@@ -1420,7 +1891,17 @@ class MultiClusterK8sOperator(K8sOperator):
                             self._manager.multi_config.add_config(
                                 KubeConfig.from_dict(yaml.safe_load(server.kubeconfig))
                             )
-                            self._sync_chute_configmaps(message.cluster)
+
+                            if (
+                                settings.reconcile_clusters
+                                and self._config_map_worker
+                                and not self._config_map_worker.sync_cluster_configmaps(
+                                    message.cluster
+                                )
+                            ):
+                                logger.error(
+                                    f"Failed to enqueue configmap sync for cluster {message.cluster}."
+                                )
                         else:
                             logger.warning(
                                 f"Received add event for cluster {message.cluster} but no kubeconfig is set in DB."
@@ -1470,37 +1951,24 @@ class MultiClusterK8sOperator(K8sOperator):
 
     async def _handle_cluster_reconnect(self, message: ClusterReconnetMessage):
         try:
+            if not settings.reconcile_clusters:
+                return
+
+            if not self._config_map_worker:
+                logger.warning(
+                    f"Cluster {message.cluster} reconnected but config map worker is unavailable; skipping sync."
+                )
+                return
+
             logger.info(f"Cluster {message.cluster} reconnected.  Refreshing Chutes config maps.")
 
-            # Don't block in case there was a mass restart,
-            # instead dump each cluster to a thread
-            asyncio.create_task(asyncio.to_thread(self._sync_chute_configmaps, message.cluster))
+            if not self._config_map_worker.sync_cluster_configmaps(message.cluster):
+                logger.error(
+                    f"Failed to enqueue configmap sync for cluster {message.cluster} after reconnect."
+                )
 
         except Exception as e:
             logger.error(f"Unexpected exception while handling cluster change:\n{e}")
-
-    def _sync_chute_configmaps(self, cluster_name: str):
-        try:
-            with get_sync_session() as session:
-                # Get all existing CMs
-                client = self._manager.get_core_client(cluster_name)
-                chute_cms: V1ConfigMapList = client.list_namespaced_config_map(
-                    settings.namespace, label_selector="chutes/code=true"
-                )
-
-                # Delete all Chute CMs
-                for cm in chute_cms.items:
-                    self._delete_config_map_from_cluster(cluster_name, name=cm.metadata.name)
-
-                # Propagate existing Chute CMs to the cluster
-                chutes = (session.execute(select(Chute))).unique().scalars()
-                for chute in chutes:
-                    config_map = self._build_code_config_map(chute)
-                    self._deploy_config_map_to_cluster(cluster_name, config_map)
-
-            logger.info(f"Successfully synced chute configmaps for {cluster_name}")
-        except Exception as e:
-            logger.error(f"Unexpected exception syncing chute configmaps for {cluster_name}:\n{e}")
 
     def get_node(
         self, name: str, kubeconfig: Optional[KubeConfig] = None, timeout_seconds=15
@@ -1546,6 +2014,97 @@ class MultiClusterK8sOperator(K8sOperator):
         if status and not status.is_healthy:
             raise ApiException(status=503, reason=f"Node {name} is not healthy, check the agent.")
 
+    def _read_live_deployment(
+        self, cluster: str, namespace: Optional[str], name: str, timeout_seconds: int
+    ):
+        client = self._manager.get_app_client(cluster)
+        if client is None:
+            return None
+
+        return client.read_namespaced_deployment(
+            name=name,
+            namespace=namespace,
+            _request_timeout=self._get_request_timeout(timeout_seconds),
+        )
+
+    def _read_live_service(
+        self, cluster: str, namespace: Optional[str], name: str, timeout_seconds: int
+    ):
+        client = self._manager.get_core_client(cluster)
+        if client is None:
+            return None
+
+        return client.read_namespaced_service(
+            name=name,
+            namespace=namespace,
+            _request_timeout=self._get_request_timeout(timeout_seconds),
+        )
+
+    def _read_live_job(
+        self, cluster: str, namespace: Optional[str], name: str, timeout_seconds: int
+    ):
+        client = self._manager.get_batch_client(cluster)
+        if client is None:
+            return None
+
+        return client.read_namespaced_job(
+            name=name,
+            namespace=namespace,
+            _request_timeout=self._get_request_timeout(timeout_seconds),
+        )
+
+    def _is_resource_stale(
+        self,
+        *,
+        cluster: str,
+        cached_resource=None,
+        read_live_resource=None,
+        timeout_seconds: int = 120,
+    ) -> bool:
+        metadata = getattr(cached_resource, "metadata", None) if cached_resource else None
+        cached_version = getattr(metadata, "resource_version", None) if metadata else None
+        name = getattr(metadata, "name", "unknown") if metadata else "unknown"
+        namespace = getattr(metadata, "namespace", "unknown") if metadata else "unknown"
+        resource_label = (
+            getattr(cached_resource, "kind", "resource").lower() if cached_resource else "resource"
+        )
+
+        can_check_live = bool(cached_resource and cached_version and read_live_resource)
+        live_resource = None
+        is_stale = False
+
+        if can_check_live:
+            try:
+                live_resource = read_live_resource(cluster, namespace, name, timeout_seconds)
+            except ApiException as exc:
+                if exc.status != 404:
+                    reason = f"Failed to read {resource_label} {namespace}/{name} in cluster {cluster}: {exc}"
+                    self._redis.mark_cluster_unhealthy(cluster, reason)
+                    logger.warning(reason)
+                    is_stale = True
+                can_check_live = False
+            except Exception as exc:
+                reason = f"Unexpected error reading {resource_label} {namespace}/{name} in cluster {cluster}: {exc}"
+                self._redis.mark_cluster_unhealthy(cluster, reason)
+                logger.error(reason)
+                is_stale = True
+                can_check_live = False
+
+        if can_check_live and live_resource is not None:
+            live_metadata = getattr(live_resource, "metadata", None)
+            live_version = getattr(live_metadata, "resource_version", None)
+
+            if live_version and live_version != cached_version:
+                reason = (
+                    f"Resource version mismatch for {resource_label} {namespace}/{name} in cluster {cluster}: "
+                    f"cache={cached_version}, cluster={live_version}"
+                )
+                self._redis.mark_cluster_unhealthy(cluster, reason)
+                logger.warning(reason)
+                is_stale = True
+
+        return is_stale
+
     async def get_deployment(self, deployment_id: str) -> Dict:
         """Get a single Chute deployment by ID."""
         deployment_name = f"{CHUTE_DEPLOY_PREFIX}-{deployment_id}"
@@ -1587,30 +2146,33 @@ class MultiClusterK8sOperator(K8sOperator):
             )
 
     def _delete_deployment(self, name, namespace=settings.namespace, timeout_seconds: int = 120):
-        context = self._redis.get_resource_cluster(
-            resource_name=name, resource_type=ResourceType.DEPLOYMENT, namespace=namespace
+        context, cached_deployment = self._redis.get_resource_with_context(
+            resource_type=ResourceType.DEPLOYMENT,
+            resource_name=name,
+            namespace=namespace,
         )
 
-        if context:
-            client = self._manager.get_app_client(context)
-
-            try:
-                client.delete_namespaced_deployment(
-                    name=name,
-                    namespace=namespace,
-                    _request_timeout=self._get_request_timeout(timeout_seconds),
-                )
-            except ApiException as e:
-                if e.status == 404:
-                    # Not found, remove from redis
-                    self._redis.delete_resource(name, context, ResourceType.DEPLOYMENT, namespace)
-                    logger.warning(
-                        f"Attempted to delete deployment {name}, but appears to have disappeared.  Removed from redis cache."
-                    )
-                else:
-                    raise
-        else:
+        if not context:
             logger.warning(f"Attempted to delete deployment {name}, but deployment not found.")
+            return
+
+        client = self._manager.get_app_client(context)
+
+        try:
+            client.delete_namespaced_deployment(
+                name=name,
+                namespace=namespace,
+                _request_timeout=self._get_request_timeout(timeout_seconds),
+            )
+        except ApiException as e:
+            if e.status == 404:
+                # Not found, remove from redis
+                self._redis.delete_resource(name, context, ResourceType.DEPLOYMENT, namespace)
+                logger.warning(
+                    f"Attempted to delete deployment {name}, but appears to have disappeared.  Removed from redis cache."
+                )
+            else:
+                raise
 
     def _deploy_service(
         self, service, server_name, namespace=settings.namespace, timeout_seconds: int = 60
@@ -1627,53 +2189,46 @@ class MultiClusterK8sOperator(K8sOperator):
 
     def _delete_service(self, name, namespace=settings.namespace, timeout_seconds: int = 60):
         svc_name = name
-        if CHUTE_SVC_PREFIX in name:
-            # Legacy check to cleanup services with legacy prefix
-            # TODO: Remove this once legacy deployments are not found
-            resources = self._redis.get_resources(resource_type=ResourceType.SERVICE)
-            all_services = resources.services
-
-            # Find service by new or legacy name in one pass
-            target_service = None
-            legacy_name = name.replace(CHUTE_SVC_PREFIX, "chute-svc")
-            for svc in all_services:
-                svc_name = svc.metadata.name
-                if svc_name in (name, legacy_name):
-                    target_service = svc
-                    break
-
-            if not target_service:
-                logger.warning(
-                    f"Service {name} (or legacy {legacy_name}) not found in namespace {namespace}"
-                )
-                return
-
-            svc_name = target_service.metadata.name
-
-        context = self._redis.get_resource_cluster(
-            resource_name=svc_name, resource_type=ResourceType.SERVICE, namespace=namespace
+        context, cached_service = self._redis.get_resource_with_context(
+            resource_type=ResourceType.SERVICE,
+            resource_name=svc_name,
+            namespace=namespace,
         )
 
-        if context:
-            client = self._manager.get_core_client(context)
+        if not context and CHUTE_SVC_PREFIX in name:
+            legacy_name = name.replace(CHUTE_SVC_PREFIX, "chute-svc")
+            context, cached_service = self._redis.get_resource_with_context(
+                resource_type=ResourceType.SERVICE,
+                resource_name=legacy_name,
+                namespace=namespace,
+            )
+            if context:
+                svc_name = legacy_name
 
-            try:
-                client.delete_namespaced_service(
-                    name=svc_name,
-                    namespace=namespace,
-                    _request_timeout=self._get_request_timeout(timeout_seconds),
-                )
-            except ApiException as e:
-                if e.status == 404:
-                    # Not found, remove from redis
-                    self._redis.delete_resource(svc_name, context, ResourceType.SERVICE, namespace)
-                    logger.warning(
-                        f"Attempted to delete service {svc_name}, but appears to have disappeared.  Removed from redis cache."
-                    )
-                else:
-                    raise
-        else:
+        if not context:
             logger.warning(f"Attempted to delete service {svc_name}, but context not found.")
+            return
+
+        if cached_service is not None and cached_service.metadata:
+            svc_name = cached_service.metadata.name
+
+        client = self._manager.get_core_client(context)
+
+        try:
+            client.delete_namespaced_service(
+                name=svc_name,
+                namespace=namespace,
+                _request_timeout=self._get_request_timeout(timeout_seconds),
+            )
+        except ApiException as e:
+            if e.status == 404:
+                # Not found, remove from redis
+                self._redis.delete_resource(svc_name, context, ResourceType.SERVICE, namespace)
+                logger.warning(
+                    f"Attempted to delete service {svc_name}, but appears to have disappeared.  Removed from redis cache."
+                )
+            else:
+                raise
 
     def delete_config_map(self, name, namespace=settings.namespace, timeout_seconds: int = 60):
         # Create CM on all clusters
@@ -1706,17 +2261,21 @@ class MultiClusterK8sOperator(K8sOperator):
         timeout_seconds: int = 60,
         force=False,
     ):
-        # We don't want to wait for this and block the main loop
-        # Offload to a thread to update this CM across all clusters
-        asyncio.create_task(
-            asyncio.to_thread(
-                self._deploy_config_map_to_all_clusters,
-                config_map=config_map,
-                namespace=namespace,
-                timeout_seconds=timeout_seconds,
-                force=force,
-            )
+        request = ConfigMapDeployRequest(
+            config_map=config_map,
+            namespace=namespace,
+            timeout_seconds=timeout_seconds,
+            force=force,
         )
+
+        if not self._config_map_worker:
+            logger.debug(
+                f"ConfigMap worker disabled (RECONCILE_CLUSTERS=false); skipping async deploy for {config_map.metadata.name}."
+            )
+            return
+
+        if not self._config_map_worker.enqueue_deploy(request):
+            logger.error(f"ConfigMap worker failed to deploy CM for {config_map.metadata.name}.")
 
     def _deploy_config_map_to_all_clusters(
         self,
@@ -1812,9 +2371,16 @@ class MultiClusterK8sOperator(K8sOperator):
         )
 
     def _delete_job(self, name, namespace=settings.namespace, timeout_seconds: int = 120):
-        context = self._redis.get_resource_cluster(
-            resource_name=name, resource_type=ResourceType.JOB, namespace=namespace
+        context, cached_job = self._redis.get_resource_with_context(
+            resource_type=ResourceType.JOB,
+            resource_name=name,
+            namespace=namespace,
         )
+
+        if not context:
+            logger.warning(f"Attempted to delete job {name}, but context not found.")
+            return
+
         client = self._manager.get_batch_client(context)
 
         try:

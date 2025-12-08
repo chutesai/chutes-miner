@@ -1,7 +1,17 @@
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, create_autospec, patch
 
-from more_itertools import side_effect
 import pytest
+
+from chutes_common.redis import MonitoringRedisClient
+
+
+def _create_redis_mock():
+    mock_instance = create_autospec(
+        MonitoringRedisClient,
+        instance=True,
+        spec_set=True,
+    )
+    return mock_instance
 
 @pytest.fixture(scope='module')
 def mock_redis_client_instance():
@@ -11,7 +21,7 @@ def mock_redis_client_instance():
         patch('chutes_monitor.cluster_monitor.MonitoringRedisClient'),
     ]
     
-    mock_instance = AsyncMock()
+    mock_instance = _create_redis_mock()
     _patches = []
     
     for p in patches:
@@ -28,4 +38,8 @@ def mock_redis_client_instance():
 @pytest.fixture(scope='function')
 def mock_redis_client(mock_redis_client_instance):
     mock_redis_client_instance.reset_mock(side_effect=True)
+    for attr_name in dir(mock_redis_client_instance):
+        attr = getattr(mock_redis_client_instance, attr_name)
+        if isinstance(attr, AsyncMock):
+            attr.reset_mock(side_effect=True)
     yield mock_redis_client_instance

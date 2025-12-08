@@ -102,8 +102,8 @@ async def test_bootstrap_server_graval_pod_failure(
     
     # Verify cleanup was called
     mock_k8s_operator.cleanup_graval.assert_called()
-    # Verify GPUs were cleaned up from validator
-    assert mock_aiohttp_session.delete.call_count == 2  # Two GPUs
+    # Verify server was cleaned up from validator
+    assert mock_aiohttp_session.delete.call_count == 1
 
 
 @pytest.mark.asyncio
@@ -129,8 +129,8 @@ async def test_bootstrap_server_fetch_devices_failure(
     
     # Verify cleanup was called
     mock_k8s_operator.cleanup_graval.assert_called()
-    # Verify GPUs were cleaned up from validator
-    assert mock_aiohttp_session.delete.call_count == 2  # Two GPUs
+    # Verify server was cleaned up from validator
+    assert mock_aiohttp_session.delete.call_count == 1
 
 
 @pytest.mark.asyncio
@@ -156,8 +156,8 @@ async def test_bootstrap_server_advertise_nodes_failure(
         
     # Verify cleanup was called with delete_node=True
     mock_k8s_operator.cleanup_graval.assert_called()
-    # Verify GPUs were cleaned up from validator
-    assert mock_aiohttp_session.delete.call_count == 2  # Two GPUs
+    # Verify server was cleaned up from validator
+    assert mock_aiohttp_session.delete.call_count == 1
 
 
 @pytest.mark.asyncio

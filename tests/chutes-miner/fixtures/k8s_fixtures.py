@@ -7,6 +7,7 @@ import pytest
 from chutes_common.schemas.chute import Chute
 from chutes_common.schemas.gpu import GPU
 from chutes_common.schemas.server import Server
+from chutes_miner.api.config import settings as miner_settings
 
 import uuid
 import random
@@ -21,7 +22,14 @@ def mock_k8s_core_client():
 
     # Create a single mock object
     mock_client = MagicMock()
-    # mock_client.list_node.return_value = MagicMock(items=None)
+    namespace = getattr(miner_settings, "namespace", "chutes")
+
+    mock_service = MagicMock()
+    mock_service.metadata = MagicMock()
+    mock_service.metadata.name = "chute-service-test"
+    mock_service.metadata.namespace = namespace
+    mock_service.metadata.resource_version = "1"
+    mock_client.read_namespaced_service.return_value = mock_service
 
     # Create and start patches for each import path, all returning the same mock
     patches = []
@@ -44,7 +52,12 @@ def mock_k8s_app_client():
 
     # Create a single mock object
     mock_client = MagicMock()
-    # mock_client.list_node.return_value = MagicMock(items=None)
+    mock_deployment = MagicMock()
+    mock_deployment.metadata = MagicMock()
+    mock_deployment.metadata.name = "chute-deployment-test"
+    mock_deployment.metadata.namespace = getattr(miner_settings, "namespace", "chutes")
+    mock_deployment.metadata.resource_version = "1"
+    mock_client.read_namespaced_deployment.return_value = mock_deployment
 
     # Create and start patches for each import path, all returning the same mock
     patches = []
@@ -66,7 +79,12 @@ def mock_k8s_batch_client():
 
     # Create a single mock object
     mock_client = MagicMock()
-    # mock_client.list_node.return_value = MagicMock(items=None)
+    mock_job = MagicMock()
+    mock_job.metadata = MagicMock()
+    mock_job.metadata.name = "chute-job-test"
+    mock_job.metadata.namespace = getattr(miner_settings, "namespace", "chutes")
+    mock_job.metadata.resource_version = "1"
+    mock_client.read_namespaced_job.return_value = mock_job
 
     # Create and start patches for each import path, all returning the same mock
     patches = []

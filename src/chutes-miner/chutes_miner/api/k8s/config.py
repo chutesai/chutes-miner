@@ -329,9 +329,7 @@ class MultiClusterKubeConfig:
         return next((ctx for ctx in self.contexts if ctx.name == context_name))
 
     def add_config(self, other_config: KubeConfig):
-        """Add a cluster configuration from database to the consolidated config"""
-        """Add a cluster configuration from database"""
-        # other_config = KubeConfig.from_dict(yaml.safe_load(kubeconfig))
+        """Add a cluster configuration to the consolidated config"""
 
         # Merge with prefix to avoid naming conflicts
         self.kubeconfig.merge(other_config)

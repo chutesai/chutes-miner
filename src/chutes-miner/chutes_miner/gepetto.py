@@ -266,20 +266,29 @@ class Gepetto:
                     headers=headers,
                     params=params,
                 ) as resp:
+                    if resp.status == 200:
+                        return await resp.json()
+
+                    error_body = await resp.text()
                     if resp.status == 423:
-                        logger.warning(
-                            f"Unable to scale up {chute.chute_id} at this time, "
-                            f"at capacity or blocked for another reason: {await resp.text()}"
+                        message = (
+                            f"Unable to scale up {chute.chute_id} at this time. "
+                            f"Validator reported capacity issue: {error_body}"
                         )
-                    elif resp.status != 200:
-                        logger.error(
-                            f"Failed to fetch launch token: {resp.status=} -> {await resp.text()}"
+                        logger.warning(message)
+                    else:
+                        message = (
+                            f"Failed to fetch launch token for {chute.chute_id}: "
+                            f"status={resp.status}, body={error_body}"
                         )
-                    resp.raise_for_status()
-                    return await resp.json()
+                        logger.error(message)
+
+                    raise DeploymentFailure(message)
+        except DeploymentFailure:
+            raise
         except Exception as exc:
             logger.warning(f"Unable to fetch launch config token: {exc}")
-            raise DeploymentFailure(f"Failed to fetch JWT for launch: {exc}")
+            raise DeploymentFailure(f"Failed to fetch JWT for launch: {exc}") from exc
 
     async def activate(self, deployment: Deployment):
         """
@@ -381,9 +390,9 @@ class Gepetto:
                         for item in await resp.json():
                             if item.get("scalable") is False:
                                 scalable[validator.hotkey][item["chute_id"]] = False
-                                # logger.warning(
-                                #     f"Chute {item['chute_id']} is capped due to utilization: {item}"
-                                # )
+                                logger.warning(
+                                    f"Chute {item['chute_id']} is capped due to utilization: {item}"
+                                )
                             if item.get("update_in_progress") is True:
                                 scalable[validator.hotkey][item["chute_id"]] = False
                                 logger.warning(
@@ -414,9 +423,9 @@ class Gepetto:
                     # If there are no metrics, it means the chute is not being actively used, so don't scale.
                     metrics = self.remote_metrics.get(validator, {}).get(chute_id, {})
                     if not (metrics and chute_info["preemptible"]):
-                        # logger.info(
-                        #     f"No metrics for {chute_id=} {chute_name}, scaling would be unproductive..."
-                        # )
+                        logger.info(
+                            f"No metrics for {chute_id=} {chute_name}, scaling would be unproductive..."
+                        )
                         continue
 
                     # First, we need to adjust the theoretical usage based on the rate limit counts.
@@ -536,7 +545,14 @@ class Gepetto:
         """
         logger.info(f"Removing all traces of deployment: {deployment_id}")
 
-        # Clean up the database.
+        preflight_ok = await k8s.delete_preflight(deployment_id)
+        if not preflight_ok:
+            logger.warning(
+                f"Skipping undeploy for {deployment_id} because cache preflight failed; will retry later"
+            )
+            return
+
+        # Clean up the database (safe now that preflight succeeded).
         chute_id = None
         validator_hotkey = None
         async with get_session() as session:
