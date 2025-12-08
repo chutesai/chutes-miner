@@ -1646,7 +1646,7 @@ class MultiClusterK8sOperator(K8sOperator):
             self._redis = MonitoringRedisClient()
 
         if settings.reconcile_clusters:
-            if not not hasattr(self, "_watch_reconnects_task"):
+            if not hasattr(self, "_watch_reconnects_task"):
                 self.watch_cluster_connections()
             
             self._config_map_worker = ConfigMapWorker(
