@@ -70,6 +70,8 @@ import yaml
 # Cache disk stats.
 _disk_info_cache: dict[str, tuple[dict[str, float], datetime]] = {}
 _disk_info_locks: dict[str, asyncio.Lock] = {}
+
+
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -296,9 +298,7 @@ class ConfigMapWorker:
             )
             return True, None
         except (MaxRetryError, ConnectionTimeoutError) as exc:
-            reason = (
-                f"Failed to deploy {cm_name} on cluster {cluster}, unable to connect: {exc}. CMs will reconcile on reconnect."
-            )
+            reason = f"Failed to deploy {cm_name} on cluster {cluster}, unable to connect: {exc}. CMs will reconcile on reconnect."
             logger.warning(reason)
             return False, reason
         except ApiException as e:
@@ -325,9 +325,7 @@ class ConfigMapWorker:
                     )
                     return True, None
                 except ApiException as replace_exc:
-                    reason = (
-                        f"Failed to force replace configmap {cm_name} on cluster {cluster}: {replace_exc}"
-                    )
+                    reason = f"Failed to force replace configmap {cm_name} on cluster {cluster}: {replace_exc}"
                     logger.error(reason)
                     return False, reason
             elif e.status == 503:
@@ -1713,7 +1711,9 @@ class MultiClusterK8sOperator(K8sOperator):
 
         return should_allow_delete
 
-    async def _get_deployment_server_context(self, deployment_id: str) -> Optional[Tuple[str, Optional[str]]]:
+    async def _get_deployment_server_context(
+        self, deployment_id: str
+    ) -> Optional[Tuple[str, Optional[str]]]:
         async with get_session() as session:
             query = (
                 select(Deployment.server_id, Server.name)
@@ -1977,17 +1977,13 @@ class MultiClusterK8sOperator(K8sOperator):
                 live_resource = read_live_resource(cluster, namespace, name, timeout_seconds)
             except ApiException as exc:
                 if exc.status != 404:
-                    reason = (
-                        f"Failed to read {resource_label} {namespace}/{name} in cluster {cluster}: {exc}"
-                    )
+                    reason = f"Failed to read {resource_label} {namespace}/{name} in cluster {cluster}: {exc}"
                     self._redis.mark_cluster_unhealthy(cluster, reason)
                     logger.warning(reason)
                     is_stale = True
                 can_check_live = False
             except Exception as exc:
-                reason = (
-                    f"Unexpected error reading {resource_label} {namespace}/{name} in cluster {cluster}: {exc}"
-                )
+                reason = f"Unexpected error reading {resource_label} {namespace}/{name} in cluster {cluster}: {exc}"
                 self._redis.mark_cluster_unhealthy(cluster, reason)
                 logger.error(reason)
                 is_stale = True
@@ -2172,9 +2168,7 @@ class MultiClusterK8sOperator(K8sOperator):
         )
 
         if not self._config_map_worker.submit(request):
-            logger.error(
-                f"ConfigMap worker failed to deploy CM for {config_map.metadata.name}."
-            )
+            logger.error(f"ConfigMap worker failed to deploy CM for {config_map.metadata.name}.")
 
     def _deploy_config_map_to_all_clusters(
         self,

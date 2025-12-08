@@ -552,7 +552,7 @@ class Gepetto:
             )
             return
 
-    # Clean up the database (safe now that preflight succeeded).
+        # Clean up the database (safe now that preflight succeeded).
         chute_id = None
         validator_hotkey = None
         async with get_session() as session:

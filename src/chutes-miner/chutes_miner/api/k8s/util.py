@@ -37,7 +37,7 @@ CODE_VOLUME_CUTOFF_VERSION = VersionInfo.parse("0.3.61")
 
 
 def _requires_code_volume(chute: Chute) -> bool:
-    version_str = (chute.chutes_version or chute.version or "0.0.0")
+    version_str = chute.chutes_version or chute.version or "0.0.0"
     try:
         version = VersionInfo.parse(version_str)
     except ValueError:
