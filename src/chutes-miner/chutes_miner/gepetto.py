@@ -390,9 +390,9 @@ class Gepetto:
                         for item in await resp.json():
                             if item.get("scalable") is False:
                                 scalable[validator.hotkey][item["chute_id"]] = False
-                                # logger.warning(
-                                #     f"Chute {item['chute_id']} is capped due to utilization: {item}"
-                                # )
+                                logger.warning(
+                                    f"Chute {item['chute_id']} is capped due to utilization: {item}"
+                                )
                             if item.get("update_in_progress") is True:
                                 scalable[validator.hotkey][item["chute_id"]] = False
                                 logger.warning(
@@ -423,9 +423,9 @@ class Gepetto:
                     # If there are no metrics, it means the chute is not being actively used, so don't scale.
                     metrics = self.remote_metrics.get(validator, {}).get(chute_id, {})
                     if not (metrics and chute_info["preemptible"]):
-                        # logger.info(
-                        #     f"No metrics for {chute_id=} {chute_name}, scaling would be unproductive..."
-                        # )
+                        logger.info(
+                            f"No metrics for {chute_id=} {chute_name}, scaling would be unproductive..."
+                        )
                         continue
 
                     # First, we need to adjust the theoretical usage based on the rate limit counts.
