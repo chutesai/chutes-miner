@@ -227,7 +227,9 @@ class ConfigMapWorker:
             return False
 
         if not self._loop or not self._queue:
-            logger.error("Config map worker loop unavailable after start; cannot enqueue sync request.")
+            logger.error(
+                "Config map worker loop unavailable after start; cannot enqueue sync request."
+            )
             return False
 
         request = ConfigMapSyncRequest(cluster=cluster)
@@ -270,7 +272,9 @@ class ConfigMapWorker:
                 else:
                     logger.error(f"Unknown config map worker request type: {type(request)}")
             except Exception as exc:
-                logger.error(f"Unexpected error processing config map worker request {request}: {exc}")
+                logger.error(
+                    f"Unexpected error processing config map worker request {request}: {exc}"
+                )
             finally:
                 self._queue.task_done()
 
@@ -1891,7 +1895,9 @@ class MultiClusterK8sOperator(K8sOperator):
                             if (
                                 settings.reconcile_clusters
                                 and self._config_map_worker
-                                and not self._config_map_worker.sync_cluster_configmaps(message.cluster)
+                                and not self._config_map_worker.sync_cluster_configmaps(
+                                    message.cluster
+                                )
                             ):
                                 logger.error(
                                     f"Failed to enqueue configmap sync for cluster {message.cluster}."
