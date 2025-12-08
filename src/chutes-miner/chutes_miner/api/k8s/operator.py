@@ -1631,13 +1631,8 @@ class MultiClusterK8sOperator(K8sOperator):
     # This class will implement the K8sOperator interface but translate operations
     # to work with k3s multi-cluster orchestration
     def __init__(self):
+        self._config_map_worker: Optional[ConfigMapWorker] = None
         self._initialize()
-        self._config_map_worker = ConfigMapWorker(
-            redis_client=self._redis,
-            manager=self._manager,
-            verify_node_health=self._verify_node_health,
-            get_request_timeout=self._get_request_timeout,
-        )
 
     def _initialize(self):
         # Ugly pattern to ensure we don't kick this off every time singleton is called.
@@ -1650,8 +1645,16 @@ class MultiClusterK8sOperator(K8sOperator):
         if not hasattr(self, "_redis"):
             self._redis = MonitoringRedisClient()
 
-        if settings.reconcile_clusters and not hasattr(self, "_watch_reconnects_task"):
-            self.watch_cluster_connections()
+        if settings.reconcile_clusters:
+            if not not hasattr(self, "_watch_reconnects_task"):
+                self.watch_cluster_connections()
+            
+            self._config_map_worker = ConfigMapWorker(
+                redis_client=self._redis,
+                manager=self._manager,
+                verify_node_health=self._verify_node_health,
+                get_request_timeout=self._get_request_timeout,
+            )
 
     def _get_request_timeout(self, read_timeout: int) -> Tuple[int, int]:
         return (5, read_timeout)
@@ -1787,7 +1790,9 @@ class MultiClusterK8sOperator(K8sOperator):
                             self._manager.multi_config.add_config(
                                 KubeConfig.from_dict(yaml.safe_load(server.kubeconfig))
                             )
-                            self._sync_chute_configmaps(message.cluster)
+
+                            if settings.reconcile_clusters:
+                                self._sync_chute_configmaps(message.cluster)
                         else:
                             logger.warning(
                                 f"Received add event for cluster {message.cluster} but no kubeconfig is set in DB."
@@ -1837,6 +1842,9 @@ class MultiClusterK8sOperator(K8sOperator):
 
     async def _handle_cluster_reconnect(self, message: ClusterReconnetMessage):
         try:
+            if not settings.reconcile_clusters:
+                return
+
             logger.info(f"Cluster {message.cluster} reconnected.  Refreshing Chutes config maps.")
 
             # Don't block in case there was a mass restart,
@@ -2166,6 +2174,12 @@ class MultiClusterK8sOperator(K8sOperator):
             timeout_seconds=timeout_seconds,
             force=force,
         )
+
+        if not self._config_map_worker:
+            logger.debug(
+                f"ConfigMap worker disabled (RECONCILE_CLUSTERS=false); skipping async deploy for {config_map.metadata.name}."
+            )
+            return
 
         if not self._config_map_worker.submit(request):
             logger.error(f"ConfigMap worker failed to deploy CM for {config_map.metadata.name}.")
