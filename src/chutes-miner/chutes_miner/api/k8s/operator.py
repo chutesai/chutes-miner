@@ -1769,10 +1769,10 @@ class MultiClusterK8sOperator(K8sOperator):
         cached_job = None
 
         if not server_binding:
-            logger.warning(
-                f"Preflight delete for {deployment_name} blocked: deployment not found in DB, unable to determine server context."
+            logger.info(
+                f"Preflight delete for {deployment_name} allowed: deployment not found in DB, assuming orphaned deployment."
             )
-            should_allow_delete = False
+            return True
         else:
             server_id, server_name = server_binding
 
