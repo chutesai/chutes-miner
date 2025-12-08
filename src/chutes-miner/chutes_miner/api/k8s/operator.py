@@ -1,5 +1,6 @@
 import asyncio
-from datetime import datetime, timedelta
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 import json
 import math
@@ -8,6 +9,7 @@ import time
 import uuid
 import traceback
 import abc
+import threading
 from aiohttp import ConnectionTimeoutError
 import semver
 from chutes_common.monitoring.messages import (
@@ -20,7 +22,7 @@ from chutes_common.redis import MonitoringRedisClient
 from chutes_miner.api.k8s.client import KubernetesMultiClusterClientManager
 from chutes_miner.api.k8s.config import KubeConfig
 from loguru import logger
-from typing import Generator, List, Dict, Any, Optional, Tuple, Union
+from typing import Callable, Generator, List, Dict, Any, Optional, Tuple, Union
 from kubernetes import watch
 from kubernetes.client import (
     V1Deployment,
@@ -68,6 +70,278 @@ import yaml
 # Cache disk stats.
 _disk_info_cache: dict[str, tuple[dict[str, float], datetime]] = {}
 _disk_info_locks: dict[str, asyncio.Lock] = {}
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+@dataclass(slots=True)
+class ConfigMapDeployRequest:
+    config_map: V1ConfigMap
+    namespace: str
+    timeout_seconds: int = 60
+    force: bool = False
+    enqueued_at: datetime = field(default_factory=_utc_now)
+
+
+class ConfigMapWorker:
+    """Background worker that fan-outs ConfigMap updates across clusters."""
+
+    _instance: Optional["ConfigMapWorker"] = None
+    _instance_lock = threading.Lock()
+
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            with cls._instance_lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def __init__(
+        self,
+        *,
+        redis_client: MonitoringRedisClient,
+        manager: KubernetesMultiClusterClientManager,
+        verify_node_health: Callable[[str], None],
+        get_request_timeout: Callable[[int], Tuple[int, int]],
+    ):
+        if getattr(self, "_initialized", False):
+            return
+
+        self._redis = redis_client
+        self._manager = manager
+        self._verify_node_health = verify_node_health
+        self._get_request_timeout = get_request_timeout
+
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._queue: Optional[asyncio.Queue[ConfigMapDeployRequest]] = None
+        self._thread: Optional[threading.Thread] = None
+        self._worker_task: Optional[asyncio.Task] = None
+        self._queue_ready = threading.Event()
+        self._started = False
+        self._start_lock = threading.Lock()
+
+        self._initialized = True
+        self._ensure_running()
+
+    def _ensure_running(self):
+        if self._started:
+            return
+
+        with self._start_lock:
+            if self._started:
+                return
+
+            self._loop = asyncio.new_event_loop()
+            self._queue_ready.clear()
+
+            def _run_loop():
+                asyncio.set_event_loop(self._loop)
+                self._queue = asyncio.Queue()
+                self._worker_task = self._loop.create_task(self._worker())
+                self._queue_ready.set()
+                try:
+                    self._loop.run_forever()
+                except Exception as exc:
+                    logger.error(f"ConfigMapWorker loop encountered an error: {exc}")
+                finally:
+                    pending = asyncio.all_tasks()
+                    for task in pending:
+                        task.cancel()
+                    if pending:
+                        self._loop.run_until_complete(
+                            asyncio.gather(*pending, return_exceptions=True)
+                        )
+                    self._loop.close()
+                    self._started = False
+
+            self._thread = threading.Thread(
+                target=_run_loop,
+                name="ChutesConfigMapWorker",
+                daemon=True,
+            )
+            self._thread.start()
+
+            if not self._queue_ready.wait(timeout=5):
+                logger.error(
+                    "Failed to start config map worker loop; falling back to synchronous deploys."
+                )
+                self._stop_loop()
+                return
+
+            self._started = True
+
+    def _stop_loop(self):
+        try:
+            if self._loop:
+                self._loop.call_soon_threadsafe(self._loop.stop)
+        except Exception:
+            pass
+        self._loop = None
+        self._queue = None
+        self._worker_task = None
+        self._thread = None
+        self._started = False
+
+    def submit(self, request: ConfigMapDeployRequest) -> bool:
+        self._ensure_running()
+        if not self._started:
+            return False
+
+        if not self._loop or not self._queue:
+            logger.error("Config map worker loop unavailable after start; cannot submit request.")
+            return False
+
+        def _put_request():
+            try:
+                self._queue.put_nowait(request)
+            except Exception as exc:
+                logger.error(
+                    f"Failed to enqueue configmap {request.config_map.metadata.name}: {exc}"
+                )
+
+        try:
+            self._loop.call_soon_threadsafe(_put_request)
+            return True
+        except RuntimeError as exc:
+            logger.error(
+                f"Config map worker loop is not running; unable to enqueue {request.config_map.metadata.name}: {exc}"
+            )
+            return False
+
+    def process_request_sync(self, request: ConfigMapDeployRequest) -> Dict[str, str]:
+        return self._handle_request(request)
+
+    async def _worker(self):
+        logger.info("Config map deployment worker loop started.")
+        if not self._queue:
+            logger.error("Config map worker queue not initialized; terminating worker loop.")
+            return
+
+        while True:
+            try:
+                request: ConfigMapDeployRequest = await self._queue.get()
+            except asyncio.CancelledError:
+                break
+
+            try:
+                self._handle_request(request)
+            except Exception as exc:
+                logger.error(
+                    f"Unexpected error processing configmap {request.config_map.metadata.name}: {exc}"
+                )
+            finally:
+                self._queue.task_done()
+
+        logger.info("Config map deployment worker loop stopped.")
+
+    def _handle_request(self, request: ConfigMapDeployRequest) -> Dict[str, str]:
+        failures = self._deploy_config_map_to_all_clusters(
+            config_map=request.config_map,
+            namespace=request.namespace,
+            timeout_seconds=request.timeout_seconds,
+            force=request.force,
+        )
+        for cluster, reason in failures.items():
+            logger.warning(
+                f"Marking cluster {cluster} unhealthy after configmap {request.config_map.metadata.name} failure: {reason}"
+            )
+            self._redis.mark_cluster_unhealthy(cluster, reason)
+
+        return failures
+
+    def _deploy_config_map_to_all_clusters(
+        self,
+        *,
+        config_map: V1ConfigMap,
+        namespace: str,
+        timeout_seconds: int = 60,
+        force: bool = False,
+    ) -> Dict[str, str]:
+        clusters = self._redis.get_all_cluster_names()
+        failures: Dict[str, str] = {}
+        for cluster in clusters:
+            success, reason = self._deploy_config_map_to_cluster(
+                cluster=cluster,
+                config_map=config_map,
+                namespace=namespace,
+                timeout_seconds=timeout_seconds,
+                force=force,
+            )
+            if not success:
+                failures[cluster] = reason or "Unknown error"
+
+        return failures
+
+    def _deploy_config_map_to_cluster(
+        self,
+        *,
+        cluster: str,
+        config_map: V1ConfigMap,
+        namespace: str,
+        timeout_seconds: int = 60,
+        force: bool = False,
+    ) -> Tuple[bool, Optional[str]]:
+        cm_name = config_map.metadata.name
+        client: Optional[CoreV1Api] = None
+        try:
+            self._verify_node_health(cluster)
+            client = self._manager.get_core_client(cluster)
+            if client is None:
+                raise RuntimeError(f"No core client available for cluster {cluster}")
+
+            client.create_namespaced_config_map(
+                namespace=namespace,
+                body=config_map,
+                _request_timeout=self._get_request_timeout(timeout_seconds),
+            )
+            return True, None
+        except (MaxRetryError, ConnectionTimeoutError) as exc:
+            reason = (
+                f"Failed to deploy {cm_name} on cluster {cluster}, unable to connect: {exc}. CMs will reconcile on reconnect."
+            )
+            logger.warning(reason)
+            return False, reason
+        except ApiException as e:
+            if e.status == 409:
+                if not force:
+                    logger.debug(
+                        f"Configmap {cm_name} already exists on cluster {cluster}; skipping because force=False."
+                    )
+                    return True, None
+
+                logger.warning(f"Replacing configmap {cm_name} on cluster {cluster}.")
+                try:
+                    if client is None:
+                        client = self._manager.get_core_client(cluster)
+                    client.delete_namespaced_config_map(
+                        name=cm_name,
+                        namespace=namespace,
+                        _request_timeout=self._get_request_timeout(timeout_seconds),
+                    )
+                    client.create_namespaced_config_map(
+                        namespace=namespace,
+                        body=config_map,
+                        _request_timeout=self._get_request_timeout(timeout_seconds),
+                    )
+                    return True, None
+                except ApiException as replace_exc:
+                    reason = (
+                        f"Failed to force replace configmap {cm_name} on cluster {cluster}: {replace_exc}"
+                    )
+                    logger.error(reason)
+                    return False, reason
+            elif e.status == 503:
+                reason = f"Cluster {cluster} returned 503 when deploying configmap {cm_name}: {e}"
+                logger.warning(reason)
+                return False, reason
+            else:
+                reason = f"Failed to deploy configmap {cm_name} to cluster {cluster}: {e}"
+                logger.error(reason)
+                return False, reason
+        except Exception as e:
+            reason = f"Failed to deploy configmap {cm_name} to cluster {cluster}: {e}"
+            logger.error(reason)
+            return False, reason
 
 
 # Abstract base class for all Kubernetes operations
@@ -1360,6 +1634,12 @@ class MultiClusterK8sOperator(K8sOperator):
     # to work with k3s multi-cluster orchestration
     def __init__(self):
         self._initialize()
+        self._config_map_worker = ConfigMapWorker(
+            redis_client=self._redis,
+            manager=self._manager,
+            verify_node_health=self._verify_node_health,
+            get_request_timeout=self._get_request_timeout,
+        )
 
     def _initialize(self):
         # Ugly pattern to ensure we don't kick this off every time singleton is called.
@@ -1884,17 +2164,17 @@ class MultiClusterK8sOperator(K8sOperator):
         timeout_seconds: int = 60,
         force=False,
     ):
-        # We don't want to wait for this and block the main loop
-        # Offload to a thread to update this CM across all clusters
-        asyncio.create_task(
-            asyncio.to_thread(
-                self._deploy_config_map_to_all_clusters,
-                config_map=config_map,
-                namespace=namespace,
-                timeout_seconds=timeout_seconds,
-                force=force,
-            )
+        request = ConfigMapDeployRequest(
+            config_map=config_map,
+            namespace=namespace,
+            timeout_seconds=timeout_seconds,
+            force=force,
         )
+
+        if not self._config_map_worker.submit(request):
+            logger.error(
+                f"ConfigMap worker failed to deploy CM for {config_map.metadata.name}."
+            )
 
     def _deploy_config_map_to_all_clusters(
         self,
