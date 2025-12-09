@@ -1764,76 +1764,60 @@ class MultiClusterK8sOperator(K8sOperator):
         deployment_name = f"{CHUTE_DEPLOY_PREFIX}-{deployment_id}"
         should_allow_delete = True
 
-        server_binding = await self._get_deployment_server_context(deployment_id)
+        server_name = await self._get_deployment_server(deployment_id)
         context: Optional[str] = None
         cached_job = None
 
-        if not server_binding:
+        if not server_name:
             logger.info(
                 f"Preflight delete for {deployment_name} allowed: deployment not found in DB, assuming orphaned deployment."
             )
             return True
         else:
-            server_id, server_name = server_binding
+            context, cached_job = self._redis.get_resource_with_context(
+                resource_type=ResourceType.JOB,
+                resource_name=deployment_name,
+                namespace=settings.namespace,
+            )
 
-            if not server_name:
-                logger.warning(
-                    f"Preflight delete for {deployment_name} blocked: server record {server_id} missing name."
+            if context and context != server_name:
+                logger.error(
+                    f"Preflight delete for {deployment_name} blocked: cache context {context} does not match DB server {server_name}."
                 )
                 should_allow_delete = False
-            else:
-                context, cached_job = self._redis.get_resource_with_context(
-                    resource_type=ResourceType.JOB,
-                    resource_name=deployment_name,
-                    namespace=settings.namespace,
+            elif not self._cluster_is_healthy(server_name):
+                logger.warning(
+                    f"Preflight delete for {deployment_name} blocked: cluster {server_name} unhealthy or offline."
                 )
-
-                if context and context != server_name:
-                    logger.error(
-                        f"Preflight delete for {deployment_name} blocked: cache context {context} does not match DB server {server_name}."
-                    )
-                    should_allow_delete = False
-                elif not self._cluster_is_healthy(server_name):
-                    logger.warning(
-                        f"Preflight delete for {deployment_name} blocked: cluster {server_name} unhealthy or offline."
-                    )
-                    should_allow_delete = False
-                elif cached_job and self._is_resource_stale(
-                    cluster=server_name,
-                    cached_resource=cached_job,
-                    read_live_resource=self._read_live_job,
-                    timeout_seconds=timeout_seconds,
-                ):
-                    logger.warning(
-                        f"Preflight delete for {deployment_name} on cluster {server_name} failed due to cache mismatch."
-                    )
-                    should_allow_delete = False
-                elif not context or not cached_job:
-                    logger.debug(
-                        f"Preflight bypassed for {deployment_name}: resource not found in cache but server {server_name} is healthy."
-                    )
+                should_allow_delete = False
+            elif cached_job and self._is_resource_stale(
+                cluster=server_name,
+                cached_resource=cached_job,
+                read_live_resource=self._read_live_job,
+                timeout_seconds=timeout_seconds,
+            ):
+                logger.warning(
+                    f"Preflight delete for {deployment_name} on cluster {server_name} failed due to cache mismatch."
+                )
+                should_allow_delete = False
+            elif not context or not cached_job:
+                logger.debug(
+                    f"Preflight bypassed for {deployment_name}: resource not found in cache but server {server_name} is healthy."
+                )
 
         return should_allow_delete
 
-    async def _get_deployment_server_context(
-        self, deployment_id: str
-    ) -> Optional[Tuple[str, Optional[str]]]:
+    async def _get_deployment_server(self, deployment_id: str) -> Optional[str]:
         async with get_session() as session:
             query = (
-                select(Deployment.server_id, Server.name)
+                select(Server.name)
                 .select_from(Deployment)
                 .join(Server, Deployment.server_id == Server.server_id, isouter=True)
                 .where(Deployment.deployment_id == deployment_id)
             )
 
             result = await session.execute(query)
-            row = result.one_or_none()
-
-            if not row:
-                return None
-
-            server_id, server_name = row
-            return server_id, server_name
+            return result.scalar_one_or_none()
 
     def _cluster_is_healthy(self, cluster: str) -> bool:
         status = self._redis.get_cluster_status(cluster)
