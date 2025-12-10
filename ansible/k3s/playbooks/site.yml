@@ -13,6 +13,22 @@
       ansible.builtin.set_fact:
         skip_configuration: "{{ config_marker.stat.exists and 'add-nodes' in ansible_run_tags }}"
 
+    - name: Build control and worker node lists
+      ansible.builtin.set_fact:
+        control_nodes: >-
+          {{ ((groups['control'] | default([]) | map('extract', hostvars, 'ansible_host') | select('defined') | list)
+              + (groups['control'] | default([]))) | unique }}
+        worker_nodes: >-
+          {{ ((groups['workers'] | default([]) | map('extract', hostvars, 'ansible_host') | select('defined') | list)
+              + (groups['workers'] | default([]))) | unique }}
+
+    - name: Determine host identity flags
+      ansible.builtin.set_fact:
+        host_identifier: "{{ ansible_host | default(inventory_hostname) }}"
+        is_worker: "{{ (ansible_host | default(inventory_hostname)) in (worker_nodes | default([])) }}"
+        is_control: "{{ (ansible_host | default(inventory_hostname)) in (control_nodes | default([])) }}"
+        skip_common_roles: "{{ (is_worker | bool) and (is_control | bool) }}"
+
 - name: Common Setup
   hosts: all
   become: true
@@ -26,12 +42,16 @@
     - name: Include common role
       ansible.builtin.include_role:
         name: common
-      when: "not skip_configuration | default(false)"
+      when:
+        - not skip_configuration | default(false)
+        - not skip_common_roles | default(false)
 
     - name: Record common role completion
       ansible.builtin.set_fact:
         common_setup: true
-      when: "not skip_configuration | default(false)"
+      when:
+        - not skip_configuration | default(false)
+        - not skip_common_roles | default(false)
 
 - name: Setup K3S clusters
   hosts: all
@@ -46,12 +66,16 @@
     - name: Include k3s role
       ansible.builtin.include_role:
         name: k3s
-      when: "not skip_configuration | default(false)"
+      when:
+        - not skip_configuration | default(false)
+        - not skip_common_roles | default(false)
 
     - name: Record k3s role completion
       ansible.builtin.set_fact:
         k3s_setup: true
-      when: "not skip_configuration | default(false)"
+      when:
+        - not skip_configuration | default(false)
+        - not skip_common_roles | default(false)
 
 - name: GPU Setup
   hosts: workers

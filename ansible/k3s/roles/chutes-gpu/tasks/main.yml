@@ -6,7 +6,7 @@
 - name: Setup monitoring
   ansible.builtin.include_tasks: setup_monitoring.yml
   tags: monitoring
-  when: inventory_hostname not in (groups['control'] | default([]))
+  when: not (is_control | default(false))
 
 - name: Parse and distribute credentials
   ansible.builtin.include_tasks: "{{ playbook_dir }}/../tasks/charts/parse_credentials.yml"

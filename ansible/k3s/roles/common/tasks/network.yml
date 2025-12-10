@@ -34,7 +34,7 @@
     - name: Allow for control plane 
       when:
         - ufw_status['stdout'] == "Status':' active"
-        - inventory_hostname in groups['control'] | default([])
+        - is_control | default(false)
       community.general.ufw:
         rule: allow
         port: "{{ item.port }}"
