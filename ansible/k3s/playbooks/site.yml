@@ -27,6 +27,9 @@
         host_identifier: "{{ ansible_host | default(inventory_hostname) }}"
         is_worker: "{{ (ansible_host | default(inventory_hostname)) in (worker_nodes | default([])) }}"
         is_control: "{{ (ansible_host | default(inventory_hostname)) in (control_nodes | default([])) }}"
+
+    - name: Set skip-common flag for shared hosts
+      ansible.builtin.set_fact:
         skip_common_roles: "{{ (is_worker | bool) and (is_control | bool) }}"
 
 - name: Common Setup
