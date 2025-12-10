@@ -3,6 +3,7 @@ import asyncio
 import logging
 import os
 from typing import Any, Callable, Optional
+from urllib.parse import urlparse
 from chutes_agent.k8s import KubernetesResourceType
 from chutes_common.monitoring.models import ClusterState, MonitoringState, MonitoringStatus
 from chutes_common.k8s import WatchEvent, WatchEventType, serializer
@@ -83,8 +84,21 @@ class ResourceMonitor:
             if os.path.exists(self._control_plane_url_file):
                 with open(self._control_plane_url_file, "r") as f:
                     url = f.read().strip()
+                if not url:
+                    raise ValueError("Persisted control plane URL file is empty")
+
+                parsed_url = urlparse(url)
+                if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+                    raise ValueError("Persisted control plane URL is invalid")
+
                 logger.debug(f"Loaded control plane URL from {self._control_plane_url_file}")
                 return url
+        except ValueError as e:
+            error_message = f"Invalid persisted control plane URL: {e}"
+            logger.error(error_message)
+            self.state = MonitoringState.ERROR
+            self.status.error_message = error_message
+            raise
         except Exception as e:
             logger.warning(f"Failed to load control plane URL: {e}")
         return None
