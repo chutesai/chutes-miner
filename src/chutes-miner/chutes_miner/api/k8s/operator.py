@@ -2065,9 +2065,8 @@ class MultiClusterK8sOperator(K8sOperator):
         cached_version = getattr(metadata, "resource_version", None) if metadata else None
         name = getattr(metadata, "name", "unknown") if metadata else "unknown"
         namespace = getattr(metadata, "namespace", "unknown") if metadata else "unknown"
-        resource_label = (
-            getattr(cached_resource, "kind", "resource").lower() if cached_resource else "resource"
-        )
+        raw_kind = getattr(cached_resource, "kind", None) if cached_resource else None
+        resource_label = (raw_kind or "resource").lower()
 
         can_check_live = bool(cached_resource and cached_version and read_live_resource)
         live_resource = None
