@@ -329,16 +329,18 @@ class ConfigMapWorker:
         namespace: str,
         timeout_seconds: int = 60,
         force: bool = False,
+        client: Optional[CoreV1Api] = None,
     ) -> Tuple[bool, Optional[str]]:
         cm_name = config_map.metadata.name
-        client: Optional[CoreV1Api] = None
+        core_client: Optional[CoreV1Api] = client
         try:
             self._verify_node_health(cluster)
-            client = self._manager.get_core_client(cluster)
-            if client is None:
+            if core_client is None:
+                core_client = self._manager.get_core_client(cluster)
+            if core_client is None:
                 raise RuntimeError(f"No core client available for cluster {cluster}")
 
-            client.create_namespaced_config_map(
+            core_client.create_namespaced_config_map(
                 namespace=namespace,
                 body=config_map,
                 _request_timeout=self._get_request_timeout(timeout_seconds),
@@ -358,14 +360,14 @@ class ConfigMapWorker:
 
                 logger.warning(f"Replacing configmap {cm_name} on cluster {cluster}.")
                 try:
-                    if client is None:
-                        client = self._manager.get_core_client(cluster)
-                    client.delete_namespaced_config_map(
+                    if core_client is None:
+                        core_client = self._manager.get_core_client(cluster)
+                    core_client.delete_namespaced_config_map(
                         name=cm_name,
                         namespace=namespace,
                         _request_timeout=self._get_request_timeout(timeout_seconds),
                     )
-                    client.create_namespaced_config_map(
+                    core_client.create_namespaced_config_map(
                         namespace=namespace,
                         body=config_map,
                         _request_timeout=self._get_request_timeout(timeout_seconds),
@@ -414,29 +416,48 @@ class ConfigMapWorker:
 
     def _sync_cluster_configmaps(self, cluster_name: str) -> None:
         try:
+            client = self._manager.get_core_client(cluster_name)
+            if client is None:
+                raise RuntimeError(f"No core client available for cluster {cluster_name}")
+
             with get_sync_session() as session:
-                client = self._manager.get_core_client(cluster_name)
-                chute_cms: V1ConfigMapList = client.list_namespaced_config_map(
-                    settings.namespace, label_selector="chutes/code=true"
+                try:
+                    client.delete_collection_namespaced_config_map(
+                        namespace=settings.namespace,
+                        label_selector="chutes/code=true",
+                        _request_timeout=self._get_request_timeout(60),
+                    )
+                except ApiException as exc:
+                    # 404/410 simply mean there was nothing to delete.
+                    if exc.status not in (404, 410):
+                        raise
+
+                chutes = (
+                    session.execute(select(Chute))
+                    .unique()
+                    .scalars()
+                    .all()
                 )
 
-                for cm in chute_cms.items:
-                    self._delete_config_map_from_cluster(
-                        cluster=cluster_name,
-                        name=cm.metadata.name,
-                        namespace=settings.namespace,
-                    )
+            failures: Dict[str, str] = {}
+            for chute in chutes:
+                config_map = self._build_code_config_map(chute)
+                success, reason = self._deploy_config_map_to_cluster(
+                    cluster=cluster_name,
+                    config_map=config_map,
+                    namespace=settings.namespace,
+                    client=client,
+                )
+                if not success:
+                    failures[config_map.metadata.name] = reason or "Unknown error"
 
-                chutes = (session.execute(select(Chute))).unique().scalars()
-                for chute in chutes:
-                    config_map = self._build_code_config_map(chute)
-                    self._deploy_config_map_to_cluster(
-                        cluster=cluster_name,
-                        config_map=config_map,
-                        namespace=settings.namespace,
+            if failures:
+                for cm_name, reason in failures.items():
+                    logger.warning(
+                        f"Failed to sync configmap {cm_name} for cluster {cluster_name}: {reason}"
                     )
-
-            logger.info(f"Successfully synced chute configmaps for {cluster_name}")
+            else:
+                logger.info(f"Successfully synced chute configmaps for {cluster_name}")
         except Exception as e:
             logger.error(f"Unexpected exception syncing chute configmaps for {cluster_name}:\n{e}")
 
