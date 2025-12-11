@@ -107,6 +107,8 @@ async def resource_monitor(
     """Create ResourceMonitor instance for testing"""
     from chutes_agent.monitor import ResourceMonitor
     monitor = ResourceMonitor()
+    original_stop = monitor.stop
 
     yield monitor
+    monitor.stop = original_stop
     await monitor.stop()
