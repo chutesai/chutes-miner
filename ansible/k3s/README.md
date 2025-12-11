@@ -90,6 +90,16 @@ ssh_args = -o ControlMaster=auto -o ControlPersist=2m
 
 If you haven't already gone through the local configuratoin setup, go setup your local inventory and values according to the [pre-requisites](../../README.md#2-configure-prerequisites).
 
+### Single-node control + GPU deployments
+
+Some providers only expose a single powerful node that must act as both the control-plane host and the GPU worker. To support this topology:
+
+1. In the Helm values file referenced by `chart_values`, set `multiCluster: false` for the `chutes-miner` and `chutes-miner-gpu` charts. This allows the control-plane services to use the correct k8s operator to manage services on the same node.
+2. The playbooks now detect when a host belongs to both the `control` and `workers` groups and automatically install the GPU chart with the release name `chutes-gpu` to avoid clashing with the control-plane release (`chutes`).
+
+**NOTE** If you use a single node for CPU and GPU you will not be able to add any additional nodes due to the conflict with k8s interactions.  The control components either expect to look within a unified cluster for workload resources or to standalone nodes for workload resources.
+
+
 ## 4. Bootstrap the nodes
 
 ### Bootstrap

@@ -211,7 +211,7 @@
       changed_when: nvidia_permissions.changed | default(false)
 
     - name: Create NVIDIA character device symlinks
-      when: inventory_hostname in groups['workers']
+      when: is_worker | default(false)
       ansible.builtin.shell:
         cmd: |
           set -o pipefail

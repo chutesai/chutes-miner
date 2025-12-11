@@ -26,7 +26,7 @@
         merge_type: strategic-merge
         
 - name: Add worker labels to nodes
-  when: inventory_hostname in groups['workers']
+  when: is_worker | default(false)
   block:
     - name: Add worker label
       kubernetes.core.k8s:

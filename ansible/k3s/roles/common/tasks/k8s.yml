@@ -43,7 +43,7 @@
   when: containerd_config_file.stat.exists
 
 - name: Setup KTX
-  when: inventory_hostname in groups['control']
+  when: is_control | default(false)
   block:
     - name: Get KTX script
       ansible.builtin.get_url:
