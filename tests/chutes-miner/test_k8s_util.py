@@ -1,3 +1,4 @@
+import pytest
 from types import SimpleNamespace
 
 from kubernetes.client import V1Service, V1ServiceSpec, V1ServicePort
@@ -72,6 +73,15 @@ def test_build_chute_job_skips_code_volume_for_min_version():
 
 def test_build_chute_job_skips_code_volume_for_newer_version():
     job = _build_job("0.3.65")
+    volumes = job.spec.template.spec.volumes
+    mounts = job.spec.template.spec.containers[0].volume_mounts
+
+    assert all(volume.name != "code" for volume in volumes)
+    assert all(mount.name != "code" for mount in mounts)
+
+@pytest.mark.parametrize("version", ["0.4.0.rc2", "0.4.0.rc16", "0.4.49.rc100"])
+def test_build_chute_job_skips_code_volume_for_newer_rc_version(version):
+    job = _build_job(version)
     volumes = job.spec.template.spec.volumes
     mounts = job.spec.template.spec.containers[0].volume_mounts
 

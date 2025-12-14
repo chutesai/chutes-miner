@@ -36,8 +36,18 @@ from semver import VersionInfo
 CODE_VOLUME_CUTOFF_VERSION = VersionInfo.parse("0.3.61")
 
 
+def _normalize_chutes_version(version_str: str) -> str:
+    """Ensure rc prerelease tags match semver expectations."""
+    if ".rc" in version_str and "-rc" not in version_str:
+        prefix, suffix = version_str.split(".rc", 1)
+        if prefix and suffix:
+            return f"{prefix}-rc{suffix}"
+    return version_str
+
+
 def _requires_code_volume(chute: Chute) -> bool:
     version_str = chute.chutes_version or chute.version or "0.0.0"
+    version_str = _normalize_chutes_version(version_str)
     try:
         version = VersionInfo.parse(version_str)
     except ValueError:
