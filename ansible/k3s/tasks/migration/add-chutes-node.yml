@@ -29,10 +29,10 @@
         max_retries: 9 # Maximum number of retry attempts
         initial_delay: 30 # Initial delay before first check
 
-    - name: Check if agent service is available at {{ ansible_host }}:32000/ping
+    - name: Check if agent service is available at {{ public_ip }}:32000/ping
       become: false
       ansible.builtin.uri:
-        url: "http://{{ ansible_host }}:32000/ping"
+        url: "http://{{ public_ip }}:32000/ping"
         method: GET
         status_code: 200
         timeout: 10
@@ -51,7 +51,7 @@
 
     - name: Fail if service is not available
       ansible.builtin.fail:
-        msg: "Service at http://{{ ansible_host }}:32000/ping is not available after {{ max_retries | default(9) }} retries"
+        msg: "Service at http://{{ public_ip }}:32000/ping is not available after {{ max_retries | default(9) }} retries"
       when: service_check.status | default(0) != 200
 
     - name: Run add node command remotely
@@ -61,7 +61,7 @@
         --validator 5Dt7HZ7Zpw4DppPxFM7Ke3Cm7sDAWhsZXmM5ZAmE7dSVJbcQ
         --hourly-cost {{ chutes_nodes[inventory_hostname]['hourly_cost'] }}
         --gpu-short-ref {{ chutes_nodes[inventory_hostname]['gpu_type'] }}
-        --agent-api "http://{{ ansible_host }}:32000"
+        --agent-api "http://{{ public_ip }}:32000"
       register: remote_add_output
       delegate_to: "{{ groups['control'][0] }}"
       failed_when: remote_add_output.rc != 0
@@ -71,12 +71,12 @@
     - name: Run add node command locally
       ansible.builtin.command: >
         chutes-miner add-node --name {{ inventory_hostname }}  --hotkey {{ hotkey_path }}
-        --miner-api http://{{ hostvars[groups['control'][0]]['ansible_host'] }}:{{ miner_api_port | default(32000) }}
+        --miner-api http://{{ hostvars[groups['control'][0]]['public_ip'] }}:{{ miner_api_port | default(32000) }}
         --hotkey {{ hotkey_path }}
         --validator 5Dt7HZ7Zpw4DppPxFM7Ke3Cm7sDAWhsZXmM5ZAmE7dSVJbcQ
         --hourly-cost {{ chutes_nodes[inventory_hostname]['hourly_cost'] }}
         --gpu-short-ref {{ chutes_nodes[inventory_hostname]['gpu_type'] }}
-        --agent-api "http://{{ ansible_host }}:32000"
+        --agent-api "http://{{ public_ip }}:32000"
       register: local_add_output
       failed_when: local_add_output.rc != 0
       become: false

@@ -22,7 +22,7 @@
         definition:
           metadata:
             labels:
-              chutes/external-ip: "{{ ansible_host }}"
+              chutes/external-ip: "{{ public_ip }}"
         merge_type: strategic-merge
         
 - name: Add worker labels to nodes
