@@ -269,7 +269,7 @@
     # Test miner API connection from localhost
     - name: Test connection to miner API from localhost
       ansible.builtin.uri:
-        url: "http://{{ ansible_host }}:{{ miner_api_port | default(32000) }}/ping"
+        url: "http://{{ public_ip }}:{{ miner_api_port | default(32000) }}/ping"
         method: GET
         validate_certs: false
         status_code: 200
@@ -286,7 +286,7 @@
     - name: Run local-inventory command locally
       ansible.builtin.command: >
         chutes-miner local-inventory  --hotkey {{ hotkey_path }}
-        --miner-api http://{{ ansible_host }}:{{ miner_api_port | default(32000) }}
+        --miner-api http://{{ public_ip }}:{{ miner_api_port | default(32000) }}
       register: local_inventory_result_local
       failed_when: local_inventory_result_local.rc != 0
       changed_when: false
