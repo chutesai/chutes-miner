@@ -1485,19 +1485,18 @@ class Gepetto:
             for deployment in sorted(server.deployments, key=get_deployment_multiplier):
                 # Never preempt jobs.
                 if deployment.job_id:
-                    logger.warning(f"Cannot preempt job deployments: {deployment.job_id=}")
                     continue
 
                 # Never preempt non-preemptible (private) deployments.
                 if not deployment.preemptible:
-                    logger.warning(f"Skipping un-preemptible deployment: {deployment.chute_id=}")
                     continue
 
-                # Can't preempt deployments that haven't been verified yet.
-                if not deployment.verified_at:
-                    logger.warning(
-                        f"Cannot preempt unverified deployment: {deployment.deployment_id}"
-                    )
+                # Can't preempt deployments that aren't active (still booting).
+                if not deployment.activated_at:
+                    continue
+
+                # Make sure we don't replace an instance of the target chute.
+                if deployment.chute_id == chute.chute_id:
                     continue
 
                 # Can't preempt deployments that are too new (< 62 minutes since activation).
