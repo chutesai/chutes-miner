@@ -280,7 +280,6 @@ class Gepetto:
                 params = {"chute_id": chute.chute_id}
                 if job_id:
                     params["job_id"] = job_id
-                logger.warning(f"SENDING LAUNCH TOKEN REQUEST WITH {headers=}")
                 async with session.get(
                     f"{validator.api}/instances/launch_config",
                     headers=headers,
@@ -436,11 +435,21 @@ class Gepetto:
                     if not potential_server:
                         continue
 
-                    # Value = effective_multiplier / hourly cost per GPU
-                    # Higher multiplier and lower cost = better value
+                    # XXX Miners you can choose two options here:
+                    # 1. use the effective multiplier directly, which
+                    #    can increase your overall score, but leave your
+                    #    theoretical max incentive lacking in the sense that
+                    #    you may be using more powerful servers than necessary
+                    #    for a given chute.
+                    # 2. use the effective multiplier scaled by GPU costs, which
+                    #    maximize the efficiency/value but may leave some incentive
+                    #    on the table.
+                    # Default strategy is to maximize value, i.e. highest multiplier per GPU/option 2.
                     chute_value = effective_multiplier / (
                         potential_server.hourly_cost * chute.gpu_count
                     )
+                    # alternative
+                    # chute_value = effective_multiplier
 
                     chute_values.append((validator, chute_id, chute_value, effective_multiplier))
 
@@ -449,7 +458,7 @@ class Gepetto:
                     continue
 
         if not chute_values:
-            logger.debug("No chutes available to scale.")
+            logger.info("No chutes available to scale.")
             return
 
         # Sort by value and attempt to deploy the highest value chute
