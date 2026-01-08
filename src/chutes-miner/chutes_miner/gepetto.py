@@ -17,7 +17,6 @@ from loguru import logger
 from typing import Dict, Any, Optional
 from sqlalchemy import select, func, case, text, or_, update
 from sqlalchemy.orm import selectinload
-from prometheus_api_client import PrometheusConnect
 from chutes_miner.api.config import settings, validator_by_hotkey
 from chutes_miner.api.redis_pubsub import RedisListener
 from chutes_common.auth import sign_request
@@ -43,6 +42,8 @@ class Gepetto:
         self.remote_instances = {validator.hotkey: {} for validator in settings.validators}
         self.remote_nodes = {validator.hotkey: {} for validator in settings.validators}
         self.remote_metrics = {validator.hotkey: {} for validator in settings.validators}
+        # Global active instances across all miners (for preemption decisions)
+        self.global_active_instances = {validator.hotkey: [] for validator in settings.validators}
         self._scale_lock = asyncio.Lock()
         self._restart_lock = asyncio.Lock()
         self.setup_handlers()
@@ -111,6 +112,23 @@ class Gepetto:
             if updated_items or explicit_null:
                 pointer[hotkey] = updated_items
 
+    async def _refresh_global_active_instances(self, validator):
+        """
+        Refresh global active instances from the validator.
+        This endpoint returns all active instances across all miners.
+        """
+        try:
+            async with aiohttp.ClientSession(raise_for_status=True) as session:
+                headers, _ = sign_request(purpose="miner")
+                async with session.get(
+                    f"{validator.api}/miner/active_instances/", headers=headers
+                ) as resp:
+                    self.global_active_instances[validator.hotkey] = await resp.json()
+        except Exception as exc:
+            logger.error(
+                f"Failed to refresh global active instances from {validator.hotkey}: {exc}"
+            )
+
     async def remote_refresh_all(self):
         """
         Refresh chutes from the validators.
@@ -130,6 +148,8 @@ class Gepetto:
                     f"{validator.api}/miner/{clazz}/",
                     id_field,
                 )
+            # Also refresh global active instances for preemption decisions
+            await self._refresh_global_active_instances(validator)
 
     @staticmethod
     async def load_chute(chute_id: str, version: str, validator: str):
@@ -260,7 +280,6 @@ class Gepetto:
                 params = {"chute_id": chute.chute_id}
                 if job_id:
                     params["job_id"] = job_id
-                logger.warning(f"SENDING LAUNCH TOKEN REQUEST WITH {headers=}")
                 async with session.get(
                     f"{validator.api}/instances/launch_config",
                     headers=headers,
@@ -370,15 +389,13 @@ class Gepetto:
 
     async def _autoscale(self):
         """
-        Autoscale chutes, based on metrics and server availability.
+        Autoscale chutes based on effective_compute_multiplier.
+
+        The effective_compute_multiplier is the sole metric that matters for incentive.
+        It includes all bonuses (bounty age, urgency, TEE, private) baked in at activation.
         """
-        for validator in settings.validators:
-            await self._remote_refresh_objects(
-                self.remote_metrics,
-                validator.hotkey,
-                f"{validator.api}/miner/metrics/",
-                "chute_id",
-            )
+        # Refresh remote data - chutes, instances, etc. change dynamically
+        await self.remote_refresh_all()
 
         # Load chute utilization to see if it can scale.
         scalable = {}
@@ -390,23 +407,16 @@ class Gepetto:
                         for item in await resp.json():
                             if item.get("scalable") is False:
                                 scalable[validator.hotkey][item["chute_id"]] = False
-                                logger.warning(
-                                    f"Chute {item['chute_id']} is capped due to utilization: {item}"
-                                )
                             if item.get("update_in_progress") is True:
                                 scalable[validator.hotkey][item["chute_id"]] = False
-                                logger.warning(
-                                    f"Chute {item['chute_id']} is updating, cannot scale now: {item}"
-                                )
                 except Exception as exc:
                     logger.error(f"Failed to fetch chute utilization from {validator=}: {exc}")
 
-        # Count the number of deployments for each chute
+        # Evaluate chutes by effective_compute_multiplier / cost ratio
         chute_values = []
         for validator, chutes in self.remote_chutes.items():
             for chute_id, chute_info in chutes.items():
                 try:
-                    chute_name = chute_info.get("name")
                     chute = await self.load_chute(chute_id, chute_info["version"], validator)
                     if not chute:
                         continue
@@ -415,96 +425,56 @@ class Gepetto:
                     if scalable.get(validator, {}).get(chute_id) not in (None, True):
                         continue
 
-                    # Count how many deployments we already have (excluding jobs).
-                    local_count = await self.count_non_job_deployments(
-                        chute_id, chute_info["version"], validator
-                    )
-
-                    # If there are no metrics, it means the chute is not being actively used, so don't scale.
-                    metrics = self.remote_metrics.get(validator, {}).get(chute_id, {})
-                    if not (metrics and chute_info["preemptible"]):
-                        logger.info(
-                            f"No metrics for {chute_id=} {chute_name}, scaling would be unproductive..."
-                        )
+                    # Get effective compute multiplier - this is what determines incentive
+                    effective_multiplier = chute_info.get("effective_compute_multiplier", 1.0)
+                    if effective_multiplier <= 0:
                         continue
 
-                    # First, we need to adjust the theoretical usage based on the rate limit counts.
-                    rate_limited = metrics.get("rate_limit_count")
-                    if metrics.get("instance_count") and metrics["instance_count"] >= 5:
-                        # We try up to 5 miners so the rate limit count can be artificially high.
-                        rate_limited /= 5
-
-                    # Calculate approximate compute units.
-                    compute_units = metrics.get("total_compute_time")
-                    if metrics.get("compute_multiplier"):
-                        compute_units *= metrics["compute_multiplier"]
-                    per_invocation = compute_units / (metrics.get("total_invocations", 0) or 1.0)
-                    theoretical = compute_units
-                    if per_invocation and rate_limited:
-                        theoretical += rate_limited * per_invocation
-
-                    # Calculate potential gain from a new deployment.
-                    total_count = metrics.get("instance_count", 0)
-                    potential_gain = theoretical
-                    if total_count:
-                        potential_gain /= total_count + 1
-
-                    # See if we have a server that could even handle it.
+                    # See if we have a server that could handle it.
                     potential_server = await self.optimal_scale_up_server(chute)
                     if not potential_server:
-                        logger.info(f"No viable server to scale {chute_id=} {chute_name}")
                         continue
 
-                    # Calculate value ratio
-                    chute_value = potential_gain / (potential_server.hourly_cost * chute.gpu_count)
-
-                    # Adjust chute_value for private chutes, which have a much different compute_units value of
-                    # number of seconds * compute multiplier * 16.
-                    if not chute_info["preemptible"]:
-                        compute_units = (
-                            60 * 60 * chute_info["compute_multiplier"] * 16
-                        )  # metrics here are for last hour.
-                        chute_value = compute_units / (
-                            potential_server.hourly_cost * chute.gpu_count
-                        )
-                        logger.info(f"Overriding private chute potential value: {chute_value=}")
-
-                    logger.info(
-                        f"Estimated {potential_gain=} for name={chute_name} "
-                        f"chute_id={chute_info['chute_id']} on {validator=}, "
-                        f"optimal server hourly cost={potential_server.hourly_cost} "
-                        f"on server {potential_server.name}, {chute_value=} "
-                        f"{local_count=} {total_count=}"
+                    # XXX Miners you can choose two options here:
+                    # 1. use the effective multiplier directly, which
+                    #    can increase your overall score, but leave your
+                    #    theoretical max incentive lacking in the sense that
+                    #    you may be using more powerful servers than necessary
+                    #    for a given chute.
+                    # 2. use the effective multiplier scaled by GPU costs, which
+                    #    maximize the efficiency/value but may leave some incentive
+                    #    on the table.
+                    # Default strategy is to maximize value, i.e. highest multiplier per GPU/option 2.
+                    chute_value = effective_multiplier / (
+                        potential_server.hourly_cost * chute.gpu_count
                     )
-                    chute_values.append((validator, chute_id, chute_value))
+                    # alternative
+                    # chute_value = effective_multiplier
+
+                    chute_values.append((validator, chute_id, chute_value, effective_multiplier))
 
                 except Exception as e:
                     logger.error(f"Error processing chute {chute_id}: {e}")
                     continue
 
         if not chute_values:
-            logger.info("No benefit in scaling, or no ability to do so...")
+            logger.info("No chutes available to scale.")
             return
 
         # Sort by value and attempt to deploy the highest value chute
         chute_values.sort(key=lambda x: x[2], reverse=True)
-        for idx in range(len(chute_values)):
-            best_validator, best_chute_id, best_value = chute_values[idx]
-            if (
-                chute := await self.load_chute(
-                    best_chute_id,
-                    self.remote_chutes[best_validator][best_chute_id]["version"],
-                    best_validator,
-                )
-            ) is not None:
-                current_count = await self.count_non_job_deployments(
-                    best_chute_id, chute.version, best_validator
-                )
-                logger.info(
-                    f"Attempting to scale up {chute.chute_id=} {chute.name=} for validator {best_validator}"
-                )
-                if await self.scale_chute(chute, current_count + 1, preempt=False):
-                    break
+        for validator, chute_id, value, multiplier in chute_values:
+            chute_info = self.remote_chutes[validator].get(chute_id, {})
+            chute = await self.load_chute(chute_id, chute_info.get("version"), validator)
+            if chute is None:
+                continue
+
+            logger.info(
+                f"Scaling {chute.name} ({chute_id}) effective_multiplier={multiplier:.2f} value={value:.4f}"
+            )
+            current_count = await self.count_non_job_deployments(chute_id, chute.version, validator)
+            if await self.scale_chute(chute, current_count + 1, preempt=False):
+                break
 
     async def autoscaler(self):
         """
@@ -1371,9 +1341,35 @@ class Gepetto:
                     return server
         return None
 
+    def _get_global_instance_count(self, validator: str, chute_id: str) -> int:
+        """
+        Get the global instance count for a chute from the active_instances endpoint.
+        """
+        count = 0
+        for instance in self.global_active_instances.get(validator, []):
+            if instance.get("chute_id") == chute_id:
+                count += 1
+        return count
+
+    def _get_instance_multiplier_from_global(self, validator: str, instance_id: str) -> float:
+        """
+        Get compute_multiplier for an instance from global_active_instances.
+        Returns 0.0 if not found.
+        """
+        for instance in self.global_active_instances.get(validator, []):
+            if instance.get("instance_id") == instance_id:
+                return float(instance.get("compute_multiplier", 0.0))
+        return 0.0
+
     async def preempting_deploy(self, chute: Chute, job_id: str = None, disk_gb: int = 10):
         """
-        Force deploy a chute by preempting other deployments (assuming a server exists that can be used).
+        Force deploy a chute by preempting other deployments.
+
+        Preemption rules:
+        - Never preempt non-preemptible (private) deployments
+        - Never preempt the only global instance of a chute
+        - Never preempt if existing instance's multiplier >= new chute's effective_multiplier
+        - Sort by instance compute_multiplier (lowest first) to preempt least valuable
         """
         if chute.ban_reason:
             logger.warning(
@@ -1383,33 +1379,25 @@ class Gepetto:
 
         supported_gpus = list(chute.supported_gpus)
 
-        # Get the prometheus data for staleness check
-        prom = PrometheusConnect(url=settings.prometheus_url)
-        last_invocations = {}
-        try:
-            result = prom.custom_query("max by (chute_id) (invocation_last_timestamp)")
-            for metric in result:
-                chute_id = metric["metric"]["chute_id"]
-                timestamp = datetime.fromtimestamp(float(metric["value"][1]))
-                last_invocations[chute_id] = timestamp.replace(tzinfo=None)
-        except Exception as e:
-            logger.error(f"Failed to fetch prometheus metrics: {e}")
+        # Get the new chute's effective multiplier - this is what we'd gain
+        new_chute_info = self.remote_chutes.get(chute.validator, {}).get(chute.chute_id, {})
+        new_effective_multiplier = new_chute_info.get("effective_compute_multiplier", 1.0)
 
-        # Calculate value metrics for each chute per validator
-        chute_values = {}
-        for chute_id, metric in self.remote_metrics.get(chute.validator, {}).items():
-            instance_count = metric["instance_count"]
-            rate_limited = metric.get("rate_limit_count", 0)
-            if instance_count and instance_count >= 5:
-                rate_limited = rate_limited / 5
-            total_usage_usd = metric.get("total_usage_usd", 0)
-            total_invocations = metric.get("total_invocations", 0)
-            per_invocation_cost = total_usage_usd / (total_invocations or 1.0)
-            theoretical_usage = total_usage_usd
-            if per_invocation_cost and rate_limited:
-                theoretical_usage += rate_limited * per_invocation_cost
-            value_per_instance = 0 if not instance_count else theoretical_usage / instance_count
-            chute_values[chute_id] = value_per_instance
+        # Check if we already have a deployment in progress (not yet activated) for this chute
+        async with get_session() as session:
+            pending_deployment = (
+                await session.execute(
+                    select(Deployment)
+                    .where(Deployment.chute_id == chute.chute_id)
+                    .where(Deployment.validator == chute.validator)
+                    .where(Deployment.activated_at.is_(None))
+                )
+            ).scalar_one_or_none()
+            if pending_deployment:
+                logger.warning(
+                    f"Already have a pending deployment for {chute.chute_id=}: {pending_deployment.deployment_id}"
+                )
+                return False
 
         # Find all servers that support this chute, sorted by cheapest & most already free GPUs.
         total_gpus_per_server = (
@@ -1470,10 +1458,12 @@ class Gepetto:
             if await k8s.check_node_has_disk_available(server.name, disk_gb)
         ]
 
-        # Iterate through servers to see if any *could* handle preemption.
-        chute_counts = {}
-        for chute_id, metrics in self.remote_metrics.get(chute.validator, {}).items():
-            chute_counts[chute_id] = metrics.get("instance_count", 0)
+        # Build global instance counts from global_active_instances
+        global_counts = {}
+        for instance in self.global_active_instances.get(chute.validator, []):
+            cid = instance.get("chute_id")
+            global_counts[cid] = global_counts.get(cid, 0) + 1
+
         to_preempt = None
         target_server = None
         for server in servers:
@@ -1485,36 +1475,31 @@ class Gepetto:
                 target_server = server
                 break
 
-            proposed_counts = deepcopy(chute_counts)
+            proposed_counts = deepcopy(global_counts)
             to_delete = []
-            for deployment in sorted(
-                server.deployments, key=lambda d: chute_values.get(d.chute_id, 0.0)
-            ):
+
+            # Sort deployments by their instance compute_multiplier (lowest first = best to preempt)
+            def get_deployment_multiplier(d):
+                return self._get_instance_multiplier_from_global(chute.validator, d.instance_id)
+
+            for deployment in sorted(server.deployments, key=get_deployment_multiplier):
                 # Never preempt jobs.
                 if deployment.job_id:
-                    logger.warning(f"Cannot preempt job deployments: {deployment.job_id=}")
                     continue
 
-                # Ignore un-preemptible deployments.
+                # Never preempt non-preemptible (private) deployments.
                 if not deployment.preemptible:
-                    logger.warning(f"Skipping un-preemptible deployment: {deployment.chute_id=}")
                     continue
 
-                # Make sure we aren't pointlessly preempting (already have a deployment in progress).
+                # Can't preempt deployments that aren't active (still booting).
+                if not deployment.activated_at:
+                    continue
+
+                # Make sure we don't replace an instance of the target chute.
                 if deployment.chute_id == chute.chute_id:
-                    logger.warning(
-                        f"Attempting to preempt for {chute.chute_id=}, but deployment already exists: {deployment.deployment_id=}"
-                    )
-                    return False
-
-                # Can't preempt deployments that haven't been verified yet.
-                if not deployment.verified_at:
-                    logger.warning(
-                        f"Cannot preempt unverified deployment: {deployment.deployment_id}"
-                    )
                     continue
 
-                # Can't preempt deployments that are <= 5 minutes since verification.
+                # Can't preempt deployments that are too new (< 62 minutes since activation).
                 if deployment.activated_at:
                     age = datetime.now(timezone.utc).replace(
                         tzinfo=None
@@ -1530,28 +1515,36 @@ class Gepetto:
                     )
                     continue
 
-                # If we'd be left with > 1 instance, we can preempt.
-                if proposed_counts.get(deployment.chute_id, 0) > 1:
-                    to_delete.append(deployment.deployment_id)
-                    available_gpus += len(deployment.gpus)
-                    proposed_counts[deployment.chute_id] -= 1
-                elif deployment.chute_id in proposed_counts:
-                    # Only allow 0 global replicas if we aren't getting invocations.
-                    message = (
-                        f"Preempting {deployment.deployment_id=} would leave no global instances!"
+                # Get the existing instance's compute multiplier
+                existing_multiplier = self._get_instance_multiplier_from_global(
+                    chute.validator, deployment.instance_id
+                )
+
+                # Never preempt if existing multiplier >= new chute's effective multiplier
+                if existing_multiplier >= new_effective_multiplier:
+                    logger.info(
+                        f"Skipping {deployment.chute_id} - existing multiplier {existing_multiplier:.2f} "
+                        f">= new multiplier {new_effective_multiplier:.2f}"
                     )
-                    if (last_invoked := last_invocations.get(deployment.chute_id)) is not None:
-                        time_since_invoked = (
-                            datetime.now(timezone.utc).replace(tzinfo=None) - last_invoked
-                        )
-                        if time_since_invoked >= timedelta(minutes=10):
-                            to_delete.append(deployment.deployment_id)
-                            available_gpus += len(deployment.gpus)
-                            proposed_counts[deployment.chute_id] -= 1
-                        else:
-                            logger.warning(message)
-                    else:
-                        logger.warning(message)
+                    continue
+
+                # Never remove the only global instance of a chute
+                if proposed_counts.get(deployment.chute_id, 0) <= 1:
+                    logger.warning(
+                        f"Skipping {deployment.chute_id} - would remove only global instance"
+                    )
+                    continue
+
+                # This deployment is eligible for preemption
+                to_delete.append(deployment.deployment_id)
+                available_gpus += len(deployment.gpus)
+                proposed_counts[deployment.chute_id] -= 1
+
+                logger.info(
+                    f"Proposing preemption of {deployment.chute_id} "
+                    f"(multiplier={existing_multiplier:.2f}) for {chute.chute_id} "
+                    f"(multiplier={new_effective_multiplier:.2f})"
+                )
 
                 # Would we reach a sufficient number of free GPUs?
                 if available_gpus >= chute.gpu_count:
