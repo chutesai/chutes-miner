@@ -1,4 +1,29 @@
 ---
+- name: Check node roles
+  hosts: all
+  become: true
+  tags: always
+  tasks:
+  
+    - name: Build control and worker node lists
+      ansible.builtin.set_fact:
+        control_nodes: >-
+          {{ ((groups['control'] | default([]) | map('extract', hostvars, 'ansible_host') | select('defined') | list)
+              + (groups['control'] | default([]))) | unique }}
+        worker_nodes: >-
+          {{ ((groups['workers'] | default([]) | map('extract', hostvars, 'ansible_host') | select('defined') | list)
+              + (groups['workers'] | default([]))) | unique }}
+
+    - name: Determine host identity flags
+      ansible.builtin.set_fact:
+        host_identifier: "{{ ansible_host | default(inventory_hostname) }}"
+        is_worker: "{{ (ansible_host | default(inventory_hostname)) in (worker_nodes | default([])) }}"
+        is_control: "{{ (ansible_host | default(inventory_hostname)) in (control_nodes | default([])) }}"
+
+    - name: Set skip-common flag for shared hosts
+      ansible.builtin.set_fact:
+        skip_common_roles: "{{ (is_worker | bool) and (is_control | bool) }}"
+
 - name: Parse credentials for charts
   hosts: localhost
   connection: local

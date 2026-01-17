@@ -1,4 +1,7 @@
----
+{% set control_hosts = groups['control'] if groups['control'] is defined else [] %}
+{% set worker_hosts = groups['workers'] if groups['workers'] is defined else [] %}
+{% set worker_federation_hosts = worker_hosts | reject('in', control_hosts) | list %}
+
 grafana:
   # Admin credentials
   adminUser: chutes
@@ -84,7 +87,11 @@ prometheus:
     - '{job="kubernetes-nodes-cadvisor"}'
     - '{job="node-exporter"}'
     clusters:
-{% for host in groups['workers'] %}
+{% if worker_federation_hosts %}
+{% for host in worker_federation_hosts %}
     - endpoint: {{ hostvars[host]['ansible_host'] }}:30090
       name: {{ host }}
 {% endfor %}
+{% else %}
+    []
+{% endif %}

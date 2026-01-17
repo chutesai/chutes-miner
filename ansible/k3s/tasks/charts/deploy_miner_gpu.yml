@@ -14,9 +14,15 @@
   register: copy_values_result
   changed_when: copy_values_result.changed
 
+- name: Determine GPU Helm release name
+  ansible.builtin.set_fact:
+    miner_gpu_release_name: >-
+      {{ miner_gpu_release_name_override
+         | default('chutes-gpu' if ((is_control | default(false)) | bool and (is_worker | default(false)) | bool) else 'chutes') }}
+
 - name: Install or upgrade Chutes GPU charts
   ansible.builtin.command: >
-    helm upgrade --install chutes chutes/chutes-miner-gpu
+    helm upgrade --install {{ miner_gpu_release_name }} chutes/chutes-miner-gpu
     --namespace chutes
     --kubeconfig {{ k3s_kubeconfig_path }}
     --create-namespace
