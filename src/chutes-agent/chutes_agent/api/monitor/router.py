@@ -7,6 +7,7 @@ from loguru import logger
 
 from chutes_agent.monitor import ResourceMonitor
 from chutes_agent.config import settings
+from chutes_agent.exceptions import InvalidOperationError
 
 # Router instance
 router = APIRouter()
@@ -61,6 +62,13 @@ async def stop_monitoring(
     try:
         await resource_monitor.stop()
         return {"message": "Monitoring stopped"}
+    except InvalidOperationError as e:
+        # Agent has no active control plane client (lost state)
+        logger.warning(f"Cannot stop monitoring: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(e)
+        )
     except Exception as e:
         logger.error(f"Failed to stop monitoring: {e}")
         raise HTTPException(status_code=500, detail=str(e))

@@ -27,7 +27,10 @@ from chutes_common.schemas.chute import Chute
 from chutes_common.schemas.server import Server
 from chutes_common.schemas.gpu import GPU
 from chutes_common.schemas.deployment import Deployment
-from chutes_miner.api.exceptions import DeploymentFailure
+from chutes_miner.api.exceptions import (
+    DeploymentFailure,
+    AgentError,
+)
 import chutes_miner.api.k8s as k8s
 
 
@@ -967,9 +970,23 @@ class Gepetto:
                 if server.agent_api:
                     try:
                         await stop_server_monitoring(server.agent_api)
+                    except AgentError as e:
+                        if e.status_code == 409:
+                            logger.warning(
+                                f"Agent for {server.name} has no active monitoring state (status_code=409). "
+                                f"Agent cannot remove itself from cache. Manually clearing cache as fallback."
+                            )
+                        else:
+                            logger.error(
+                                f"Failed to stop monitoring for {server.name} (status_code={e.status_code}). "
+                                f"Clearing from cache.\n{str(e)}"
+                            )
+                        # Since the call failed to stop monitoring for cluster we need to manually clear the cache
+                        await clear_server_cache(server.name)
                     except Exception as e:
                         logger.error(
-                            f"Unexpected error encountered trying to stop monitoring for {server.name}.  Clearing from cache.\n{e}"
+                            f"Unexpected error encountered trying to stop monitoring for {server.name}. "
+                            f"Clearing from cache.\n{str(e)}"
                         )
                         # Since the call failed to stop monitoring for cluster we need to manually clear the cache
                         await clear_server_cache(server.name)
