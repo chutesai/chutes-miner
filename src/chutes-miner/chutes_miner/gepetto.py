@@ -826,15 +826,10 @@ class Gepetto:
         # Check if we have this thing deployed already (or in progress).
         chute = None
         async with get_session() as session:
-            deployment = (
-                (
-                    await session.execute(
-                        select(Deployment).where(Deployment.chute_id == event_data["chute_id"])
-                    )
-                )
-                .unique()
-                .scalar_one_or_none()
+            result = await session.execute(
+                select(Deployment).where(Deployment.chute_id == event_data["chute_id"])
             )
+            deployment = result.unique().scalars().first()
             if deployment:
                 logger.info(
                     f"Ignoring bounty event, already have a deployment pending: {deployment.deployment_id}"
