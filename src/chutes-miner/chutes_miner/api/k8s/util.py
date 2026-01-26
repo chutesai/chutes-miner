@@ -381,6 +381,7 @@ def build_chute_service(
             ports=[
                 V1ServicePort(port=8000, target_port=8000, protocol="TCP", name="chute-8000"),
                 V1ServicePort(port=8001, target_port=8001, protocol="TCP", name="chute-8001"),
+                V1ServicePort(port=8002, target_port=8002, protocol="TCP", name="chute-8002"),
             ]
             + [
                 V1ServicePort(
