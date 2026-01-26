@@ -109,8 +109,8 @@ def build_chute_job(
         ]
 
     # Port mappings must be in the environment variables.
-    unique_ports = [8000, 8001]
-    for port_object in service.spec.ports[2:]:
+    unique_ports = [8000, 8001, 8002]
+    for port_object in service.spec.ports[3:]:
         proto = (port_object.protocol or "TCP").upper()
         extra_env.append(
             V1EnvVar(
@@ -287,6 +287,10 @@ def build_chute_job(
                                 V1EnvVar(
                                     name="CHUTES_PORT_LOGGING",
                                     value=str(service.spec.ports[1].node_port),
+                                ),
+                                V1EnvVar(
+                                    name="CHUTES_PORT_ATTESTATION",
+                                    value=str(service.spec.ports[2].node_port),
                                 ),
                                 V1EnvVar(
                                     name="CHUTES_EXECUTION_CONTEXT",
