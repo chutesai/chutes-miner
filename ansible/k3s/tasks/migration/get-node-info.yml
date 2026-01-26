@@ -22,7 +22,7 @@
     - name: Run local-inventory command locally
       ansible.builtin.command: >
         chutes-miner local-inventory  --hotkey {{ hotkey_path }}
-        --miner-api http://{{ ansible_host }}:{{ miner_api_port | default(32000) }}
+        --miner-api http://{{ public_ip }}:{{ miner_api_port | default(32000) }}
       register: local_inventory_output
       failed_when: local_inventory_output.rc != 0
       become: false
