@@ -1195,6 +1195,8 @@ class Gepetto:
                             "version",
                             "supported_gpus",
                             "chutes_version",
+                            "preemptible",
+                            "tee",
                         ):
                             setattr(chute, key, chute_dict.get(key))
                         chute.gpu_count = chute_dict["node_selector"]["gpu_count"]
@@ -1622,7 +1624,7 @@ class Gepetto:
             if deployment:
                 await self.undeploy(deployment.deployment_id)
             if job_id:
-                self.release_job(chute, job_id)
+                await self.release_job(chute, job_id)
         return False
 
     async def scale_chute(self, chute: Chute, desired_count: int, preempt: bool = False) -> bool:
