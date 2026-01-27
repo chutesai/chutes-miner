@@ -25,7 +25,10 @@ from chutes_miner.api.util import sse_message
 from chutes_miner.api.database import get_session
 from chutes_common.schemas.server import Server, ServerArgs
 from chutes_common.schemas.gpu import GPU
-from chutes_miner.api.exceptions import DuplicateServer
+from chutes_miner.api.exceptions import (
+    DuplicateServer,
+    AgentError,
+)
 import yaml
 
 
@@ -125,7 +128,8 @@ async def stop_server_monitoring(agent_url: str):
             headers=headers,
         ) as response:
             if response.status != 200:
-                raise Exception(f"Failed to stop monitoring for cluster: {await response.text()}")
+                response_text = await response.text()
+                raise AgentError(response_text, status_code=response.status)
 
 
 async def clear_server_cache(cluster_name):
