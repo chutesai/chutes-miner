@@ -65,10 +65,7 @@ async def stop_monitoring(
     except InvalidOperationError as e:
         # Agent has no active control plane client (lost state)
         logger.warning(f"Cannot stop monitoring: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to stop monitoring: {e}")
         raise HTTPException(status_code=500, detail=str(e))
