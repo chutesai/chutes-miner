@@ -502,7 +502,7 @@ def scorch_remote(
 
 
 def delete_remote(
-    server_id: str = typer.Option(help="Server UUID to delete, aka node_node on validator side"),
+    server_id: str = typer.Option(help="Server UUID to delete on the validator side"),
     hotkey: str = typer.Option(..., help="Path to the hotkey file for your miner"),
     validator_api: str = typer.Option("https://api.chutes.ai", help="Validator API base URL"),
 ):
