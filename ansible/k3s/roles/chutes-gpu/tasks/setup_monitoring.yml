@@ -12,11 +12,6 @@
         name: metrics-server
         repo_url: https://kubernetes-sigs.github.io/metrics-server/
 
-    - name: Add Kubernetes Dashboard Helm repository
-      kubernetes.core.helm_repository:
-        name: kubernetes-dashboard
-        repo_url: https://kubernetes.github.io/dashboard/
-
     - name: Update Helm repositories
       shell: helm repo update
 
@@ -30,12 +25,4 @@
           --set prometheus-pushgateway.persistentVolume.enabled=false \
           --set prometheus-server.persistentVolume.enabled=false \
           --set alertmanager.persistence.enabled=false \
-          --kubeconfig={{ k3s_kubeconfig_path }}
-
-    - name: Install kubernetes dashboard
-      shell: |
-        helm upgrade --install kubernetes-dashboard kubernetes-dashboard/kubernetes-dashboard \
-          --create-namespace \
-          --namespace kubernetes-dashboard \
-          --set persistence.enabled=false \
           --kubeconfig={{ k3s_kubeconfig_path }}
