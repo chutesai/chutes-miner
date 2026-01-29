@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 import asyncio
 from contextlib import asynccontextmanager
+import json
 import ssl
 import time
 
@@ -21,6 +22,7 @@ from chutes_miner.api.exceptions import (
     GraValBootstrapFailure,
     NonEmptyServer,
     TEEBootstrapFailure,
+    VerificationFailure,
 )
 from chutes_miner.api.k8s.constants import GRAVAL_JOB_PREFIX, GRAVAL_SVC_PREFIX
 from chutes_miner.api.k8s.operator import K8sOperator
@@ -43,6 +45,36 @@ from kubernetes.client import (
     V1ExecAction,
     V1EnvVar,
 )
+
+
+def format_error_message(exc: Exception) -> str:
+    """
+    Format an exception message in a readable way, especially for aiohttp.ClientResponseError.
+    Removes escaped quotes to make error messages more convenient to pass to support teams.
+    """
+    if isinstance(exc, aiohttp.ClientResponseError):
+        status = exc.status
+        message = exc.message
+        url = exc.request_info.url if exc.request_info else None
+        
+        # Try to parse the message as JSON to make it more readable
+        try:
+            parsed = json.loads(message)
+            # Format the JSON nicely without extra escaping
+            formatted_message = json.dumps(parsed, indent=2)
+        except (json.JSONDecodeError, TypeError):
+            # If it's not JSON, use the message as-is
+            formatted_message = message
+        
+        # Format the output to avoid Python's repr() escaping
+        # Use a format that's easy to read and copy
+        if url:
+            return f"{status}, message={formatted_message}, url={url}"
+        else:
+            return f"{status}, message={formatted_message}"
+    else:
+        # For other exceptions, use the string representation
+        return str(exc)
 
 
 class VerificationStrategy(ABC):
@@ -436,9 +468,23 @@ class GravalVerificationStrategy(VerificationStrategy):
         task_id = None
         try:
             task_id, validator_nodes = await self._advertise_nodes(validator, self.gpus)
+        except aiohttp.ClientResponseError as exc:
+            if exc.status == 409:
+                # Handle 409 specifically - emit message and raise VerificationFailure
+                error_msg = format_error_message(exc)
+                await self.emit_message(
+                    f"failed to advertising node to {validator.hotkey} via {validator.api}: {error_msg}",
+                )
+                raise VerificationFailure(error_msg) from exc
+            else:
+                # For other HTTP errors, emit message and re-raise
+                await self.emit_message(
+                    f"failed to advertising node to {validator.hotkey} via {validator.api}: {format_error_message(exc)}",
+                )
+                raise
         except Exception as exc:
             await self.emit_message(
-                f"failed to advertising node to {validator.hotkey} via {validator.api}: {exc}",
+                f"failed to advertising node to {validator.hotkey} via {validator.api}: {format_error_message(exc)}",
             )
             raise
         assert len(set(node["seed"] for node in validator_nodes)) == 1, (
@@ -496,7 +542,15 @@ class GravalVerificationStrategy(VerificationStrategy):
                 f"{validator.api}/nodes/", data=payload_string, headers=headers
             ) as response:
                 response_text = await response.text()
-                assert response.status == 202, response_text
+                if response.status != 202:
+                    # Raise ClientResponseError for bad status codes
+                    raise aiohttp.ClientResponseError(
+                        request_info=response.request_info,
+                        history=response.history,
+                        status=response.status,
+                        message=response_text,
+                        headers=response.headers,
+                    )
                 data = await response.json()
                 nodes = data.get("nodes")
                 task_id = data.get("task_id")
@@ -689,9 +743,23 @@ class TEEVerificationStrategy(VerificationStrategy):
 
         try:
             await self._advertise_server()
+        except aiohttp.ClientResponseError as exc:
+            if exc.status == 409:
+                # Handle 409 specifically - emit message and raise VerificationFailure
+                error_msg = format_error_message(exc)
+                await self.emit_message(
+                    f"failed to verify server with {validator.hotkey} via {validator.api}: {error_msg}",
+                )
+                raise VerificationFailure(error_msg) from exc
+            else:
+                # For other HTTP errors, emit message and re-raise
+                await self.emit_message(
+                    f"failed to verify server with {validator.hotkey} via {validator.api}: {format_error_message(exc)}",
+                )
+                raise
         except Exception as exc:
             await self.emit_message(
-                f"failed to verify server with {validator.hotkey} via {validator.api}: {exc}",
+                f"failed to verify server with {validator.hotkey} via {validator.api}: {format_error_message(exc)}",
             )
             raise
 

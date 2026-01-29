@@ -19,6 +19,9 @@ class GraValBootstrapFailure(BootstrapFailure): ...
 class TEEBootstrapFailure(BootstrapFailure): ...
 
 
+class VerificationFailure(BootstrapFailure): ...
+
+
 class AgentError(Exception):
     """Exception raised when agent encounters an error (e.g., no active monitoring state - 409 Conflict)"""
 

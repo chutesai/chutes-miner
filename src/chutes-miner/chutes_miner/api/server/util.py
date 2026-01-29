@@ -12,7 +12,7 @@ import traceback
 from chutes_common.monitoring.requests import StartMonitoringRequest
 from chutes_common.redis import MonitoringRedisClient
 from chutes_miner.api.k8s.config import KubeConfig, MultiClusterKubeConfig
-from chutes_miner.api.server.verification import VerificationStrategy
+from chutes_miner.api.server.verification import VerificationStrategy, format_error_message
 from loguru import logger
 from kubernetes.client import V1Node
 from sqlalchemy import update
@@ -28,6 +28,7 @@ from chutes_common.schemas.gpu import GPU
 from chutes_miner.api.exceptions import (
     DuplicateServer,
     AgentError,
+    VerificationFailure,
 )
 import yaml
 
@@ -243,6 +244,7 @@ async def bootstrap_server(
     """
     started_at = time.time()
     strategy = None
+    success = False
 
     async def _cleanup(delete_node=False):
         if delete_node and server_args.agent_api:
@@ -294,25 +296,31 @@ async def bootstrap_server(
 
         await task
 
+        # Astonishing, everything worked. Mark GPUs as verified.
+        async with get_session() as session:
+            await session.execute(
+                update(GPU).where(GPU.server_id == node_object.metadata.uid).values({"verified": True})
+            )
+            await session.commit()
+        yield sse_message(f"completed server bootstrapping in {time.time() - started_at} seconds!")
+        success = True
+
+    except VerificationFailure as exc:
+        # VerificationFailure is already logged/emitted in the verification strategy
+        # Just re-raise without logging again with stacktrace
+        pass
     except Exception as exc:
         error_message = (
-            f"unhandled exception bootstrapping new node: {exc}\n{traceback.format_exc()}"
+            f"Unhandled exception bootstrapping new node:\n{traceback.format_exc()} "
         )
-        logger.error(error_message)
+        logger.error(f"{error_message}")
         yield sse_message(error_message)
-        if strategy:
-            await strategy.cleanup(delete_node=True)
-        await _cleanup(delete_node=True)
         raise
     finally:
+        # Clean up based on whether we succeeded or not
+        # If success=False, we hit an exception, so delete_node=True
+        # If success=True, we completed successfully, so delete_node=False
+        delete_node = True if not success else False
         if strategy:
-            await strategy.cleanup(delete_node=False)
-        await _cleanup(delete_node=False)
-
-    # Astonishing, everything worked.
-    async with get_session() as session:
-        await session.execute(
-            update(GPU).where(GPU.server_id == node_object.metadata.uid).values({"verified": True})
-        )
-        await session.commit()
-    yield sse_message(f"completed server bootstrapping in {time.time() - started_at} seconds!")
+            await strategy.cleanup(delete_node=delete_node)
+        await _cleanup(delete_node=delete_node)
