@@ -667,7 +667,8 @@ class K8sOperator(abc.ABC):
             node_list = self._get_nodes()
             for node in node_list.items:
                 node_info = await self._extract_node_info(node)
-                nodes.append(node_info)
+                if node_info:
+                    nodes.append(node_info)
         except Exception as e:
             logger.error(f"Failed to get Kubernetes nodes: {e}")
             raise
