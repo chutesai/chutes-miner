@@ -10,7 +10,7 @@ validators:
       socket: wss://ws.chutes.ai
 
 registry:
-  image: nginx:1.27
+  image: parachutes/nginx-proxy:latest
   imagePullPolicy: IfNotPresent
   resources:
     requests:
