@@ -1,4 +1,8 @@
 ---
+- name: Setup host mount directories for Chutes pods
+  ansible.builtin.include_tasks: setup_host_mounts.yml
+  tags: host-mounts
+
 - name: Setup GPU operator
   ansible.builtin.include_tasks: setup_gpu_operator.yml
   tags: gpu-operator

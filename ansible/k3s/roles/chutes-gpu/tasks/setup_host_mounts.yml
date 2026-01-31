@@ -1,0 +1,27 @@
+---
+# Create host mount directories for Chutes pods (cache and agent state).
+# Pods run as UID 1000; these dirs must be 1000:1000 and 755 so kubelet
+# can mount them and pods can use them without root init containers.
+- name: Ensure /var/snap/cache exists for Chute cache hostPath
+  ansible.builtin.file:
+    path: /var/snap/cache
+    state: directory
+    owner: "1000"
+    group: "1000"
+    mode: "0755"
+
+- name: Ensure /var/lib/chutes exists for agent state parent
+  ansible.builtin.file:
+    path: /var/lib/chutes
+    state: directory
+    owner: "1000"
+    group: "1000"
+    mode: "0755"
+
+- name: Ensure /var/lib/chutes/agent exists for agent state hostPath
+  ansible.builtin.file:
+    path: /var/lib/chutes/agent
+    state: directory
+    owner: "1000"
+    group: "1000"
+    mode: "0755"
