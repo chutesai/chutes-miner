@@ -9,7 +9,7 @@ import time
 import math
 import aiohttp
 import traceback
-from chutes_common.monitoring.requests import StartMonitoringRequest
+from chutes_common.monitoring.client import start_server_monitoring as _start_server_monitoring_common
 from chutes_common.redis import MonitoringRedisClient
 from chutes_miner.api.k8s.config import KubeConfig, MultiClusterKubeConfig
 from chutes_miner.api.server.verification import VerificationStrategy, format_error_message
@@ -25,9 +25,9 @@ from chutes_miner.api.util import sse_message
 from chutes_miner.api.database import get_session
 from chutes_common.schemas.server import Server, ServerArgs
 from chutes_common.schemas.gpu import GPU
+from chutes_common.exceptions import AgentError
 from chutes_miner.api.exceptions import (
     DuplicateServer,
-    AgentError,
     VerificationFailure,
 )
 import yaml
@@ -108,29 +108,15 @@ async def get_server_kubeconfig(agent_url: str):
 
 
 async def start_server_monitoring(agent_url: str):
-    request = StartMonitoringRequest(control_plane_url=settings.monitor_api)
-    payload = request.model_dump()
-    async with aiohttp.ClientSession() as session:
-        headers, payload_string = sign_request(payload, purpose="monitoring", management=True)
-        async with session.post(
-            f"{agent_url}/monitor/start",
-            data=payload_string,
-            headers=headers,
-        ) as response:
-            if response.status != 200:
-                raise Exception(f"Failed to start monitoring for cluster: {await response.text()}")
+    await _start_server_monitoring_common(
+        agent_url=agent_url,
+        control_plane_url=settings.monitor_api,
+    )
 
 
 async def stop_server_monitoring(agent_url: str):
-    async with aiohttp.ClientSession(conn_timeout=5, read_timeout=30) as session:
-        headers, _ = sign_request(purpose="monitoring", management=True)
-        async with session.get(
-            f"{agent_url}/monitor/stop",
-            headers=headers,
-        ) as response:
-            if response.status != 200:
-                response_text = await response.text()
-                raise AgentError(response_text, status_code=response.status)
+    from chutes_common.monitoring.client import stop_server_monitoring as _stop_common
+    await _stop_common(agent_url=agent_url)
 
 
 async def clear_server_cache(cluster_name):

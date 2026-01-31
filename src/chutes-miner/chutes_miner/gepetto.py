@@ -27,10 +27,8 @@ from chutes_common.schemas.chute import Chute
 from chutes_common.schemas.server import Server
 from chutes_common.schemas.gpu import GPU
 from chutes_common.schemas.deployment import Deployment
-from chutes_miner.api.exceptions import (
-    DeploymentFailure,
-    AgentError,
-)
+from chutes_common.exceptions import AgentError
+from chutes_miner.api.exceptions import DeploymentFailure
 import chutes_miner.api.k8s as k8s
 
 
@@ -952,16 +950,8 @@ class Gepetto:
                 .scalar_one_or_none()
             )
             if server:
-                # Remove server once GPUs are removed.  Should probably just switch this
-                # To delete the server and rely on the cascade delete to remove GPUs
-                if (validator := validator_by_hotkey(server.validator)) is not None:
-                    await self.remove_server_from_validator(validator, server.server_id)
-
-                await session.refresh(server)
-                await session.delete(server)
-                await session.commit()
-
-                # If this is a standalone server, we need to stop monitoring from the agent
+                # Stop monitoring and clear Redis before deleting from DB so there is no
+                # window where the server is gone from DB but Redis still has the cluster.
                 if server.agent_api:
                     try:
                         await stop_server_monitoring(server.agent_api)
@@ -976,15 +966,20 @@ class Gepetto:
                                 f"Failed to stop monitoring for {server.name} (status_code={e.status_code}). "
                                 f"Clearing from cache.\n{str(e)}"
                             )
-                        # Since the call failed to stop monitoring for cluster we need to manually clear the cache
                         await clear_server_cache(server.name)
                     except Exception as e:
                         logger.error(
                             f"Unexpected error encountered trying to stop monitoring for {server.name}. "
                             f"Clearing from cache.\n{str(e)}"
                         )
-                        # Since the call failed to stop monitoring for cluster we need to manually clear the cache
                         await clear_server_cache(server.name)
+
+                if (validator := validator_by_hotkey(server.validator)) is not None:
+                    await self.remove_server_from_validator(validator, server.server_id)
+
+                await session.refresh(server)
+                await session.delete(server)
+                await session.commit()
 
         logger.info(f"Finished processing server_deleted event for {server_id=}")
 
