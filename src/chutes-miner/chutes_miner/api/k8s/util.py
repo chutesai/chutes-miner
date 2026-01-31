@@ -189,12 +189,6 @@ def build_chute_job(
                             ),
                         ),
                         V1Volume(
-                            name="cache-cleanup",
-                            config_map=V1ConfigMapVolumeSource(
-                                name="chutes-cache-cleaner",
-                            ),
-                        ),
-                        V1Volume(
                             name="tmp",
                             empty_dir=V1EmptyDirVolumeSource(size_limit=f"{disk_gb}Gi"),
                         ),
@@ -207,10 +201,6 @@ def build_chute_job(
                         V1Container(
                             name="cache-init",
                             image="parachutes/cache-cleaner:latest",
-                            command=["/bin/bash", "-c"],
-                            args=[
-                                "mkdir -p /cache/hub /cache/civitai && chmod -R 777 /cache && python /scripts/cache_cleanup.py"
-                            ],
                             env=[
                                 V1EnvVar(
                                     name="CLEANUP_EXCLUDE",
@@ -239,15 +229,7 @@ def build_chute_job(
                             ],
                             volume_mounts=[
                                 V1VolumeMount(name="raw-cache", mount_path="/cache"),
-                                V1VolumeMount(
-                                    name="cache-cleanup",
-                                    mount_path="/scripts",
-                                ),
                             ],
-                            security_context=V1SecurityContext(
-                                run_as_user=0,
-                                run_as_group=0,
-                            ),
                         ),
                     ],
                     containers=[

@@ -1,0 +1,161 @@
+"""HF/CivitAI cache cleanup. Run as module: python -m chutes_cache_cleaner.cache_cleanup"""
+import os
+import time
+import shutil
+from pathlib import Path
+from types import SimpleNamespace
+
+from huggingface_hub import scan_cache_dir
+
+
+def get_dir_size(path):
+    total = 0
+    with os.scandir(path) as it:
+        for entry in it:
+            if entry.is_file():
+                total += entry.stat().st_size
+            elif entry.is_dir():
+                total += get_dir_size(entry.path)
+    return total
+
+
+def should_exclude_repo(repo_id, exclude_pattern):
+    """Check if repo should be excluded based on CLEANUP_EXCLUDE pattern"""
+    if not exclude_pattern:
+        return False
+    return exclude_pattern.lower() in repo_id.lower()
+
+
+def clean_safetensors_dir(dir_path, max_age_days, max_size_gb):
+    if not dir_path or not os.path.exists(dir_path):
+        return
+    exclude_pattern = os.getenv("CLEANUP_EXCLUDE")
+    dir_size = get_dir_size(dir_path)
+    max_size_bytes = max_size_gb * 1024 * 1024 * 1024
+    cutoff_time = time.time() - (max_age_days * 24 * 3600)
+    print(f"Current CivitAI directory size: {dir_size / 1024**3:.2f}GB")
+    if exclude_pattern:
+        print(f"Excluding directories containing: {exclude_pattern}")
+    for file in Path(dir_path).glob("*.safetensors"):
+        # Check if file is in an excluded directory
+        if exclude_pattern and exclude_pattern.lower() in str(file.parent).lower():
+            print(f"Skipping excluded file: {file.name}")
+            continue
+        last_accessed = os.path.getatime(file)
+        if last_accessed < cutoff_time:
+            file_size = os.path.getsize(file)
+            print(
+                f"Removing old safetensors: {file.name} ({file_size / 1024**3:.2f}GB, "
+                f"last accessed: {time.strftime('%Y-%m-%d', time.localtime(last_accessed))})"
+            )
+            os.remove(file)
+    dir_size = get_dir_size(dir_path)
+    if dir_size > max_size_bytes:
+        files = [(f, os.path.getsize(f)) for f in Path(dir_path).glob("*.safetensors")]
+        # Filter out excluded files
+        if exclude_pattern:
+            files = [
+                (f, size)
+                for f, size in files
+                if exclude_pattern.lower() not in str(f.parent).lower()
+            ]
+        files.sort(key=lambda x: x[1], reverse=True)
+        for file_path, size in files:
+            if os.path.exists(file_path):
+                print(
+                    f"Removing large safetensors: {file_path.name} ({size / 1024**3:.2f}GB)"
+                )
+                os.remove(file_path)
+                dir_size = get_dir_size(dir_path)
+                if dir_size <= max_size_bytes:
+                    break
+
+
+def scan_uuid_cache_dir():
+    hub_dirs = []
+
+    cache_base = os.getenv("HF_HOME", "/cache")
+    main_hub = Path(cache_base) / "hub"
+
+    if main_hub.exists() and list(main_hub.glob("models--*")):
+        hub_dirs.append(main_hub)
+
+    for item in Path(cache_base).iterdir():
+        if item.is_dir() and len(item.name) == 36:  # UUID
+            uuid_hub = item / "hub"
+            if uuid_hub.exists() and list(uuid_hub.glob("models--*")):
+                hub_dirs.append(uuid_hub)
+
+    # Process each hub directory
+    size_on_disk = 0
+    all_repos = []
+
+    if hub_dirs:
+        for hub_dir in hub_dirs:
+            try:
+                cache_info = scan_cache_dir(cache_dir=hub_dir)
+                print(f"Cache in {hub_dir}: {cache_info.size_on_disk / 1024**3:.2f}GB")
+                size_on_disk += cache_info.size_on_disk
+                all_repos.extend(cache_info.repos)
+            except Exception as e:
+                print(f"Error scanning {hub_dir}: {e}")
+    else:
+        print("No HuggingFace cache directories found")
+
+    return SimpleNamespace(size_on_disk=size_on_disk, repos=all_repos)
+
+
+def clean_old_cache(max_age_days=5, max_size_gb=100):
+    # Clean HuggingFace cache
+    cache_info = scan_uuid_cache_dir()
+    max_size_bytes = max_size_gb * 1024 * 1024 * 1024
+    cutoff_time = time.time() - (max_age_days * 24 * 3600)
+    exclude_pattern = os.getenv("CLEANUP_EXCLUDE")
+    print(f"Current HF cache size: {cache_info.size_on_disk / 1024**3:.2f}GB")
+    if exclude_pattern:
+        print(f"Excluding repositories containing: {exclude_pattern}")
+
+    repos = sorted(cache_info.repos, key=lambda r: r.last_accessed)
+    for repo in repos:
+        # Skip repos that match the exclude pattern
+        if should_exclude_repo(repo.repo_id, exclude_pattern):
+            print(f"Skipping excluded repo: {repo.repo_id}")
+            continue
+        if repo.last_accessed < cutoff_time:
+            print(
+                f"Removing old cache: {repo.repo_id} ({repo.size_on_disk / 1024**3:.2f}GB\n"
+                f"\tlast accessed: {time.strftime('%Y-%m-%d', time.localtime(repo.last_accessed))}\n"
+                f"\t{repo.repo_path.parent.parent}"
+            )
+            shutil.rmtree(repo.repo_path.parent.parent)
+    cache_info = scan_uuid_cache_dir()
+    if cache_info.size_on_disk > max_size_bytes:
+        repos = sorted(cache_info.repos, key=lambda r: r.size_on_disk, reverse=True)
+        for repo in repos:
+            # Skip repos that match the exclude pattern
+            if should_exclude_repo(repo.repo_id, exclude_pattern):
+                print(f"Skipping excluded repo: {repo.repo_id}")
+                continue
+            if repo.repo_path.exists():
+                print(
+                    f"Removing large cache: {repo.repo_id} "
+                    f"({repo.size_on_disk / 1024**3:.2f}GB) [{repo.repo_path.parent.parent}]"
+                )
+                shutil.rmtree(repo.repo_path.parent.parent)
+                cache_info = scan_uuid_cache_dir()
+                if cache_info.size_on_disk <= max_size_bytes:
+                    break
+
+    civitai_dir = os.getenv("CIVITAI_HOME")
+    if civitai_dir:
+        clean_safetensors_dir(civitai_dir, max_age_days, max_size_gb)
+
+
+if __name__ == "__main__":
+    try:
+        clean_old_cache(
+            max_age_days=int(os.getenv("CACHE_MAX_AGE_DAYS", "5")),
+            max_size_gb=int(os.getenv("CACHE_MAX_SIZE_GB", "500")),
+        )
+    except Exception as exc:
+        print(f"Error cleaning up cache: {exc}")

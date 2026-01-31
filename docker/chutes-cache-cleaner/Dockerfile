@@ -1,8 +1,22 @@
-# Cache cleaner.
+# Cache cleanup image: HF/CivitAI cache cleanup. Script is in the image (no ConfigMap).
+# Runs as UID 1000; host cache dir must be owned by 1000:1000 when VM is set up.
+ARG PROJECT_DIR
+ARG PROJECT
+
 FROM python:3.10-slim AS base
-RUN pip install --no-cache-dir transformers==4.46.3
+
+RUN pip install --no-cache-dir huggingface_hub
+
+WORKDIR /app
+COPY ${PROJECT_DIR} ./
+RUN pip install --no-cache-dir .
+
+RUN groupadd -g 1000 chutes && useradd -u 1000 -g chutes -m -s /bin/sh chutes
+USER chutes
+
+# Chute init: mkdir then run cleanup. Standalone: just run cleanup (mkdir is harmless).
+ENTRYPOINT ["sh", "-c", "mkdir -p /cache/hub /cache/civitai && exec python -m chutes_cache_cleaner.cache_cleanup"]
 
 FROM base AS production
-
 
 FROM base AS development
