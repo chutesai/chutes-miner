@@ -1,0 +1,106 @@
+name: Chart Version Bump Check
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'charts/**'
+
+jobs:
+  chart-version-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch main
+        run: git fetch origin main
+
+      - name: Check chart version bumps
+        run: |
+          set -e
+          CHARTS_DIR="charts"
+          FAILED=""
+          FAIL_MSG=""
+
+          # Get version from Chart.yaml (top-level version: key)
+          get_chart_version() {
+            local chart_yaml="$1"
+            if [ -f "$chart_yaml" ]; then
+              grep '^version:' "$chart_yaml" | head -1 | sed -E 's/version:[[:space:]]*["'\'']?([^"'\''"]+)["'\''"]?.*/\1/' | tr -d '\n\r \t'
+            else
+              echo ""
+            fi
+          }
+
+          # Compare two semver strings: print "ok" if second > first, else "fail"
+          version_gt() {
+            local main_ver="$1"
+            local pr_ver="$2"
+            [ -z "$pr_ver" ] && { echo "fail"; return; }
+            [ -z "$main_ver" ] && main_ver="0.0.0"
+            HIGHER=$(printf '%s\n%s\n' "$main_ver" "$pr_ver" | sort -V | tail -n1)
+            if [ "$HIGHER" = "$pr_ver" ] && [ "$main_ver" != "$pr_ver" ]; then
+              echo "ok"
+            else
+              echo "fail"
+            fi
+          }
+
+          # Changed paths in this PR (files under charts/)
+          CHANGED_FILES=$(git diff --name-only origin/main...HEAD -- "$CHARTS_DIR/" || true)
+
+          # Chart dirs are top-level subdirs of charts/ that contain Chart.yaml
+          CHANGED_CHARTS=""
+          for chart_path in "$CHARTS_DIR"/*/; do
+            [ -d "$chart_path" ] || continue
+            chart_name=$(basename "$chart_path")
+            [ ! -f "${chart_path}Chart.yaml" ] && continue
+            if echo "$CHANGED_FILES" | grep -q "^charts/$chart_name/"; then
+              CHANGED_CHARTS="${CHANGED_CHARTS}${chart_name}"$'\n'
+            fi
+          done
+          CHANGED_CHARTS=$(echo "$CHANGED_CHARTS" | sort -u)
+
+          if [ -z "$CHANGED_CHARTS" ]; then
+            echo "No charts were changed. Nothing to verify."
+            exit 0
+          fi
+
+          echo "Charts with changes: $CHANGED_CHARTS"
+          echo ""
+
+          for CHART in $CHANGED_CHARTS; do
+            CHART_DIR="$CHARTS_DIR/$CHART"
+            CHART_YAML="$CHART_DIR/Chart.yaml"
+            [ ! -f "$CHART_YAML" ] && continue
+
+            # Get version on main (same extraction as get_chart_version, from git show output)
+            MAIN_VERSION=$(git show origin/main:"$CHART_YAML" 2>/dev/null | grep '^version:' | head -1 | sed -E 's/version:[[:space:]]*["'\'']?([^"'\''"]+)["'\''"]?.*/\1/' | tr -d '\n\r \t' || true)
+            [ -z "$MAIN_VERSION" ] && MAIN_VERSION="0.0.0"
+
+            # Get version in PR branch (current checkout)
+            PR_VERSION=$(get_chart_version "$CHART_YAML")
+
+            GT=$(version_gt "$MAIN_VERSION" "$PR_VERSION")
+            if [ "$GT" = "ok" ]; then
+              echo "✅ $CHART: $MAIN_VERSION → $PR_VERSION (bumped)"
+            else
+              if [ -z "$PR_VERSION" ]; then
+                FAIL_MSG="${FAIL_MSG}- **$CHART**: No \`version\` in Chart.yaml or could not read it. Set \`version\` in Chart.yaml and ensure it is higher than main ($MAIN_VERSION).\n"
+              else
+                FAIL_MSG="${FAIL_MSG}- **$CHART**: Chart.yaml version must be higher than on main. main=$MAIN_VERSION, PR=$PR_VERSION.\n"
+              fi
+              FAILED=1
+            fi
+          done
+
+          if [ -n "$FAILED" ]; then
+            echo ""
+            echo "::error::One or more changed charts do not have a version bump in Chart.yaml."
+            echo -e "$FAIL_MSG"
+            exit 1
+          fi
