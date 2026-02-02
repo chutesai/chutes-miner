@@ -56,9 +56,7 @@ class SyncServerKeysMigration(ValidatorMigration):
                 for server in servers:
                     url = f"{base_url}/servers/{server.server_id}"
                     params = {"server_name": server.name}
-                    async with client.patch(
-                        url, headers=headers, params=params
-                    ) as resp:
+                    async with client.patch(url, headers=headers, params=params) as resp:
                         if resp.status >= 200 and resp.status < 300:
                             logger.info(
                                 f"Validator migration sync_server_keys: patched server {server.server_id} name to {server.name!r} on {validator.hotkey}"

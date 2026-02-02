@@ -29,9 +29,7 @@ async def start_server_monitoring(
     """
     request = StartMonitoringRequest(control_plane_url=control_plane_url)
     payload = request.model_dump()
-    headers, payload_string = sign_request(
-        payload, purpose="monitoring", management=True
-    )
+    headers, payload_string = sign_request(payload, purpose="monitoring", management=True)
     client_timeout = aiohttp.ClientTimeout(total=timeout)
     async with aiohttp.ClientSession(timeout=client_timeout) as session:
         url = f"{agent_url.rstrip('/')}/monitor/start"

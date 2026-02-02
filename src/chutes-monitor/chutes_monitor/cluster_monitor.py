@@ -294,8 +294,7 @@ class MonitoringReconciler:
             logger.info(f"Reinitiated monitoring for agent at {agent_url}")
         except AgentError as e:
             logger.warning(
-                f"Reinitiate monitoring failed for {agent_url}: "
-                f"{e.status_code} {e.response_text}"
+                f"Reinitiate monitoring failed for {agent_url}: {e.status_code} {e.response_text}"
             )
         except Exception as e:
             logger.warning(f"Reinitiate monitoring failed for {agent_url}: {e}")
@@ -308,9 +307,7 @@ class MonitoringReconciler:
         now = time.time()
         try:
             async with get_session() as session:
-                result = await session.execute(
-                    select(Server).where(Server.agent_api.isnot(None))
-                )
+                result = await session.execute(select(Server).where(Server.agent_api.isnot(None)))
                 servers = result.scalars().all()
             cluster_statuses = await self.redis_client.get_all_cluster_statuses()
             status_by_name = {s.cluster_name: s for s in cluster_statuses}

@@ -56,7 +56,7 @@ def format_error_message(exc: Exception) -> str:
         status = exc.status
         message = exc.message
         url = exc.request_info.url if exc.request_info else None
-        
+
         # Try to parse the message as JSON to make it more readable
         try:
             parsed = json.loads(message)
@@ -65,7 +65,7 @@ def format_error_message(exc: Exception) -> str:
         except (json.JSONDecodeError, TypeError):
             # If it's not JSON, use the message as-is
             formatted_message = message
-        
+
         # Format the output to avoid Python's repr() escaping
         # Use a format that's easy to read and copy
         if url:

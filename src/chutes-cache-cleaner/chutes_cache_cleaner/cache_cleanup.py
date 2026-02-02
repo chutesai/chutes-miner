@@ -1,4 +1,5 @@
 """HF/CivitAI cache cleanup. Run as module: python -m chutes_cache_cleaner.cache_cleanup"""
+
 import os
 import time
 import shutil
@@ -62,9 +63,7 @@ def clean_safetensors_dir(dir_path, max_age_days, max_size_gb):
         files.sort(key=lambda x: x[1], reverse=True)
         for file_path, size in files:
             if os.path.exists(file_path):
-                print(
-                    f"Removing large safetensors: {file_path.name} ({size / 1024**3:.2f}GB)"
-                )
+                print(f"Removing large safetensors: {file_path.name} ({size / 1024**3:.2f}GB)")
                 os.remove(file_path)
                 dir_size = get_dir_size(dir_path)
                 if dir_size <= max_size_bytes:

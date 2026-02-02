@@ -16,6 +16,4 @@ class AgentError(Exception):
     def __init__(self, response_text: str, status_code: int = 409):
         self.status_code = status_code
         self.response_text = response_text
-        super().__init__(
-            f"Agent error (status_code={status_code}). response={response_text}"
-        )
+        super().__init__(f"Agent error (status_code={status_code}). response={response_text}")

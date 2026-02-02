@@ -9,10 +9,12 @@ import time
 import math
 import aiohttp
 import traceback
-from chutes_common.monitoring.client import start_server_monitoring as _start_server_monitoring_common
+from chutes_common.monitoring.client import (
+    start_server_monitoring as _start_server_monitoring_common,
+)
 from chutes_common.redis import MonitoringRedisClient
 from chutes_miner.api.k8s.config import KubeConfig, MultiClusterKubeConfig
-from chutes_miner.api.server.verification import VerificationStrategy, format_error_message
+from chutes_miner.api.server.verification import VerificationStrategy
 from loguru import logger
 from kubernetes.client import V1Node
 from sqlalchemy import update
@@ -25,7 +27,6 @@ from chutes_miner.api.util import sse_message
 from chutes_miner.api.database import get_session
 from chutes_common.schemas.server import Server, ServerArgs
 from chutes_common.schemas.gpu import GPU
-from chutes_common.exceptions import AgentError
 from chutes_miner.api.exceptions import (
     DuplicateServer,
     VerificationFailure,
@@ -116,6 +117,7 @@ async def start_server_monitoring(agent_url: str):
 
 async def stop_server_monitoring(agent_url: str):
     from chutes_common.monitoring.client import stop_server_monitoring as _stop_common
+
     await _stop_common(agent_url=agent_url)
 
 
@@ -285,20 +287,20 @@ async def bootstrap_server(
         # Astonishing, everything worked. Mark GPUs as verified.
         async with get_session() as session:
             await session.execute(
-                update(GPU).where(GPU.server_id == node_object.metadata.uid).values({"verified": True})
+                update(GPU)
+                .where(GPU.server_id == node_object.metadata.uid)
+                .values({"verified": True})
             )
             await session.commit()
         yield sse_message(f"completed server bootstrapping in {time.time() - started_at} seconds!")
         success = True
 
-    except VerificationFailure as exc:
+    except VerificationFailure:
         # VerificationFailure is already logged/emitted in the verification strategy
         # Just re-raise without logging again with stacktrace
         pass
-    except Exception as exc:
-        error_message = (
-            f"Unhandled exception bootstrapping new node:\n{traceback.format_exc()} "
-        )
+    except Exception:
+        error_message = f"Unhandled exception bootstrapping new node:\n{traceback.format_exc()} "
         logger.error(f"{error_message}")
         yield sse_message(error_message)
         raise
