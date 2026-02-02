@@ -283,21 +283,21 @@ class MonitoringReconciler:
         except Exception as e:
             logger.error(f"Error clearing Redis for clusters not in DB: {e}")
 
-    async def _reinitiate_agent_monitoring(self, agent_url: str) -> None:
+    async def _restore_server_monitoring(self, server: Server) -> None:
         """Reinitiate monitoring for a single agent by sending a signed start-monitoring request. Does not raise."""
         try:
             await start_server_monitoring(
-                agent_url=agent_url,
+                agent_url=server.agent_api,
                 control_plane_url=settings.monitor_api,
                 timeout=30,
             )
-            logger.info(f"Reinitiated monitoring for agent at {agent_url}")
+            logger.info(f"Reinitiated monitoring for {server.name} at {server.agent_url}")
         except AgentError as e:
             logger.warning(
-                f"Reinitiate monitoring failed for {agent_url}: {e.status_code} {e.response_text}"
+                f"Reinitiate monitoring failed for {server.name}: {e.status_code} {e.response_text}"
             )
         except Exception as e:
-            logger.warning(f"Reinitiate monitoring failed for {agent_url}: {e}")
+            logger.warning(f"Reinitiate monitoring failed for {server.name}: {e}")
 
     async def _reinitiate_unhealthy_clusters(self) -> None:
         """Reinitiate monitoring for expected clusters that are unhealthy or missing in Redis."""
@@ -308,7 +308,7 @@ class MonitoringReconciler:
         try:
             async with get_session() as session:
                 result = await session.execute(select(Server).where(Server.agent_api.isnot(None)))
-                servers = result.scalars().all()
+                servers = result.unique().scalars().all()
             cluster_statuses = await self.redis_client.get_all_cluster_statuses()
             status_by_name = {s.cluster_name: s for s in cluster_statuses}
             for server in servers:
@@ -325,7 +325,7 @@ class MonitoringReconciler:
                 if now - last < throttle_seconds:
                     continue
                 self._reinitiate_last_attempt[cluster_name] = now
-                await self._reinitiate_agent_monitoring(server.agent_api)
+                await self._restore_server_monitoring(server)
         except Exception as e:
             logger.error(f"Error during reinitiate unhealthy clusters: {e}")
 
