@@ -502,7 +502,7 @@ def scorch_remote(
 
 
 def delete_remote(
-    server_id: str = typer.Option(help="Server UUID to delete on the validator side"),
+    name: str = typer.Option(help="Server name to delete on the validator side"),
     hotkey: str = typer.Option(..., help="Path to the hotkey file for your miner"),
     validator_api: str = typer.Option("https://api.chutes.ai", help="Validator API base URL"),
 ):
@@ -511,14 +511,14 @@ def delete_remote(
     """
 
     async def _delete_remote():
-        nonlocal hotkey, validator_api, server_id
+        nonlocal hotkey, validator_api, name
         async with aiohttp.ClientSession(raise_for_status=True) as session:
             headers, _ = sign_request(hotkey, purpose="tee", remote=True)
             async with session.delete(
-                f"{validator_api.rstrip('/')}/servers/{server_id}",
+                f"{validator_api.rstrip('/')}/servers/{name}",
                 headers=headers,
             ) as _:
-                print(f"  successfully deleted {server_id}")
+                print(f"  successfully deleted {name}")
 
     asyncio.run(_delete_remote())
 
