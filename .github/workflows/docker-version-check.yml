@@ -1,4 +1,4 @@
-name: Docker (Standalone) Version Bump Check
+name: Docker (Standalone) Version Check
 
 on:
   pull_request:

@@ -1,4 +1,4 @@
-name: Version Bump Check
+name: Pyproject Version Check
 
 on:
   pull_request:
@@ -8,7 +8,7 @@ on:
       - 'src/**'
 
 jobs:
-  version-check:
+  pyproject-version-check:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

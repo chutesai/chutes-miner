@@ -1,5 +1,4 @@
-name: Chart Version Bump Check
-
+name: Chart Version Check
 on:
   pull_request:
     branches:
