@@ -77,6 +77,11 @@ clean: ##@development Clean up any dependencies
 clean:
 	@echo "Skipping clean..."
 
+.PHONY: sync-pyproject-versions
+sync-pyproject-versions: ##@development Sync VERSION file into pyproject.toml for each package under src/
+sync-pyproject-versions:
+	$(POETRY) run python scripts/sync_pyproject_versions.py
+
 .PHONY: ci
 ci: ##@development Run CI pipeline
 ci: clean build infrastructure lint test clean

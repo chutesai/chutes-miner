@@ -10,11 +10,14 @@ on:
 jobs:
   pyproject-version-check:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Fetch main
         run: git fetch origin main
@@ -101,55 +104,26 @@ jobs:
             exit 1
           fi
 
-      - name: Check VERSION / pyproject.toml sync
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Sync VERSION into pyproject.toml
+        id: sync
         run: |
-          set -e
-          SRC_DIR="src"
-          SYNC_FAILED=""
-          SYNC_MSG=""
-
-          # Get version from VERSION file only
-          get_version_file() {
-            local dir="$1"
-            if [ -f "$dir/VERSION" ]; then
-              head -1 "$dir/VERSION" | tr -d '\n\r \t'
-            else
-              echo ""
-            fi
-          }
-
-          # Get version from pyproject.toml [tool.poetry] only
-          get_pyproject_version() {
-            local dir="$1"
-            if [ -f "$dir/pyproject.toml" ]; then
-              sed -n '/^\[tool\.poetry\]/,/^\[/p' "$dir/pyproject.toml" | grep '^version = ' | head -1 | sed -E 's/^version = ["'\'']([^"'\'']+)["'\''].*/\1/' | tr -d '\n\r \t'
-            else
-              echo ""
-            fi
-          }
-
-          for dir_path in "$SRC_DIR"/*/; do
-            [ -d "$dir_path" ] || continue
-            MODULE=$(basename "$dir_path")
-            VERSION_FILE="$dir_path/VERSION"
-            PYPROJECT="$dir_path/pyproject.toml"
-            [ -f "$VERSION_FILE" ] || continue
-            [ -f "$PYPROJECT" ] || continue
-
-            VERSION_VAL=$(get_version_file "$dir_path")
-            PYPROJECT_VAL=$(get_pyproject_version "$dir_path")
-
-            if [ "$VERSION_VAL" != "$PYPROJECT_VAL" ]; then
-              SYNC_MSG="${SYNC_MSG}- **$MODULE**: VERSION has \`${VERSION_VAL}\` but pyproject.toml has \`version = \"${PYPROJECT_VAL}\"\`. Sync them so built packages have the correct version.\n"
-              SYNC_FAILED=1
-            else
-              echo "✅ $MODULE: VERSION and pyproject.toml both $VERSION_VAL"
-            fi
-          done
-
-          if [ -n "$SYNC_FAILED" ]; then
-            echo ""
-            echo "::error::VERSION file and pyproject.toml must match for each package under src/ before merging to main."
-            echo -e "$SYNC_MSG"
-            exit 1
+          python scripts/sync_pyproject_versions.py
+          if git diff --quiet -- src/; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Commit and push sync
+        if: steps.sync.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/*/pyproject.toml
+          git commit -m "chore: sync pyproject.toml version from VERSION files"
+          git push
