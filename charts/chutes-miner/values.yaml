@@ -54,6 +54,8 @@ minerApi:
 gepetto:
   image: parachutes/miner:k3s-latest
   imagePullPolicy: Always
+  # Enable validator migrations (run on Gepetto startup). Default true in charts.
+  validatorMigrationsEnabled: true
   resources:
     requests:
       cpu: "500m"
