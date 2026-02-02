@@ -22,6 +22,7 @@ from chutes_miner.api.redis_pubsub import RedisListener
 from chutes_common.auth import sign_request
 from chutes_common.settings import Validator
 from chutes_miner.api.database import get_session, engine
+import chutes_common.schemas.orms  # noqa: F401 - register validator_migrations table
 from chutes_common.schemas import Base
 from chutes_common.schemas.chute import Chute
 from chutes_common.schemas.server import Server
@@ -29,6 +30,7 @@ from chutes_common.schemas.gpu import GPU
 from chutes_common.schemas.deployment import Deployment
 from chutes_common.exceptions import AgentError
 from chutes_miner.api.exceptions import DeploymentFailure
+from chutes_miner.validator_migrations import run_validator_migrations
 import chutes_miner.api.k8s as k8s
 
 
@@ -77,6 +79,8 @@ class Gepetto:
         """
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+        if settings.validator_migrations_enabled:
+            await run_validator_migrations()
         await self.reconcile()
         asyncio.create_task(self.activator())
         asyncio.create_task(self.autoscaler())
