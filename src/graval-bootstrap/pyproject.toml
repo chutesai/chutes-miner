@@ -7,7 +7,7 @@ license = "MIT"
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = ">=3.10,<3.13"
+python = ">=3.12,<4.0"
 fastapi = "^0.115.5"
 uvicorn = "^0.32.0"
 substrate-interface = "^1.7.11"

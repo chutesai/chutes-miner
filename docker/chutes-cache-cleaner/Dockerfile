@@ -1,9 +1,8 @@
 # Cache cleanup image: HF/CivitAI cache cleanup. Script is in the image (no ConfigMap).
 # Runs as UID 1000; host cache dir must be owned by 1000:1000 when VM is set up.
+FROM python:3.12-slim AS base
 ARG PROJECT_DIR
 ARG PROJECT
-
-FROM python:3.10-slim AS base
 
 RUN pip install --no-cache-dir huggingface_hub
 
