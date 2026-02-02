@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "chutes-agent"
-version = "0.1.0"
+version = "0.1.5"
 description = "Agent to monitor chutes in Chutes clusters"
 authors = ["Kyle Widmann <kyle.widmann@gmail.com>"]
 readme = "README.md"
