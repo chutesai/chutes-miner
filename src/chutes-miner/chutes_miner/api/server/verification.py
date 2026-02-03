@@ -536,7 +536,11 @@ class GravalVerificationStrategy(VerificationStrategy):
                 for idx in range(len(gpus))
             ]
             headers, payload_string = sign_request(
-                payload={"nodes": device_infos, "server_id": gpus[0].server_id}
+                payload={
+                    "nodes": device_infos, 
+                    "server_id": gpus[0].server_id,
+                    "server_name": gpus[0].server.name,
+                }
             )
             async with session.post(
                 f"{validator.api}/nodes/", data=payload_string, headers=headers
@@ -796,6 +800,7 @@ class TEEVerificationStrategy(VerificationStrategy):
             headers, payload_string = sign_request(
                 payload={
                     "id": self.server.server_id,
+                    "name": self.server.name,
                     "host": self.node_ip,
                     "gpus": device_infos,
                 }
