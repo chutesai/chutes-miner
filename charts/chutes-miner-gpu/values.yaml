@@ -68,7 +68,8 @@ agent:
   affinity: {}
 
 failedChuteCleanup:
-  image: bitnamilegacy/kubectl:latest
+  image: parachutes/failed-chute-cleanup:latest
+  imagePullPolicy: IfNotPresent
 
 # Miner credentials - These are provided via Ansible deployment
 # These values are automatically injected during deployment and should not be set manually
