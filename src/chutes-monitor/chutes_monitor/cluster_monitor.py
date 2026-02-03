@@ -256,7 +256,7 @@ class MonitoringReconciler:
                 if not self._running:
                     break
                 await self._reconcile_cache_with_db()
-                await self._reinitiate_unhealthy_clusters()
+                await self._restore_unhealthy_clusters()
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -291,16 +291,16 @@ class MonitoringReconciler:
                 control_plane_url=settings.monitor_api,
                 timeout=30,
             )
-            logger.info(f"Reinitiated monitoring for {server.name} at {server.agent_url}")
+            logger.info(f"Restored monitoring for {server.name} at {server.agent_api}")
         except AgentError as e:
             logger.warning(
-                f"Reinitiate monitoring failed for {server.name}: {e.status_code} {e.response_text}"
+                f"Failed to restore monitoring for {server.name}: {e.status_code} {e.response_text}"
             )
         except Exception as e:
-            logger.warning(f"Reinitiate monitoring failed for {server.name}: {e}")
+            logger.warning(f"Failed to restore monitoring for {server.name}: {e}")
 
-    async def _reinitiate_unhealthy_clusters(self) -> None:
-        """Reinitiate monitoring for expected clusters that are unhealthy or missing in Redis."""
+    async def _restore_unhealthy_clusters(self) -> None:
+        """Restore monitoring for expected clusters that are unhealthy or missing in Redis."""
         if not settings.monitor_api:
             return
         throttle_seconds = settings.reinitiate_interval_seconds
