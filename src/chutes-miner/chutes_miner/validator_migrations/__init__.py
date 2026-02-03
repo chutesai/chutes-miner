@@ -10,71 +10,26 @@ On any failure we do not record and re-raise so the pod exits.
 
 import re
 import traceback
-import aiohttp
-from abc import ABC, abstractmethod
-from typing import Dict, List
 
 from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from chutes_common.auth import sign_request
-from chutes_common.settings import Validator
-from chutes_common.schemas.server import Server
 from chutes_common.schemas.validator_migration import ValidatorMigrationRecord
 
 from chutes_miner.api.config import settings
 from chutes_miner.api.database import get_session
 
+from chutes_miner.validator_migrations.base import ValidatorMigration
+from chutes_miner.validator_migrations.migrations import SyncServerKeysMigration
 
-class ValidatorMigration(ABC):
-    """One-time migration that may call the validator API."""
-
-    @abstractmethod
-    async def run(self, session: AsyncSession, validators: List[Validator]) -> None:
-        """Run the migration. Raise on any error (pod will exit)."""
-        ...
-
-
-class SyncServerKeysMigration(ValidatorMigration):
-    """
-    Sync server names on the validator: call PATCH /servers/{server_id}
-    for each local server so the validator updates vm_name to match our server name.
-    """
-
-    async def run(self, session: AsyncSession, validators: List[Validator]) -> None:
-        for validator in validators:
-            result = await session.execute(
-                select(Server).where(Server.validator == validator.hotkey)
-            )
-            servers = result.scalars().all()
-            if not servers:
-                continue
-            headers, _ = sign_request(purpose="tee")
-            base_url = validator.api.rstrip("/")
-            async with aiohttp.ClientSession() as client:
-                for server in servers:
-                    url = f"{base_url}/servers/{server.server_id}"
-                    params = {"server_name": server.name}
-                    async with client.patch(url, headers=headers, params=params) as resp:
-                        if resp.status >= 200 and resp.status < 300:
-                            logger.info(
-                                f"Validator migration sync_server_keys: patched server {server.server_id} name to {server.name!r} on {validator.hotkey}"
-                            )
-                        else:
-                            text = await resp.text()
-                            raise RuntimeError(
-                                f"Validator {validator.hotkey} PATCH /servers/{server.server_id} returned {resp.status}: {text}"
-                            )
-
+# Registry: unique key YYYYMMDDXX -> migration. Run in sorted order by key.
+MIGRATIONS: dict[str, ValidatorMigration] = {
+    "2025013101": SyncServerKeysMigration(),
+}
 
 # Key format: YYYYMMDDXX (10 digits). Enforced at import.
 _MIGRATION_KEY_RE = re.compile(r"^\d{10}$")
-
-# Registry: unique key -> migration. Run in sorted order by key.
-MIGRATIONS: Dict[str, ValidatorMigration] = {
-    "2025013101": SyncServerKeysMigration(),
-}
 
 
 def _assert_migration_keys_unique() -> None:
