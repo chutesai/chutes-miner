@@ -85,6 +85,6 @@ prometheus:
     - '{job="node-exporter"}'
     clusters:
 {% for host in groups['workers'] %}
-    - endpoint: {{ hostvars[host]['ansible_host'] }}:30090
+    - endpoint: {{ hostvars[host]['public_ip'] }}:30090
       name: {{ host }}
 {% endfor %}

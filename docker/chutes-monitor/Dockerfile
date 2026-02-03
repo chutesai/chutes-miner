@@ -42,7 +42,8 @@ FROM base AS production
 ARG PROJECT_DIR
 ARG PROJECT
 
-ENV PATH="/app/.venv/bin:$PATH"
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1
 ENV APP_USER=chutes
 ENV APP_GROUP=chutes
 

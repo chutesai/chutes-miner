@@ -86,6 +86,10 @@ class Settings(CommonSettings):
 
     migrations_dir: str = os.getenv("MIGRATIONS_DIR", "chutes-miner/chutes_miner/api/migrations")
 
+    validator_migrations_enabled: bool = (
+        os.getenv("VALIDATOR_MIGRATIONS_ENABLED", "false").lower() == "true"
+    )
+
     monitor_api: str = str(os.getenv("MONITOR_API", ""))
 
     reconcile_clusters: bool = os.getenv("RECONCILE_CLUSTERS", "false").lower() == "true"

@@ -13,6 +13,7 @@ graval-bootstrap = {path = "src/graval-bootstrap", develop = true}
 chutes-miner-cli = {path = "src/chutes-miner-cli", develop = true}
 chutes-agent = {path = "src/chutes-agent", develop = true}
 chutes-monitor = {path = "src/chutes-monitor", develop = true}
+chutes-cache-cleaner = {path = "src/chutes-cache-cleaner", develop = true}
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.4.1"

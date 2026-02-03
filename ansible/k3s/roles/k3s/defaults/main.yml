@@ -11,5 +11,5 @@ k3s_server_config_yaml: |-
     - traefik
     - servicelb
   node-ip: {{ node_ip }}
-  node-external-ip: {{ ansible_host }}
-  advertise-address: {{ ansible_host }}
+  node-external-ip: {{ public_ip }}
+  advertise-address: {{ public_ip }}

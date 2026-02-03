@@ -74,6 +74,21 @@ async def test_stop_monitoring_no_task(resource_monitor):
     await resource_monitor.stop_monitoring_tasks()
     assert resource_monitor.state == MonitoringState.STOPPED
 
+@pytest.mark.asyncio
+async def test_stop_no_active_client(resource_monitor):
+    """Test stop() raises InvalidOperationError when control_plane_client is None"""
+    from chutes_agent.exceptions import InvalidOperationError
+    
+    resource_monitor.control_plane_client = None
+    resource_monitor.stop_monitoring_tasks = AsyncMock()
+    resource_monitor._clear_control_plane_url = MagicMock()
+    
+    with pytest.raises(InvalidOperationError) as exc_info:
+        await resource_monitor.stop()
+    
+    assert "no active control plane client" in str(exc_info.value).lower()
+    resource_monitor.stop_monitoring_tasks.assert_called_once()
+
 def test_restart(resource_monitor):
     """Test restart functionality"""
     with patch('asyncio.create_task') as mock_create_task:

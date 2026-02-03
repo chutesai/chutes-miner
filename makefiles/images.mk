@@ -72,7 +72,7 @@ tag:
 	done
 
 .PHONY: sign
-sign: ##@images Sign docker images from the build step for Parachutes repo
+sign: ##@images Sign docker images from the build step for Parachutes repo (set COSIGN_PASSWORD once to avoid per-sign prompts)
 sign:
 	@if [ -z "$$COSIGN_PRIVATE_KEY" ]; then \
 		echo "Error: COSIGN_PRIVATE_KEY environment variable is not set"; \
@@ -83,6 +83,13 @@ sign:
 		echo "Error: COSIGN_PRIVATE_KEY file $$COSIGN_PRIVATE_KEY does not exist"; \
 		exit 1; \
 	fi; \
+	if [ -z "$$COSIGN_PASSWORD" ]; then \
+		echo "Enter cosign key password (used for all images in this run):"; \
+		read -s COSIGN_PASSWORD; \
+		export COSIGN_PASSWORD; \
+		echo ""; \
+	fi; \
+	export COSIGN_PASSWORD; \
 	images=$$(find docker -maxdepth 1 -type d ! -path docker | sort); \
 	image_names=$$(echo $$images | xargs -n1 basename | tr '\n' ' '); \
 	filtered_images=""; \
@@ -135,10 +142,10 @@ sign:
 								target_tag="$$image_tag$$pkg_version"; \
 								src_version=$$pkg_version; \
 							fi; \
-							echo "cosign sign --key $(COSIGN_PRIVATE_KEY) -a \"org=chutes.ai\" $$registry/$$image_name:$$target_tag"; \
-							cosign sign --key $(COSIGN_PRIVATE_KEY) -a \"org=chutes.ai\" $$registry/$$image_name:$$target_tag; \
-							echo "cosign sign --key $(COSIGN_PRIVATE_KEY) -a \"org=chutes.ai\" $$registry/$$image_name:$$latest_tag"; \
-							cosign sign --key $(COSIGN_PRIVATE_KEY) -a \"org=chutes.ai\" $$registry/$$image_name:$$latest_tag; \
+							echo "cosign sign --yes --key $(COSIGN_PRIVATE_KEY) -a \"org=chutes.ai\" $$registry/$$image_name:$$target_tag"; \
+							cosign sign --yes --key $(COSIGN_PRIVATE_KEY) -a \"org=chutes.ai\" $$registry/$$image_name:$$target_tag; \
+							echo "cosign sign --yes --key $(COSIGN_PRIVATE_KEY) -a \"org=chutes.ai\" $$registry/$$image_name:$$latest_tag"; \
+							cosign sign --yes --key $(COSIGN_PRIVATE_KEY) -a \"org=chutes.ai\" $$registry/$$image_name:$$latest_tag; \
 							image_ref="$$registry/$$image_name:$$target_tag"; \
 							latest_ref="$$registry/$$image_name:$$latest_tag"; \
 							echo "Fetching digest for $$image_ref"; \
@@ -147,12 +154,12 @@ sign:
 								echo "Error: Could not fetch digest for $$image_ref. Ensure the image is pushed and accessible."; \
 								continue; \
 							fi; \
-							echo "cosign sign --key $(COSIGN_PRIVATE_KEY) -a \"org=chutes.ai\" $$registry/$$image_name@$$digest"; \
-							cosign sign --key $(COSIGN_PRIVATE_KEY) -a "org=chutes.ai" $$registry/$$image_name@$$digest; \
+							echo "cosign sign --yes --key $(COSIGN_PRIVATE_KEY) -a \"org=chutes.ai\" $$registry/$$image_name@$$digest"; \
+							cosign sign --yes --key $(COSIGN_PRIVATE_KEY) -a "org=chutes.ai" $$registry/$$image_name@$$digest; \
 							latest_digest=$$(docker inspect --format='{{index .RepoDigests 0}}' $$latest_ref 2>/dev/null | cut -d'@' -f2 || echo ""); \
 							if [ -n "$$latest_digest" ]; then \
-								echo "cosign sign --key $(COSIGN_PRIVATE_KEY) -a \"org=chutes.ai\" $$registry/$$image_name@$$latest_digest"; \
-								cosign sign --key $(COSIGN_PRIVATE_KEY) -a "org=chutes.ai" $$registry/$$image_name@$$latest_digest; \
+								echo "cosign sign --yes --key $(COSIGN_PRIVATE_KEY) -a \"org=chutes.ai\" $$registry/$$image_name@$$latest_digest"; \
+								cosign sign --yes --key $(COSIGN_PRIVATE_KEY) -a "org=chutes.ai" $$registry/$$image_name@$$latest_digest; \
 							else \
 								echo "Skipping latest tag signing for $$latest_ref: Digest not found"; \
 							fi; \

@@ -77,6 +77,8 @@ spec:
               value: {{ .Values.validators | toJson | quote }}
             - name: REGISTRY_PROXY_PORT
               value: "{{ .Values.registry.service.nodePort }}"
+            - name: VALIDATOR_MIGRATIONS_ENABLED
+              value: "{{ .Values.gepetto.validatorMigrationsEnabled }}"
             {{ if not .Values.multiCluster }}
             - name: NVIDIA_RUNTIME
               value: nvidia-container-runtime

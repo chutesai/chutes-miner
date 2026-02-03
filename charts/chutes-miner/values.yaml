@@ -54,6 +54,8 @@ minerApi:
 gepetto:
   image: parachutes/miner:k3s-latest
   imagePullPolicy: Always
+  # Enable validator migrations (run on Gepetto startup). Default true in charts.
+  validatorMigrationsEnabled: true
   resources:
     requests:
       cpu: "500m"
@@ -146,6 +148,10 @@ auditExporter:
 monitor:
   image: parachutes/chutes-monitor:k3s-latest
   imagePullPolicy: Always
+  # Interval in seconds for the monitoring reconciliation loop (cache sync + reinitiate unhealthy clusters)
+  reconciliationIntervalSeconds: 60
+  # Minimum seconds between reinitiate attempts per cluster (throttle for reinitiate-unhealthy)
+  reinitiateIntervalSeconds: 120
   resources:
     requests:
       cpu: "250m"

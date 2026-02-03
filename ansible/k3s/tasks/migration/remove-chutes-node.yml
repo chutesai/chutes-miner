@@ -19,7 +19,7 @@
     - name: Run delete node command locally
       ansible.builtin.command: >
         chutes-miner delete-node --name {{ inventory_hostname }}  --hotkey {{ hotkey_path }}
-        --miner-api http://{{ ansible_host }}:{{ miner_api_port | default(32000) }}
+        --miner-api http://{{ public_ip }}:{{ miner_api_port | default(32000) }}
       register: local_delete_output
       failed_when: local_delete_output.rc != 0
       become: false

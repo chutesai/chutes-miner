@@ -1,0 +1,130 @@
+name: Pyproject Version Check
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'src/**'
+
+jobs:
+  pyproject-version-check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Fetch main
+        run: git fetch origin main
+
+      - name: Check module version bumps
+        run: |
+          set -e
+          SRC_DIR="src"
+          FAILED=""
+          FAIL_MSG=""
+
+          # Get version for a module: VERSION file first, else pyproject.toml [tool.poetry] version
+          get_version() {
+            local dir="$1"
+            if [ -f "$dir/VERSION" ]; then
+              head -1 "$dir/VERSION" | tr -d '\n\r \t'
+            elif [ -f "$dir/pyproject.toml" ]; then
+              sed -n '/^\[tool\.poetry\]/,/^\[/p' "$dir/pyproject.toml" | grep '^version = ' | head -1 | sed -E 's/^version = ["'\'']([^"'\'']+)["'\''].*/\1/'
+            else
+              echo ""
+            fi
+          }
+
+          # Compare two semver strings: print "ok" if second > first, else "fail"
+          version_gt() {
+            local main_ver="$1"
+            local pr_ver="$2"
+            [ -z "$pr_ver" ] && { echo "fail"; return; }
+            [ -z "$main_ver" ] && main_ver="0.0.0"
+            HIGHER=$(printf '%s\n%s\n' "$main_ver" "$pr_ver" | sort -V | tail -n1)
+            if [ "$HIGHER" = "$pr_ver" ] && [ "$main_ver" != "$pr_ver" ]; then
+              echo "ok"
+            else
+              echo "fail"
+            fi
+          }
+
+          # Top-level modules under src/
+          MODULES=$(find "$SRC_DIR" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort)
+
+          # Changed paths in this PR (files changed vs main)
+          CHANGED_FILES=$(git diff --name-only origin/main...HEAD -- "$SRC_DIR/" || true)
+          CHANGED_MODULES=$(echo "$CHANGED_FILES" | awk -F/ -v n=2 'NF>=n {print $n}' | sort -u)
+
+          if [ -z "$CHANGED_MODULES" ]; then
+            echo "No modules under src/ were changed. Nothing to verify."
+            exit 0
+          fi
+
+          echo "Modules with changes: $CHANGED_MODULES"
+          echo ""
+
+          for MODULE in $CHANGED_MODULES; do
+            MODULE_DIR="$SRC_DIR/$MODULE"
+            [ ! -d "$MODULE_DIR" ] && continue
+
+            # Get version on main
+            MAIN_VERSION=$(git show origin/main:"$MODULE_DIR/VERSION" 2>/dev/null | head -1 | tr -d '\n\r \t' || true)
+            if [ -z "$MAIN_VERSION" ]; then
+              MAIN_VERSION=$(git show origin/main:"$MODULE_DIR/pyproject.toml" 2>/dev/null | sed -n '/^\[tool\.poetry\]/,/^\[/p' | grep '^version = ' | head -1 | sed -E 's/^version = ["'\'']([^"'\'']+)["'\''].*/\1/' || true)
+            fi
+            [ -z "$MAIN_VERSION" ] && MAIN_VERSION="0.0.0"
+
+            # Get version in PR branch (current checkout)
+            PR_VERSION=$(get_version "$MODULE_DIR")
+
+            GT=$(version_gt "$MAIN_VERSION" "$PR_VERSION")
+            if [ "$GT" = "ok" ]; then
+              echo "✅ $MODULE: $MAIN_VERSION → $PR_VERSION (bumped)"
+            else
+              if [ -z "$PR_VERSION" ]; then
+                FAIL_MSG="${FAIL_MSG}- **$MODULE**: No VERSION file or version in pyproject.toml. Add a VERSION file or set \`version\` under [tool.poetry] and ensure it is higher than main ($MAIN_VERSION).\n"
+              else
+                FAIL_MSG="${FAIL_MSG}- **$MODULE**: VERSION must be higher than on main. main=$MAIN_VERSION, PR=$PR_VERSION.\n"
+              fi
+              FAILED=1
+            fi
+          done
+
+          if [ -n "$FAILED" ]; then
+            echo ""
+            echo "::error::One or more modules with changes do not have a version bump."
+            echo -e "$FAIL_MSG"
+            exit 1
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Sync VERSION into pyproject.toml
+        id: sync
+        run: |
+          python scripts/sync_pyproject_versions.py
+          if git diff --quiet -- src/; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit and push sync
+        if: steps.sync.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/*/pyproject.toml
+          git commit -m "chore: sync pyproject.toml version from VERSION files"
+          git push

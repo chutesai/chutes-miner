@@ -45,7 +45,7 @@ Fetches a **single** context directly from a node before it has been added to th
 ```bash
 chutes-miner sync-node-kubeconfig \
 	--agent-api https://10.0.0.5:8443 \
-	--context-name chutes-miner-gpu-0 \
+	--context-name chutes-miner-gpu-0 \   # Set this to the name of your node
 	--hotkey ~/.bittensor/wallets/<wallet>/hotkeys/<hotkey>.json \
 	--path ~/.kube/chutes.config \
 	--overwrite               # optional, required if the context already exists

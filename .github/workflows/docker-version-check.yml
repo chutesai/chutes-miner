@@ -1,0 +1,114 @@
+name: Docker (Standalone) Version Check
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'docker/**'
+
+jobs:
+  docker-version-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch main
+        run: git fetch origin main
+
+      - name: Check standalone docker image version bumps
+        run: |
+          set -e
+          DOCKER_DIR="docker"
+          SRC_DIR="src"
+          FAILED=""
+          FAIL_MSG=""
+
+          # Standalone = docker/<name>/ has no corresponding src/<name>/
+          is_standalone() {
+            local name="$1"
+            [ ! -d "$SRC_DIR/$name" ]
+          }
+
+          # Get version from VERSION file
+          get_version() {
+            local dir="$1"
+            if [ -f "$dir/VERSION" ]; then
+              head -1 "$dir/VERSION" | tr -d '\n\r \t'
+            else
+              echo ""
+            fi
+          }
+
+          # Compare two semver strings: print "ok" if second > first, else "fail"
+          version_gt() {
+            local main_ver="$1"
+            local pr_ver="$2"
+            [ -z "$pr_ver" ] && { echo "fail"; return; }
+            [ -z "$main_ver" ] && main_ver="0.0.0"
+            HIGHER=$(printf '%s\n%s\n' "$main_ver" "$pr_ver" | sort -V | tail -n1)
+            if [ "$HIGHER" = "$pr_ver" ] && [ "$main_ver" != "$pr_ver" ]; then
+              echo "ok"
+            else
+              echo "fail"
+            fi
+          }
+
+          # Changed paths in this PR (files under docker/)
+          CHANGED_FILES=$(git diff --name-only origin/main...HEAD -- "$DOCKER_DIR/" || true)
+
+          # Standalone docker dirs where Dockerfile changed
+          CHANGED_STANDALONE=""
+          for dir_path in "$DOCKER_DIR"/*/; do
+            [ -d "$dir_path" ] || continue
+            name=$(basename "$dir_path")
+            is_standalone "$name" || continue
+            if echo "$CHANGED_FILES" | grep -q "^$DOCKER_DIR/$name/Dockerfile$"; then
+              CHANGED_STANDALONE="${CHANGED_STANDALONE}${name}"$'\n'
+            fi
+          done
+          CHANGED_STANDALONE=$(echo "$CHANGED_STANDALONE" | sort -u)
+
+          if [ -z "$CHANGED_STANDALONE" ]; then
+            echo "No standalone docker image Dockerfiles were changed. Nothing to verify."
+            exit 0
+          fi
+
+          echo "Standalone docker images with Dockerfile changes: $CHANGED_STANDALONE"
+          echo ""
+
+          for NAME in $CHANGED_STANDALONE; do
+            IMAGE_DIR="$DOCKER_DIR/$NAME"
+            VERSION_FILE="$IMAGE_DIR/VERSION"
+
+            # Get version on main
+            MAIN_VERSION=$(git show origin/main:"$VERSION_FILE" 2>/dev/null | head -1 | tr -d '\n\r \t' || true)
+            [ -z "$MAIN_VERSION" ] && MAIN_VERSION="0.0.0"
+
+            # Get version in PR branch (current checkout)
+            PR_VERSION=$(get_version "$IMAGE_DIR")
+
+            GT=$(version_gt "$MAIN_VERSION" "$PR_VERSION")
+            if [ "$GT" = "ok" ]; then
+              echo "✅ $NAME: $MAIN_VERSION → $PR_VERSION (bumped)"
+            else
+              if [ ! -f "$VERSION_FILE" ]; then
+                FAIL_MSG="${FAIL_MSG}- **$NAME**: Standalone docker image must have a VERSION file. Add \`docker/$NAME/VERSION\` and set it higher than main ($MAIN_VERSION).\n"
+              elif [ -z "$PR_VERSION" ]; then
+                FAIL_MSG="${FAIL_MSG}- **$NAME**: VERSION file is empty or unreadable. Set it higher than main ($MAIN_VERSION).\n"
+              else
+                FAIL_MSG="${FAIL_MSG}- **$NAME**: VERSION must be higher than on main (Dockerfile changed). main=$MAIN_VERSION, PR=$PR_VERSION.\n"
+              fi
+              FAILED=1
+            fi
+          done
+
+          if [ -n "$FAILED" ]; then
+            echo ""
+            echo "::error::One or more standalone docker images with Dockerfile changes do not have a version bump."
+            echo -e "$FAIL_MSG"
+            exit 1
+          fi

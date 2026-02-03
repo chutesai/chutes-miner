@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "chutes-miner"
-version = "0.3.1"
+version = "0.4.0"
 description = "chutes.ai miner API"
 authors = ["Jon Durbin <jon@jondurbin.com>", "namoray <namoray@rayonlabs.ai>"]
 license = "MIT"

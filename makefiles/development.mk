@@ -77,6 +77,21 @@ clean: ##@development Clean up any dependencies
 clean:
 	@echo "Skipping clean..."
 
+.PHONY: sync-pyproject-versions
+sync-pyproject-versions: ##@development Sync VERSION file into pyproject.toml for each package under src/
+sync-pyproject-versions:
+	$(POETRY) run python scripts/sync_pyproject_versions.py
+
+.PHONY: update-chutes-common
+update-chutes-common: ##@development Run 'poetry update chutes-common' in each src package that depends on it
+update-chutes-common:
+	@for pkg in $(SRC_PACKAGE_NAMES); do \
+		if grep -q 'chutes-common =' $(SRC_DIR)/$$pkg/pyproject.toml 2>/dev/null; then \
+			echo "Updating chutes-common in $$pkg..."; \
+			(cd $(SRC_DIR)/$$pkg && $(POETRY) update chutes-common); \
+		fi; \
+	done
+
 .PHONY: ci
 ci: ##@development Run CI pipeline
 ci: clean build infrastructure lint test clean

@@ -477,7 +477,7 @@ files = [
 
 [[package]]
 name = "chutes-common"
-version = "0.1.0"
+version = "0.2.1"
 description = "Common library for Chutes Miner"
 optional = false
 python-versions = ">=3.12,<4.0"
@@ -486,6 +486,7 @@ files = []
 develop = true
 
 [package.dependencies]
+aiohttp = "^3.11.0"
 fastapi = "^0.115.4"
 kubernetes-asyncio = "^32.3.2"
 loguru = "^0.7.3"

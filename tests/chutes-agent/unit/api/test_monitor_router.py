@@ -266,6 +266,23 @@ def test_stop_monitoring_when_already_stopped(resource_monitor, client):
     assert response_data["message"] == "Monitoring stopped"
     resource_monitor.stop.assert_called_once()
 
+def test_stop_monitoring_no_active_client(resource_monitor, client):
+    """Test stop monitoring when agent has no active control plane client (409 Conflict)"""
+    from fastapi import status
+    from chutes_agent.exceptions import InvalidOperationError
+    
+    resource_monitor.stop = AsyncMock(side_effect=InvalidOperationError(
+        "Cannot stop monitoring: agent has no active control plane client. "
+        "Agent may have lost state and cannot remove itself from cache."
+    ))
+    
+    response = client.get("/stop")
+    
+    assert response.status_code == status.HTTP_409_CONFLICT
+    response_data = response.json()
+    assert "no active control plane client" in response_data["detail"]
+    resource_monitor.stop.assert_called_once()
+
 # Integration and Edge Case Tests
 
 def test_all_endpoints_registered(app):

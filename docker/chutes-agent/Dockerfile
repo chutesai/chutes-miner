@@ -75,3 +75,4 @@ COPY --chown=chutes:chutes tests/fixtures/ ./tests/fixtures/
 COPY --chown=chutes:chutes tests/*.py ./tests
 RUN chown ${APP_USER}:${APP_GROUP} .
 
+ENTRYPOINT ["python", "-m", "uvicorn", "--host", "0.0.0.0", "--port", "8000", "chutes_agent.api.main:app"]
