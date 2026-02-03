@@ -12,6 +12,10 @@ spec:
       template:
         spec:
           serviceAccountName: chutes
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
           {{- if not .Values.multiCluster}}
           nodeSelector:
             node.kubernetes.io/microk8s-controlplane: microk8s-controlplane

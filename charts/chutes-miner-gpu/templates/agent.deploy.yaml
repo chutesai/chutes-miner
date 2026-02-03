@@ -18,6 +18,7 @@ spec:
       priorityClassName: critical-pod-priority
       serviceAccountName: agent
       securityContext:
+        runAsNonRoot: true
         fsGroup: 1000
         runAsUser: 1000
         runAsGroup: 1000
