@@ -8,6 +8,7 @@ from typing import Optional
 
 import typer
 
+from chutes_miner_cli.constants import HOTKEY_ENVVAR, MINER_API_ENVVAR
 from chutes_miner_cli.tee import (
     build_tee_base_url,
     send_tee_request,
@@ -23,8 +24,8 @@ def register(app: typer.Typer) -> None:
         name: str = typer.Option(..., "--name", "-n", help="TEE node (server) name"),
         chute_id: str = typer.Option(..., "--chute-id", help="Chute ID to download"),
         force: bool = typer.Option(False, "--force", help="Re-download if already present"),
-        hotkey: str = typer.Option(..., help="Path to the hotkey file for your miner"),
-        miner_api: str = typer.Option("http://127.0.0.1:32000", help="Miner API base URL"),
+        hotkey: str = typer.Option(..., help="Path to the hotkey file for your miner", envvar=HOTKEY_ENVVAR),
+        miner_api: str = typer.Option("http://127.0.0.1:32000", help="Miner API base URL", envvar=MINER_API_ENVVAR),
     ):
         async def _run():
             ip = await resolve_server_by_name(name, hotkey, miner_api)
@@ -48,8 +49,8 @@ def register(app: typer.Typer) -> None:
     def cache_download_status(
         name: str = typer.Option(..., "--name", "-n", help="TEE node (server) name"),
         chute_id: Optional[str] = typer.Option(None, "--chute-id", help="Optional chute ID to filter"),
-        hotkey: str = typer.Option(..., help="Path to the hotkey file for your miner"),
-        miner_api: str = typer.Option("http://127.0.0.1:32000", help="Miner API base URL"),
+        hotkey: str = typer.Option(..., help="Path to the hotkey file for your miner", envvar=HOTKEY_ENVVAR),
+        miner_api: str = typer.Option("http://127.0.0.1:32000", help="Miner API base URL", envvar=MINER_API_ENVVAR),
     ):
         async def _run():
             ip = await resolve_server_by_name(name, hotkey, miner_api)
@@ -68,8 +69,8 @@ def register(app: typer.Typer) -> None:
     @app.command("cache-overview", help="List cache contents and sizes")
     def cache_overview(
         name: str = typer.Option(..., "--name", "-n", help="TEE node (server) name"),
-        hotkey: str = typer.Option(..., help="Path to the hotkey file for your miner"),
-        miner_api: str = typer.Option("http://127.0.0.1:32000", help="Miner API base URL"),
+        hotkey: str = typer.Option(..., help="Path to the hotkey file for your miner", envvar=HOTKEY_ENVVAR),
+        miner_api: str = typer.Option("http://127.0.0.1:32000", help="Miner API base URL", envvar=MINER_API_ENVVAR),
     ):
         async def _run():
             ip = await resolve_server_by_name(name, hotkey, miner_api)
@@ -88,8 +89,8 @@ def register(app: typer.Typer) -> None:
     def cache_delete(
         name: str = typer.Option(..., "--name", "-n", help="TEE node (server) name"),
         chute_id: str = typer.Option(..., "--chute-id", help="Chute ID to remove from cache"),
-        hotkey: str = typer.Option(..., help="Path to the hotkey file for your miner"),
-        miner_api: str = typer.Option("http://127.0.0.1:32000", help="Miner API base URL"),
+        hotkey: str = typer.Option(..., help="Path to the hotkey file for your miner", envvar=HOTKEY_ENVVAR),
+        miner_api: str = typer.Option("http://127.0.0.1:32000", help="Miner API base URL", envvar=MINER_API_ENVVAR),
     ):
         async def _run():
             ip = await resolve_server_by_name(name, hotkey, miner_api)
@@ -112,8 +113,8 @@ def register(app: typer.Typer) -> None:
         name: str = typer.Option(..., "--name", "-n", help="TEE node (server) name"),
         max_age_days: int = typer.Option(5, "--max-age-days", help="Remove entries older than this many days"),
         max_size_gb: int = typer.Option(100, "--max-size-gb", help="Target max cache size in GB"),
-        hotkey: str = typer.Option(..., help="Path to the hotkey file for your miner"),
-        miner_api: str = typer.Option("http://127.0.0.1:32000", help="Miner API base URL"),
+        hotkey: str = typer.Option(..., help="Path to the hotkey file for your miner", envvar=HOTKEY_ENVVAR),
+        miner_api: str = typer.Option("http://127.0.0.1:32000", help="Miner API base URL", envvar=MINER_API_ENVVAR),
     ):
         async def _run():
             ip = await resolve_server_by_name(name, hotkey, miner_api)
