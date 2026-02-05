@@ -9,6 +9,9 @@ from rich.console import Console
 from rich.table import Table
 from rich import box
 import datetime
+from chutes_miner_cli.tee import tee_app
+from chutes_miner_cli import tee_cache
+from chutes_miner_cli import tee_status
 from chutes_miner_cli.util import sign_request
 from loguru import logger
 import yaml
@@ -700,6 +703,11 @@ app.command(
 )(sync_node_kubeconfig)
 app.command(name="lock", help="Lock a server's deployments")(lock_server)
 app.command(name="unlock", help="Unlock a server's deployments")(unlock_server)
+
+# TEE VM system-manager commands (cache + status)
+tee_cache.register(tee_app)
+tee_status.register(tee_app)
+app.add_typer(tee_app, name="tee")
 
 
 if __name__ == "__main__":
