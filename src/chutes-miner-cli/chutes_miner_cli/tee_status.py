@@ -4,9 +4,12 @@ TEE VM status commands: node-health, services, gpu, disk, shutdown.
 
 import asyncio
 import json
-from typing import Optional
+from typing import Any, Optional
 
 import typer
+from rich.console import Console
+from rich.table import Table
+from rich import box
 
 from chutes_miner_cli.constants import HOTKEY_ENVVAR, MINER_API_ENVVAR
 from chutes_miner_cli.tee import (
@@ -14,6 +17,95 @@ from chutes_miner_cli.tee import (
     send_tee_request,
     resolve_server_by_name,
 )
+
+console = Console()
+
+
+def display_services_list(data: dict[str, Any]) -> None:
+    """Pretty-print list of services (id, unit, description)."""
+    services = data.get("services") or []
+    if not services:
+        console.print("No services.")
+        return
+    table = Table(title="Services", box=box.ROUNDED)
+    table.add_column("ID", style="cyan")
+    table.add_column("Unit")
+    table.add_column("Description")
+    for s in services:
+        table.add_row(
+            s.get("id", "-"),
+            s.get("unit", "-"),
+            s.get("description") or "-",
+        )
+    console.print(table)
+
+
+def display_overview(data: dict[str, Any]) -> None:
+    """Pretty-print system overview (status, services table, gpu summary)."""
+    console.print(f"[bold]Status:[/bold] {data.get('status', '-')}")
+    console.print(f"[bold]Timestamp:[/bold] {data.get('timestamp', '-')}")
+    services = data.get("services") or []
+    if services:
+        table = Table(title="Services", box=box.ROUNDED)
+        table.add_column("Service", style="cyan")
+        table.add_column("State")
+        table.add_column("Healthy")
+        table.add_column("PID")
+        for s in services:
+            if not isinstance(s, dict):
+                table.add_row(str(s), "-", "-", "-")
+                continue
+            # ServiceStatusResponse: service (ServiceInfo), status (ServiceStatus), healthy, error
+            svc = s.get("service") or {}
+            name = svc.get("id") or svc.get("unit") or "-"
+            healthy = s.get("healthy", False)
+            healthy_str = "[green]yes[/green]" if healthy else "[red]no[/red]"
+            st = s.get("status")
+            if isinstance(st, dict):
+                active = st.get("active_state") or "-"
+                sub = st.get("sub_state") or "-"
+                state_str = f"{active} / {sub}"
+                pid = st.get("main_pid") or "-"
+            else:
+                state_str = "-"
+                pid = "-"
+            table.add_row(name, state_str, healthy_str, str(pid))
+        console.print(table)
+    gpu = data.get("gpu")
+    if gpu is not None:
+        if isinstance(gpu, dict):
+            console.print("[bold]GPU:[/bold] (see --raw-json for full nvidia-smi output)")
+        else:
+            console.print(f"[bold]GPU:[/bold] {gpu}")
+
+
+def display_disk(data: dict[str, Any]) -> None:
+    """Pretty-print disk space (path, total, directories table)."""
+    path = data.get("path", "-")
+    total = data.get("total_size_human") or data.get("total_size_bytes", "-")
+    console.print(f"[bold]Path:[/bold] {path}")
+    console.print(f"[bold]Total:[/bold] {total}")
+    directories = data.get("directories") or []
+    if not directories:
+        console.print("No subdirectories.")
+        return
+    table = Table(title="Directories", box=box.ROUNDED)
+    table.add_column("Name", style="cyan")
+    table.add_column("Path")
+    table.add_column("Size", justify="right")
+    table.add_column("Depth", justify="right")
+    table.add_column("%", justify="right")
+    for d in directories:
+        pct = d.get("percentage")
+        pct_str = f"{pct:.1f}%" if pct is not None else "-"
+        table.add_row(
+            d.get("name", "-"),
+            d.get("path", "-"),
+            d.get("size_human", str(d.get("size_bytes", "-"))),
+            str(d.get("depth", "-")),
+            pct_str,
+        )
+    console.print(table)
 
 
 def register(app: typer.Typer) -> None:
@@ -58,6 +150,7 @@ def register(app: typer.Typer) -> None:
         since_minutes: int = typer.Option(
             0, "--since-minutes", help="Only logs from last N minutes (0 = no filter, for --logs)"
         ),
+        raw_json: bool = typer.Option(False, "--raw-json", help="Output raw JSON for programmatic use"),
         hotkey: str = typer.Option(..., help="Path to the hotkey file for your miner", envvar=HOTKEY_ENVVAR),
         miner_api: str = typer.Option("http://127.0.0.1:32000", help="Miner API base URL", envvar=MINER_API_ENVVAR),
     ):
@@ -90,10 +183,20 @@ def register(app: typer.Typer) -> None:
             if status >= 400:
                 typer.echo(f"Error {status}: {data}", err=True)
                 raise typer.Exit(1)
-            if isinstance(data, dict):
-                print(json.dumps(data, indent=2))
+            if raw_json:
+                if isinstance(data, dict):
+                    print(json.dumps(data, indent=2))
+                else:
+                    print(data)
+            elif overview and isinstance(data, dict):
+                display_overview(data)
+            elif not status_service_id and not logs_service_id and isinstance(data, dict):
+                display_services_list(data)
             else:
-                print(data)
+                if isinstance(data, dict):
+                    print(json.dumps(data, indent=2))
+                else:
+                    print(data)
 
         asyncio.run(_run())
 
@@ -135,6 +238,7 @@ def register(app: typer.Typer) -> None:
         cross_filesystems: bool = typer.Option(
             False, "--cross-filesystems", help="Cross filesystem boundaries"
         ),
+        raw_json: bool = typer.Option(False, "--raw-json", help="Output raw JSON for programmatic use"),
         hotkey: str = typer.Option(..., help="Path to the hotkey file for your miner", envvar=HOTKEY_ENVVAR),
         miner_api: str = typer.Option("http://127.0.0.1:32000", help="Miner API base URL", envvar=MINER_API_ENVVAR),
     ):
@@ -154,10 +258,13 @@ def register(app: typer.Typer) -> None:
             if status >= 400:
                 typer.echo(f"Error {status}: {data}", err=True)
                 raise typer.Exit(1)
-            if isinstance(data, dict):
-                print(json.dumps(data, indent=2))
+            if raw_json or not isinstance(data, dict):
+                if isinstance(data, dict):
+                    print(json.dumps(data, indent=2))
+                else:
+                    print(data)
             else:
-                print(data)
+                display_disk(data)
 
         asyncio.run(_run())
 
