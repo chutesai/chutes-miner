@@ -667,8 +667,7 @@ class K8sOperator(abc.ABC):
             node_list = self._get_nodes()
             for node in node_list.items:
                 node_info = await self._extract_node_info(node)
-                if node_info:
-                    nodes.append(node_info)
+                nodes.append(node_info)
         except Exception as e:
             logger.error(f"Failed to get Kubernetes nodes: {e}")
             raise
@@ -697,18 +696,19 @@ class K8sOperator(abc.ABC):
             gpu_capacity = node.status.capacity.get("nvidia.com/gpu")
             if gpu_capacity is None or gpu_capacity == "0":
                 logger.warning(f"Node has no GPU capacity: {node.metadata.name=}")
-                return None
         except AttributeError:
             logger.warning(f"Node has invalid status or capacity: {node.metadata.name=}")
-            return None
 
-        gpu_count = int(node.status.capacity["nvidia.com/gpu"])
+        gpu_count = int(node.status.capacity.get("nvidia.com/gpu", 0))
         gpu_mem_mb = int(node.metadata.labels.get("nvidia.com/gpu.memory", "32"))
         gpu_mem_gb = int(gpu_mem_mb / 1024)
         cpu_count = (
             int(node.status.capacity["cpu"]) - 2
         )  # leave 2 CPUs for incidentals, daemon sets, etc.
-        cpus_per_gpu = 1 if cpu_count <= gpu_count else min(4, math.floor(cpu_count / gpu_count))
+        if gpu_count > 0:
+            cpus_per_gpu = 1 if cpu_count <= gpu_count else min(4, math.floor(cpu_count / gpu_count))
+        else:
+            cpus_per_gpu = 0
         raw_mem = node.status.capacity["memory"]
         if raw_mem.endswith("Ki"):
             total_memory_gb = int(int(raw_mem.replace("Ki", "")) / 1024 / 1024) - 6
