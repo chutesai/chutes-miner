@@ -706,7 +706,9 @@ class K8sOperator(abc.ABC):
             int(node.status.capacity["cpu"]) - 2
         )  # leave 2 CPUs for incidentals, daemon sets, etc.
         if gpu_count > 0:
-            cpus_per_gpu = 1 if cpu_count <= gpu_count else min(4, math.floor(cpu_count / gpu_count))
+            cpus_per_gpu = (
+                1 if cpu_count <= gpu_count else min(4, math.floor(cpu_count / gpu_count))
+            )
         else:
             cpus_per_gpu = 0
         raw_mem = node.status.capacity["memory"]

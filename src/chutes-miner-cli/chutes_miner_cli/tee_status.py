@@ -114,15 +114,17 @@ def register(app: typer.Typer) -> None:
     @app.command("node-health", help="VM health check (GET /status/health)")
     def node_health(
         name: str = typer.Option(..., "--name", "-n", help="TEE node (server) name"),
-        hotkey: str = typer.Option(..., help="Path to the hotkey file for your miner", envvar=HOTKEY_ENVVAR),
-        miner_api: str = typer.Option("http://127.0.0.1:32000", help="Miner API base URL", envvar=MINER_API_ENVVAR),
+        hotkey: str = typer.Option(
+            ..., help="Path to the hotkey file for your miner", envvar=HOTKEY_ENVVAR
+        ),
+        miner_api: str = typer.Option(
+            "http://127.0.0.1:32000", help="Miner API base URL", envvar=MINER_API_ENVVAR
+        ),
     ):
         async def _run():
             ip = await resolve_server_by_name(name, hotkey, miner_api)
             base_url = build_tee_base_url(ip)
-            status, data = await send_tee_request(
-                base_url, "/status/health", "GET", hotkey
-            )
+            status, data = await send_tee_request(base_url, "/status/health", "GET", hotkey)
             if status >= 400:
                 typer.echo(f"Error {status}: {data}", err=True)
                 raise typer.Exit(1)
@@ -145,14 +147,22 @@ def register(app: typer.Typer) -> None:
         logs_service_id: Optional[str] = typer.Option(
             None, "--logs", help="Get journal logs for this service ID"
         ),
-        overview: bool = typer.Option(False, "--overview", help="Get system overview (services + GPUs)"),
+        overview: bool = typer.Option(
+            False, "--overview", help="Get system overview (services + GPUs)"
+        ),
         lines: int = typer.Option(200, "--lines", help="Number of log lines (for --logs)"),
         since_minutes: int = typer.Option(
             0, "--since-minutes", help="Only logs from last N minutes (0 = no filter, for --logs)"
         ),
-        raw_json: bool = typer.Option(False, "--raw-json", help="Output raw JSON for programmatic use"),
-        hotkey: str = typer.Option(..., help="Path to the hotkey file for your miner", envvar=HOTKEY_ENVVAR),
-        miner_api: str = typer.Option("http://127.0.0.1:32000", help="Miner API base URL", envvar=MINER_API_ENVVAR),
+        raw_json: bool = typer.Option(
+            False, "--raw-json", help="Output raw JSON for programmatic use"
+        ),
+        hotkey: str = typer.Option(
+            ..., help="Path to the hotkey file for your miner", envvar=HOTKEY_ENVVAR
+        ),
+        miner_api: str = typer.Option(
+            "http://127.0.0.1:32000", help="Miner API base URL", envvar=MINER_API_ENVVAR
+        ),
     ):
         modes = sum([overview, status_service_id is not None, logs_service_id is not None])
         if modes > 1:
@@ -177,9 +187,7 @@ def register(app: typer.Typer) -> None:
             else:
                 path = "/status/services"
                 params = None
-            status, data = await send_tee_request(
-                base_url, path, "GET", hotkey, params=params
-            )
+            status, data = await send_tee_request(base_url, path, "GET", hotkey, params=params)
             if status >= 400:
                 typer.echo(f"Error {status}: {data}", err=True)
                 raise typer.Exit(1)
@@ -205,8 +213,12 @@ def register(app: typer.Typer) -> None:
         name: str = typer.Option(..., "--name", "-n", help="TEE node (server) name"),
         gpu_index: str = typer.Option("all", "--gpu", help="GPU index or 'all'"),
         detail: bool = typer.Option(False, "--detail", help="Return detailed (-q) output"),
-        hotkey: str = typer.Option(..., help="Path to the hotkey file for your miner", envvar=HOTKEY_ENVVAR),
-        miner_api: str = typer.Option("http://127.0.0.1:32000", help="Miner API base URL", envvar=MINER_API_ENVVAR),
+        hotkey: str = typer.Option(
+            ..., help="Path to the hotkey file for your miner", envvar=HOTKEY_ENVVAR
+        ),
+        miner_api: str = typer.Option(
+            "http://127.0.0.1:32000", help="Miner API base URL", envvar=MINER_API_ENVVAR
+        ),
     ):
         async def _run():
             ip = await resolve_server_by_name(name, hotkey, miner_api)
@@ -233,14 +245,22 @@ def register(app: typer.Typer) -> None:
         name: str = typer.Option(..., "--name", "-n", help="TEE node (server) name"),
         path: str = typer.Option("/", "--path", help="Directory path to analyze"),
         diagnostic: bool = typer.Option(False, "--diagnostic", help="Enable diagnostic mode"),
-        max_depth: int = typer.Option(3, "--max-depth", help="Max depth for diagnostic mode (1-10)"),
+        max_depth: int = typer.Option(
+            3, "--max-depth", help="Max depth for diagnostic mode (1-10)"
+        ),
         top_n: int = typer.Option(10, "--top-n", help="Show top N directories per level"),
         cross_filesystems: bool = typer.Option(
             False, "--cross-filesystems", help="Cross filesystem boundaries"
         ),
-        raw_json: bool = typer.Option(False, "--raw-json", help="Output raw JSON for programmatic use"),
-        hotkey: str = typer.Option(..., help="Path to the hotkey file for your miner", envvar=HOTKEY_ENVVAR),
-        miner_api: str = typer.Option("http://127.0.0.1:32000", help="Miner API base URL", envvar=MINER_API_ENVVAR),
+        raw_json: bool = typer.Option(
+            False, "--raw-json", help="Output raw JSON for programmatic use"
+        ),
+        hotkey: str = typer.Option(
+            ..., help="Path to the hotkey file for your miner", envvar=HOTKEY_ENVVAR
+        ),
+        miner_api: str = typer.Option(
+            "http://127.0.0.1:32000", help="Miner API base URL", envvar=MINER_API_ENVVAR
+        ),
     ):
         async def _run():
             ip = await resolve_server_by_name(name, hotkey, miner_api)
@@ -272,8 +292,12 @@ def register(app: typer.Typer) -> None:
     def shutdown(
         name: str = typer.Option(..., "--name", "-n", help="TEE node (server) name"),
         confirm: bool = typer.Option(False, "--confirm", help="Confirm shutdown"),
-        hotkey: str = typer.Option(..., help="Path to the hotkey file for your miner", envvar=HOTKEY_ENVVAR),
-        miner_api: str = typer.Option("http://127.0.0.1:32000", help="Miner API base URL", envvar=MINER_API_ENVVAR),
+        hotkey: str = typer.Option(
+            ..., help="Path to the hotkey file for your miner", envvar=HOTKEY_ENVVAR
+        ),
+        miner_api: str = typer.Option(
+            "http://127.0.0.1:32000", help="Miner API base URL", envvar=MINER_API_ENVVAR
+        ),
     ):
         if not confirm:
             typer.echo("Error: --confirm is required to run shutdown.", err=True)

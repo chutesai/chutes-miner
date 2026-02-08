@@ -15,7 +15,6 @@ from chutes_common.auth import sign_request
 from chutes_common.settings import Validator
 from chutes_common.schemas.server import Server
 
-from chutes_miner.api.config import settings
 from chutes_miner.validator_migrations.base import ValidatorMigration
 
 
