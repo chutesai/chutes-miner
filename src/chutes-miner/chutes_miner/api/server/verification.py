@@ -537,7 +537,7 @@ class GravalVerificationStrategy(VerificationStrategy):
             ]
             headers, payload_string = sign_request(
                 payload={
-                    "nodes": device_infos, 
+                    "nodes": device_infos,
                     "server_id": gpus[0].server_id,
                     "server_name": gpus[0].server.name,
                 }

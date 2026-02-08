@@ -174,7 +174,6 @@ def build_chute_job(
                     node_name=server.name,  ## Start here
                     runtime_class_name=settings.nvidia_runtime,
                     security_context=V1PodSecurityContext(
-                        run_as_non_root=True,
                         run_as_user=1000,
                         run_as_group=1000,
                     ),
@@ -236,6 +235,10 @@ def build_chute_job(
                             volume_mounts=[
                                 V1VolumeMount(name="raw-cache", mount_path="/cache"),
                             ],
+                            security_context=V1SecurityContext(
+                                run_as_user=0,
+                                run_as_group=0,
+                            ),
                         ),
                     ],
                     containers=[

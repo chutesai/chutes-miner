@@ -10,11 +10,9 @@ WORKDIR /app
 COPY ${PROJECT_DIR} ./
 RUN pip install --no-cache-dir .
 
-RUN groupadd -g 1000 chutes && useradd -u 1000 -g chutes -m -s /bin/sh chutes
-USER chutes
-
+# Run as root so init can create/chown cache dirs when kubelet creates hostPath as root.
 # Chute init: mkdir then run cleanup. Standalone: just run cleanup (mkdir is harmless).
-ENTRYPOINT ["sh", "-c", "mkdir -p /cache/hub /cache/civitai && exec python -m chutes_cache_cleaner.cache_cleanup"]
+ENTRYPOINT ["sh", "-c", "mkdir -p /cache/hub /cache/civitai && chmod -R 777 /cache && exec python -m chutes_cache_cleaner.cache_cleanup"]
 
 FROM base AS production
 

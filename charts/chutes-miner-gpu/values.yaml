@@ -11,7 +11,7 @@ validators:
 
 registry:
   image: parachutes/nginx-proxy:latest
-  imagePullPolicy: IfNotPresent
+  imagePullPolicy: Always
   resources:
     requests:
       cpu: 500m
@@ -69,7 +69,7 @@ agent:
 
 failedChuteCleanup:
   image: parachutes/failed-chute-cleanup:latest
-  imagePullPolicy: IfNotPresent
+  imagePullPolicy: Always
 
 # Miner credentials - These are provided via Ansible deployment
 # These values are automatically injected during deployment and should not be set manually

@@ -1,7 +1,7 @@
 apiVersion: v2
 name: chutes-miner-gpu
 description: Helm chart for chutes.ai GPU nodes
-version: 0.2.0-rc1
+version: 0.2.0-rc2
 appVersion: "0.1.0"
 type: application
 maintainers:

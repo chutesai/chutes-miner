@@ -9,6 +9,14 @@ from rich.console import Console
 from rich.table import Table
 from rich import box
 import datetime
+from chutes_miner_cli.constants import (
+    HOTKEY_ENVVAR,
+    MINER_API_ENVVAR,
+    VALIDATOR_API_ENVVAR,
+)
+from chutes_miner_cli.tee import tee_app
+from chutes_miner_cli import tee_cache
+from chutes_miner_cli import tee_status
 from chutes_miner_cli.util import sign_request
 from loguru import logger
 import yaml
@@ -259,8 +267,16 @@ def display_remote_inventory(inventory):
 
 def local_inventory(
     raw_json: bool = typer.Option(False, help="Display raw JSON output"),
-    hotkey: str = typer.Option(..., help="Path to the hotkey file for your miner"),
-    miner_api: str = typer.Option("http://127.0.0.1:32000", help="Miner API base URL"),
+    hotkey: str = typer.Option(
+        ...,
+        help="Path to the hotkey file for your miner",
+        envvar=HOTKEY_ENVVAR,
+    ),
+    miner_api: str = typer.Option(
+        "http://127.0.0.1:32000",
+        help="Miner API base URL",
+        envvar=MINER_API_ENVVAR,
+    ),
 ):
     """
     Show local inventory.
@@ -286,8 +302,16 @@ def local_inventory(
 
 def remote_inventory(
     raw_json: bool = typer.Option(False, help="Display raw JSON output"),
-    hotkey: str = typer.Option(..., help="Path to the hotkey file for your miner"),
-    validator_api: str = typer.Option("https://api.chutes.ai", help="Validator API base URL"),
+    hotkey: str = typer.Option(
+        ...,
+        help="Path to the hotkey file for your miner",
+        envvar=HOTKEY_ENVVAR,
+    ),
+    validator_api: str = typer.Option(
+        "https://api.chutes.ai",
+        help="Validator API base URL",
+        envvar=VALIDATOR_API_ENVVAR,
+    ),
 ):
     """
     Show remote (i.e., what the validator has tracked) inventory.
@@ -338,9 +362,17 @@ def add_node(
     validator: str = typer.Option(..., help="Validator ss58 this node is allocated to"),
     hourly_cost: float = typer.Option(..., help="Hourly cost, used in optimizing autoscaling"),
     gpu_short_ref: str = typer.Option(..., help="GPU short reference"),
-    hotkey: str = typer.Option(..., help="Path to the hotkey file for your miner"),
+    hotkey: str = typer.Option(
+        ...,
+        help="Path to the hotkey file for your miner",
+        envvar=HOTKEY_ENVVAR,
+    ),
     agent_api: Optional[str] = typer.Option(None, help="Agent API base URL (K3s Only)"),
-    miner_api: str = typer.Option("http://127.0.0.1:32000", help="Miner API base URL"),
+    miner_api: str = typer.Option(
+        "http://127.0.0.1:32000",
+        help="Miner API base URL",
+        envvar=MINER_API_ENVVAR,
+    ),
 ):
     """
     Entrypoint for adding a new kubernetes node.
@@ -376,8 +408,16 @@ def add_node(
 
 def delete_node(
     name: str = typer.Option(..., help="Name of the server/node"),
-    hotkey: str = typer.Option(..., help="Path to the hotkey file for your miner"),
-    miner_api: str = typer.Option("http://127.0.0.1:32000", help="Miner API base URL"),
+    hotkey: str = typer.Option(
+        ...,
+        help="Path to the hotkey file for your miner",
+        envvar=HOTKEY_ENVVAR,
+    ),
+    miner_api: str = typer.Option(
+        "http://127.0.0.1:32000",
+        help="Miner API base URL",
+        envvar=MINER_API_ENVVAR,
+    ),
 ):
     """
     Entrypoint for deleting a kubernetes node.
@@ -408,8 +448,16 @@ def delete_node(
 
 
 def purge_deployments(
-    hotkey: str = typer.Option(..., help="Path to the hotkey file for your miner"),
-    miner_api: str = typer.Option("http://127.0.0.1:32000", help="Miner API base URL"),
+    hotkey: str = typer.Option(
+        ...,
+        help="Path to the hotkey file for your miner",
+        envvar=HOTKEY_ENVVAR,
+    ),
+    miner_api: str = typer.Option(
+        "http://127.0.0.1:32000",
+        help="Miner API base URL",
+        envvar=MINER_API_ENVVAR,
+    ),
 ):
     """
     Rebalance all chutes - this just deletes all current instances and let's gepetto re-scale for max $$$
@@ -436,8 +484,16 @@ def purge_deployment(
     node_id: str = typer.Option(
         None, "--node-id", "-n", help="The ID of the node to purge the deployment from."
     ),
-    hotkey: str = typer.Option(..., help="Path to the hotkey file for your miner"),
-    miner_api: str = typer.Option("http://127.0.0.1:32000", help="Miner API base URL"),
+    hotkey: str = typer.Option(
+        ...,
+        help="Path to the hotkey file for your miner",
+        envvar=HOTKEY_ENVVAR,
+    ),
+    miner_api: str = typer.Option(
+        "http://127.0.0.1:32000",
+        help="Miner API base URL",
+        envvar=MINER_API_ENVVAR,
+    ),
 ):
     """
     Purge the target deployment
@@ -471,8 +527,16 @@ def purge_deployment(
 
 
 def scorch_remote(
-    hotkey: str = typer.Option(..., help="Path to the hotkey file for your miner"),
-    validator_api: str = typer.Option("https://api.chutes.ai", help="Validator API base URL"),
+    hotkey: str = typer.Option(
+        ...,
+        help="Path to the hotkey file for your miner",
+        envvar=HOTKEY_ENVVAR,
+    ),
+    validator_api: str = typer.Option(
+        "https://api.chutes.ai",
+        help="Validator API base URL",
+        envvar=VALIDATOR_API_ENVVAR,
+    ),
 ):
     """
     Purge all inventory from the validator API.
@@ -503,8 +567,16 @@ def scorch_remote(
 
 def delete_remote(
     name: str = typer.Option(help="Server name to delete on the validator side"),
-    hotkey: str = typer.Option(..., help="Path to the hotkey file for your miner"),
-    validator_api: str = typer.Option("https://api.chutes.ai", help="Validator API base URL"),
+    hotkey: str = typer.Option(
+        ...,
+        help="Path to the hotkey file for your miner",
+        envvar=HOTKEY_ENVVAR,
+    ),
+    validator_api: str = typer.Option(
+        "https://api.chutes.ai",
+        help="Validator API base URL",
+        envvar=VALIDATOR_API_ENVVAR,
+    ),
 ):
     """
     Delete a single GPU from validator.
@@ -537,8 +609,16 @@ async def _lock_or_unlock_server(lock: bool, name: str, hotkey: str, miner_api: 
 
 def lock_server(
     name: str = typer.Option(..., help="Name of the server/node"),
-    hotkey: str = typer.Option(..., help="Path to the hotkey file for your miner"),
-    miner_api: str = typer.Option("http://127.0.0.1:32000", help="Miner API base URL"),
+    hotkey: str = typer.Option(
+        ...,
+        help="Path to the hotkey file for your miner",
+        envvar=HOTKEY_ENVVAR,
+    ),
+    miner_api: str = typer.Option(
+        "http://127.0.0.1:32000",
+        help="Miner API base URL",
+        envvar=MINER_API_ENVVAR,
+    ),
 ):
     """
     Lock a server's deployments.
@@ -553,8 +633,16 @@ def lock_server(
 
 def unlock_server(
     name: str = typer.Option(..., help="Name of the server/node"),
-    hotkey: str = typer.Option(..., help="Path to the hotkey file for your miner"),
-    miner_api: str = typer.Option("http://127.0.0.1:32000", help="Miner API base URL"),
+    hotkey: str = typer.Option(
+        ...,
+        help="Path to the hotkey file for your miner",
+        envvar=HOTKEY_ENVVAR,
+    ),
+    miner_api: str = typer.Option(
+        "http://127.0.0.1:32000",
+        help="Miner API base URL",
+        envvar=MINER_API_ENVVAR,
+    ),
 ):
     """
     Unlock a server's deployments.
@@ -571,8 +659,16 @@ def sync_kubeconfig(
     path: str = typer.Option(
         "~/.kube/chutes.config", help="Path to your local kubeconfig to update"
     ),
-    hotkey: str = typer.Option(..., help="Path to the hotkey file for your miner"),
-    miner_api: str = typer.Option("http://127.0.0.1:32000", help="Miner API base URL"),
+    hotkey: str = typer.Option(
+        ...,
+        help="Path to the hotkey file for your miner",
+        envvar=HOTKEY_ENVVAR,
+    ),
+    miner_api: str = typer.Option(
+        "http://127.0.0.1:32000",
+        help="Miner API base URL",
+        envvar=MINER_API_ENVVAR,
+    ),
 ):
     """
     Fetch the merged kubeconfig from the miner API and write it locally.
@@ -611,7 +707,11 @@ def sync_node_kubeconfig(
     path: str = typer.Option(
         "~/.kube/chutes.config", help="Path to your local kubeconfig to update"
     ),
-    hotkey: str = typer.Option(..., help="Path to the hotkey file for your miner"),
+    hotkey: str = typer.Option(
+        ...,
+        help="Path to the hotkey file for your miner",
+        envvar=HOTKEY_ENVVAR,
+    ),
     overwrite: bool = typer.Option(
         False,
         "--overwrite",
@@ -700,6 +800,11 @@ app.command(
 )(sync_node_kubeconfig)
 app.command(name="lock", help="Lock a server's deployments")(lock_server)
 app.command(name="unlock", help="Unlock a server's deployments")(unlock_server)
+
+# TEE VM system-manager commands (cache + status)
+tee_cache.register(tee_app)
+tee_status.register(tee_app)
+app.add_typer(tee_app, name="tee")
 
 
 if __name__ == "__main__":
