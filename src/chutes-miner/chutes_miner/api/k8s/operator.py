@@ -894,6 +894,8 @@ class K8sOperator(abc.ABC):
         """
         node_name = None
         try:
+            # TODO: This is problematic, if the job is deleted from k8s manually
+            # cache doesn't return it and we get no node name, so cache can't be invalidated
             job = await self.get_deployment(deployment_id=deployment_id)
             node_name = job.get("node", None)
         except Exception:
