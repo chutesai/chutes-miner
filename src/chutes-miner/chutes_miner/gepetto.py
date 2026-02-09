@@ -205,6 +205,26 @@ class Gepetto:
             ).scalar()
 
     @staticmethod
+    async def has_pending_deployment(chute_id: str, version: str, validator: str) -> bool:
+        """
+        True if there is at least one non-job deployment for this chute that is not yet active
+        (pending activation). Used to avoid deploying additional instances while one is already
+        coming up.
+        """
+        async with get_session() as session:
+            return (
+                await session.execute(
+                    select(func.count())
+                    .select_from(Deployment)
+                    .where(Deployment.chute_id == chute_id)
+                    .where(Deployment.version == version)
+                    .where(Deployment.validator == validator)
+                    .where(Deployment.job_id.is_(None))
+                    .where(Deployment.active.is_(False))
+                )
+            ).scalar() > 0
+
+    @staticmethod
     async def get_chute(chute_id: str, validator: str) -> Optional[Chute]:
         """
         Load a chute by ID.
@@ -472,6 +492,13 @@ class Gepetto:
             chute_info = self.remote_chutes[validator].get(chute_id, {})
             chute = await self.load_chute(chute_id, chute_info.get("version"), validator)
             if chute is None:
+                continue
+
+            # Skip if we already have a deployment pending activation; don't deploy more until it's up.
+            if await self.has_pending_deployment(chute_id, chute.version, validator):
+                logger.debug(
+                    f"Skipping scale of {chute.name} ({chute_id}): already have a deployment pending activation"
+                )
                 continue
 
             logger.info(
