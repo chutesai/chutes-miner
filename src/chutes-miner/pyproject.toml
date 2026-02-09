@@ -2,7 +2,7 @@
 name = "chutes-miner"
 version = "0.4.0"
 description = "chutes.ai miner API"
-authors = ["Jon Durbin <jon@jondurbin.com>", "namoray <namoray@rayonlabs.ai>"]
+authors = ["Jon Durbin <jon@jondurbin.com>", "Kyle Widmann <kyle.widmann@gmail.com>"]
 license = "MIT"
 readme = "README.md"
 

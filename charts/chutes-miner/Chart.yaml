@@ -7,8 +7,6 @@ type: application
 maintainers:
   - name: Jon Durbin
     email: jon@chutes.ai
-  - name: namoray
-    email: namoray@rayonlabs.ai
   - name: Kyle Widmann
     email: kyle@chutes.ai
 kubeVersion: ">=1.19.0-0"

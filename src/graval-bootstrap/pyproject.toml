@@ -2,7 +2,7 @@
 name = "graval-bootstrap"
 version = "0.2.7"
 description = "chutes.ai miner -- graval bootstrapper"
-authors = ["Jon Durbin <jon@jondurbin.com>", "namoray <namoray@rayonlabs.ai>"]
+authors = ["Jon Durbin <jon@jondurbin.com>"]
 license = "MIT"
 readme = "README.md"
 
