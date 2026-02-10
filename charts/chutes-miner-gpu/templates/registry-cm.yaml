@@ -6,7 +6,6 @@ metadata:
     {{- include "registry.labels" . | nindent 4 }}
 data:
   nginx.conf: |
-    user  1000;
     worker_processes  {{ .Values.registry.config.workerProcesses }};
     error_log  /var/log/nginx/error.log notice;
     pid        /var/cache/nginx/nginx.pid;
