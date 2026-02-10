@@ -31,6 +31,7 @@ from chutes_miner.api.k8s.constants import (
 )
 from chutes_common.schemas.server import Server
 from chutes_miner.api.config import settings
+from chutes_miner.api.util import semcomp
 from semver import VersionInfo
 
 
@@ -111,7 +112,7 @@ def build_chute_job(
 
     # Port mappings must be in the environment variables.
     # TODO: Remove this once we have all TEE servers updated to 0.2.0 or greater
-    chutes_legacy_version = semcomp(chute.version, "0.6.0") < 0:
+    chutes_legacy_version = semcomp(chute.version, "0.6.0") < 0
     unique_ports = [8000, 8001]
     if not chutes_legacy_version: 
         unique_ports.append(8002)
@@ -283,10 +284,14 @@ def build_chute_job(
                                     name="CHUTES_PORT_LOGGING",
                                     value=str(service.spec.ports[1].node_port),
                                 ),
-                                V1EnvVar(
-                                    name="CHUTES_PORT_ATTESTATION",
-                                    value=str(service.spec.ports[2].node_port),
-                                ) if not chutes_legacy_version else None,
+                                *(
+                                    [V1EnvVar(
+                                        name="CHUTES_PORT_ATTESTATION",
+                                        value=str(service.spec.ports[2].node_port),
+                                    )]
+                                    if not chutes_legacy_version
+                                    else []
+                                ),
                                 V1EnvVar(
                                     name="CHUTES_EXECUTION_CONTEXT",
                                     value="REMOTE",
@@ -361,6 +366,7 @@ def build_chute_job(
 def build_chute_service(
     chute: Chute, deployment_id: str, extra_service_ports: list[dict[str, Any]] = []
 ):
+    chutes_legacy_version = semcomp(chute.version, "0.6.0") < 0
     return V1Service(
         metadata=V1ObjectMeta(
             name=f"{CHUTE_SVC_PREFIX}-{deployment_id}",
@@ -380,7 +386,7 @@ def build_chute_service(
             ports=[
                 V1ServicePort(port=8000, target_port=8000, protocol="TCP", name="chute-8000"),
                 V1ServicePort(port=8001, target_port=8001, protocol="TCP", name="chute-8001"),
-                V1ServicePort(port=8002, target_port=8002, protocol="TCP", name="chute-8002") if not chutes_legacy_version else None,
+                *([V1ServicePort(port=8002, target_port=8002, protocol="TCP", name="chute-8002")] if not chutes_legacy_version else []),
             ]
             + [
                 V1ServicePort(
