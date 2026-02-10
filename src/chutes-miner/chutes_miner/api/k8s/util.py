@@ -110,7 +110,11 @@ def build_chute_job(
         ]
 
     # Port mappings must be in the environment variables.
-    unique_ports = [8000, 8001, 8002]
+    # TODO: Remove this once we have all TEE servers updated to 0.2.0 or greater
+    chutes_legacy_version = semcomp(chute.version, "0.6.0") < 0:
+    unique_ports = [8000, 8001]
+    if not chutes_legacy_version: 
+        unique_ports.append(8002)
     for port_object in service.spec.ports[3:]:
         proto = (port_object.protocol or "TCP").upper()
         extra_env.append(
@@ -282,7 +286,7 @@ def build_chute_job(
                                 V1EnvVar(
                                     name="CHUTES_PORT_ATTESTATION",
                                     value=str(service.spec.ports[2].node_port),
-                                ),
+                                ) if not chutes_legacy_version else None,
                                 V1EnvVar(
                                     name="CHUTES_EXECUTION_CONTEXT",
                                     value="REMOTE",
@@ -376,7 +380,7 @@ def build_chute_service(
             ports=[
                 V1ServicePort(port=8000, target_port=8000, protocol="TCP", name="chute-8000"),
                 V1ServicePort(port=8001, target_port=8001, protocol="TCP", name="chute-8001"),
-                V1ServicePort(port=8002, target_port=8002, protocol="TCP", name="chute-8002"),
+                V1ServicePort(port=8002, target_port=8002, protocol="TCP", name="chute-8002") if not chutes_legacy_version else None,
             ]
             + [
                 V1ServicePort(
