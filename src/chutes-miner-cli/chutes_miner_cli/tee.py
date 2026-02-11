@@ -22,6 +22,31 @@ def build_tee_base_url(ip: str) -> str:
     return f"http://{ip}:{TEE_SYSTEM_MANAGER_PORT}"
 
 
+async def get_tee_server_ip(
+    *,
+    ip: Optional[str] = None,
+    name: Optional[str] = None,
+    hotkey: str,
+    miner_api: str,
+) -> str:
+    """
+    Get TEE server IP from optional --ip or by resolving --name via API.
+    Raises typer.Exit(1) if neither/both provided or resolution fails.
+    """
+    if ip is not None and name is not None:
+        typer.echo("Error: Provide either --ip or --name, not both.", err=True)
+        raise typer.Exit(1)
+    if ip:
+        return ip.strip()
+    if name:
+        return await resolve_server_by_name(name, hotkey, miner_api)
+    typer.echo(
+        "Error: Provide either --ip (server IP) or --name (server name to resolve via API).",
+        err=True,
+    )
+    raise typer.Exit(1)
+
+
 async def resolve_server_by_name(
     name: str,
     hotkey: str,

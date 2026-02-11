@@ -14,8 +14,8 @@ from rich import box
 from chutes_miner_cli.constants import HOTKEY_ENVVAR, MINER_API_ENVVAR
 from chutes_miner_cli.tee import (
     build_tee_base_url,
+    get_tee_server_ip,
     send_tee_request,
-    resolve_server_by_name,
 )
 
 console = Console()
@@ -122,7 +122,12 @@ def register(app: typer.Typer) -> None:
 
     @app.command("cache-download", help="Start (or force) chute download on the TEE VM")
     def cache_download(
-        name: str = typer.Option(..., "--name", "-n", help="TEE node (server) name"),
+        ip: Optional[str] = typer.Option(
+            None, "--ip", help="TEE server IP (use instead of --name to skip API lookup)"
+        ),
+        name: Optional[str] = typer.Option(
+            None, "--name", "-n", help="TEE node (server) name (resolve IP via miner API)"
+        ),
         chute_id: str = typer.Option(..., "--chute-id", help="Chute ID to download"),
         force: bool = typer.Option(False, "--force", help="Re-download if already present"),
         hotkey: str = typer.Option(
@@ -133,8 +138,8 @@ def register(app: typer.Typer) -> None:
         ),
     ):
         async def _run():
-            ip = await resolve_server_by_name(name, hotkey, miner_api)
-            base_url = build_tee_base_url(ip)
+            server_ip = await get_tee_server_ip(ip=ip, name=name, hotkey=hotkey, miner_api=miner_api)
+            base_url = build_tee_base_url(server_ip)
             status, data = await send_tee_request(
                 base_url,
                 "/cache/download",
@@ -152,7 +157,12 @@ def register(app: typer.Typer) -> None:
 
     @app.command("cache-download-status", help="Get download status (all or one chute)")
     def cache_download_status(
-        name: str = typer.Option(..., "--name", "-n", help="TEE node (server) name"),
+        ip: Optional[str] = typer.Option(
+            None, "--ip", help="TEE server IP (use instead of --name to skip API lookup)"
+        ),
+        name: Optional[str] = typer.Option(
+            None, "--name", "-n", help="TEE node (server) name (resolve IP via miner API)"
+        ),
         chute_id: Optional[str] = typer.Option(
             None, "--chute-id", help="Optional chute ID to filter"
         ),
@@ -167,8 +177,8 @@ def register(app: typer.Typer) -> None:
         ),
     ):
         async def _run():
-            ip = await resolve_server_by_name(name, hotkey, miner_api)
-            base_url = build_tee_base_url(ip)
+            server_ip = await get_tee_server_ip(ip=ip, name=name, hotkey=hotkey, miner_api=miner_api)
+            base_url = build_tee_base_url(server_ip)
             params = {} if chute_id is None else {"chute_id": chute_id}
             status, data = await send_tee_request(
                 base_url, "/cache/download/status", "GET", hotkey, params=params
@@ -185,7 +195,12 @@ def register(app: typer.Typer) -> None:
 
     @app.command("cache-overview", help="List cache contents and sizes")
     def cache_overview(
-        name: str = typer.Option(..., "--name", "-n", help="TEE node (server) name"),
+        ip: Optional[str] = typer.Option(
+            None, "--ip", help="TEE server IP (use instead of --name to skip API lookup)"
+        ),
+        name: Optional[str] = typer.Option(
+            None, "--name", "-n", help="TEE node (server) name (resolve IP via miner API)"
+        ),
         raw_json: bool = typer.Option(
             False, "--raw-json", help="Output raw JSON for programmatic use"
         ),
@@ -197,8 +212,8 @@ def register(app: typer.Typer) -> None:
         ),
     ):
         async def _run():
-            ip = await resolve_server_by_name(name, hotkey, miner_api)
-            base_url = build_tee_base_url(ip)
+            server_ip = await get_tee_server_ip(ip=ip, name=name, hotkey=hotkey, miner_api=miner_api)
+            base_url = build_tee_base_url(server_ip)
             status, data = await send_tee_request(base_url, "/cache/overview", "GET", hotkey)
             if status >= 400:
                 typer.echo(f"Error {status}: {data}", err=True)
@@ -212,7 +227,12 @@ def register(app: typer.Typer) -> None:
 
     @app.command("cache-delete", help="Remove cache for one chute")
     def cache_delete(
-        name: str = typer.Option(..., "--name", "-n", help="TEE node (server) name"),
+        ip: Optional[str] = typer.Option(
+            None, "--ip", help="TEE server IP (use instead of --name to skip API lookup)"
+        ),
+        name: Optional[str] = typer.Option(
+            None, "--name", "-n", help="TEE node (server) name (resolve IP via miner API)"
+        ),
         chute_id: str = typer.Option(..., "--chute-id", help="Chute ID to remove from cache"),
         hotkey: str = typer.Option(
             ..., help="Path to the hotkey file for your miner", envvar=HOTKEY_ENVVAR
@@ -222,8 +242,8 @@ def register(app: typer.Typer) -> None:
         ),
     ):
         async def _run():
-            ip = await resolve_server_by_name(name, hotkey, miner_api)
-            base_url = build_tee_base_url(ip)
+            server_ip = await get_tee_server_ip(ip=ip, name=name, hotkey=hotkey, miner_api=miner_api)
+            base_url = build_tee_base_url(server_ip)
             status, data = await send_tee_request(base_url, f"/cache/{chute_id}", "DELETE", hotkey)
             if status >= 400:
                 typer.echo(f"Error {status}: {data}", err=True)
@@ -237,7 +257,12 @@ def register(app: typer.Typer) -> None:
 
     @app.command("cache-cleanup", help="Cleanup cache by age and max size")
     def cache_cleanup(
-        name: str = typer.Option(..., "--name", "-n", help="TEE node (server) name"),
+        ip: Optional[str] = typer.Option(
+            None, "--ip", help="TEE server IP (use instead of --name to skip API lookup)"
+        ),
+        name: Optional[str] = typer.Option(
+            None, "--name", "-n", help="TEE node (server) name (resolve IP via miner API)"
+        ),
         max_age_days: int = typer.Option(
             5, "--max-age-days", help="Remove entries older than this many days"
         ),
@@ -253,8 +278,8 @@ def register(app: typer.Typer) -> None:
         ),
     ):
         async def _run():
-            ip = await resolve_server_by_name(name, hotkey, miner_api)
-            base_url = build_tee_base_url(ip)
+            server_ip = await get_tee_server_ip(ip=ip, name=name, hotkey=hotkey, miner_api=miner_api)
+            base_url = build_tee_base_url(server_ip)
             # POST with optional body; use payload for signing
             payload = {"max_age_days": max_age_days, "max_size_gb": max_size_gb}
             status, data = await send_tee_request(

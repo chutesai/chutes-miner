@@ -14,8 +14,8 @@ from rich import box
 from chutes_miner_cli.constants import HOTKEY_ENVVAR, MINER_API_ENVVAR
 from chutes_miner_cli.tee import (
     build_tee_base_url,
+    get_tee_server_ip,
     send_tee_request,
-    resolve_server_by_name,
 )
 
 console = Console()
@@ -113,7 +113,12 @@ def register(app: typer.Typer) -> None:
 
     @app.command("node-health", help="VM health check (GET /status/health)")
     def node_health(
-        name: str = typer.Option(..., "--name", "-n", help="TEE node (server) name"),
+        ip: Optional[str] = typer.Option(
+            None, "--ip", help="TEE server IP (use instead of --name to skip API lookup)"
+        ),
+        name: Optional[str] = typer.Option(
+            None, "--name", "-n", help="TEE node (server) name (resolve IP via miner API)"
+        ),
         hotkey: str = typer.Option(
             ..., help="Path to the hotkey file for your miner", envvar=HOTKEY_ENVVAR
         ),
@@ -122,8 +127,8 @@ def register(app: typer.Typer) -> None:
         ),
     ):
         async def _run():
-            ip = await resolve_server_by_name(name, hotkey, miner_api)
-            base_url = build_tee_base_url(ip)
+            server_ip = await get_tee_server_ip(ip=ip, name=name, hotkey=hotkey, miner_api=miner_api)
+            base_url = build_tee_base_url(server_ip)
             status, data = await send_tee_request(base_url, "/status/health", "GET", hotkey)
             if status >= 400:
                 typer.echo(f"Error {status}: {data}", err=True)
@@ -140,7 +145,12 @@ def register(app: typer.Typer) -> None:
         help="List services, or get status/logs for one, or system overview",
     )
     def services(
-        name: str = typer.Option(..., "--name", "-n", help="TEE node (server) name"),
+        ip: Optional[str] = typer.Option(
+            None, "--ip", help="TEE server IP (use instead of --name to skip API lookup)"
+        ),
+        name: Optional[str] = typer.Option(
+            None, "--name", "-n", help="TEE node (server) name (resolve IP via miner API)"
+        ),
         status_service_id: Optional[str] = typer.Option(
             None, "--status", help="Get systemd status for this service ID"
         ),
@@ -173,8 +183,8 @@ def register(app: typer.Typer) -> None:
             raise typer.Exit(1)
 
         async def _run():
-            ip = await resolve_server_by_name(name, hotkey, miner_api)
-            base_url = build_tee_base_url(ip)
+            server_ip = await get_tee_server_ip(ip=ip, name=name, hotkey=hotkey, miner_api=miner_api)
+            base_url = build_tee_base_url(server_ip)
             if overview:
                 path = "/status/overview"
                 params = None
@@ -210,7 +220,12 @@ def register(app: typer.Typer) -> None:
 
     @app.command("gpu", help="GPU status / nvidia-smi")
     def gpu(
-        name: str = typer.Option(..., "--name", "-n", help="TEE node (server) name"),
+        ip: Optional[str] = typer.Option(
+            None, "--ip", help="TEE server IP (use instead of --name to skip API lookup)"
+        ),
+        name: Optional[str] = typer.Option(
+            None, "--name", "-n", help="TEE node (server) name (resolve IP via miner API)"
+        ),
         gpu_index: str = typer.Option("all", "--gpu", help="GPU index or 'all'"),
         detail: bool = typer.Option(False, "--detail", help="Return detailed (-q) output"),
         hotkey: str = typer.Option(
@@ -221,8 +236,8 @@ def register(app: typer.Typer) -> None:
         ),
     ):
         async def _run():
-            ip = await resolve_server_by_name(name, hotkey, miner_api)
-            base_url = build_tee_base_url(ip)
+            server_ip = await get_tee_server_ip(ip=ip, name=name, hotkey=hotkey, miner_api=miner_api)
+            base_url = build_tee_base_url(server_ip)
             status, data = await send_tee_request(
                 base_url,
                 "/status/gpu/nvidia-smi",
@@ -242,7 +257,12 @@ def register(app: typer.Typer) -> None:
 
     @app.command("disk", help="Directory sizes (GET /status/disk/space)")
     def disk(
-        name: str = typer.Option(..., "--name", "-n", help="TEE node (server) name"),
+        ip: Optional[str] = typer.Option(
+            None, "--ip", help="TEE server IP (use instead of --name to skip API lookup)"
+        ),
+        name: Optional[str] = typer.Option(
+            None, "--name", "-n", help="TEE node (server) name (resolve IP via miner API)"
+        ),
         path: str = typer.Option("/", "--path", help="Directory path to analyze"),
         diagnostic: bool = typer.Option(False, "--diagnostic", help="Enable diagnostic mode"),
         max_depth: int = typer.Option(
@@ -263,8 +283,8 @@ def register(app: typer.Typer) -> None:
         ),
     ):
         async def _run():
-            ip = await resolve_server_by_name(name, hotkey, miner_api)
-            base_url = build_tee_base_url(ip)
+            server_ip = await get_tee_server_ip(ip=ip, name=name, hotkey=hotkey, miner_api=miner_api)
+            base_url = build_tee_base_url(server_ip)
             params = {
                 "path": path,
                 "diagnostic": str(diagnostic).lower(),
@@ -290,7 +310,12 @@ def register(app: typer.Typer) -> None:
 
     @app.command("shutdown", help="Request system shutdown on the VM (requires --confirm)")
     def shutdown(
-        name: str = typer.Option(..., "--name", "-n", help="TEE node (server) name"),
+        ip: Optional[str] = typer.Option(
+            None, "--ip", help="TEE server IP (use instead of --name to skip API lookup)"
+        ),
+        name: Optional[str] = typer.Option(
+            None, "--name", "-n", help="TEE node (server) name (resolve IP via miner API)"
+        ),
         confirm: bool = typer.Option(False, "--confirm", help="Confirm shutdown"),
         hotkey: str = typer.Option(
             ..., help="Path to the hotkey file for your miner", envvar=HOTKEY_ENVVAR
@@ -304,8 +329,8 @@ def register(app: typer.Typer) -> None:
             raise typer.Exit(1)
 
         async def _run():
-            ip = await resolve_server_by_name(name, hotkey, miner_api)
-            base_url = build_tee_base_url(ip)
+            server_ip = await get_tee_server_ip(ip=ip, name=name, hotkey=hotkey, miner_api=miner_api)
+            base_url = build_tee_base_url(server_ip)
             # POST with no body; purpose "status"
             status, data = await send_tee_request(
                 base_url, "/status/system/shutdown", "POST", hotkey
