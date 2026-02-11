@@ -127,7 +127,9 @@ def register(app: typer.Typer) -> None:
         ),
     ):
         async def _run():
-            server_ip = await get_tee_server_ip(ip=ip, name=name, hotkey=hotkey, miner_api=miner_api)
+            server_ip = await get_tee_server_ip(
+                ip=ip, name=name, hotkey=hotkey, miner_api=miner_api
+            )
             base_url = build_tee_base_url(server_ip)
             status, data = await send_tee_request(base_url, "/status/health", "GET", hotkey)
             if status >= 400:
@@ -183,7 +185,9 @@ def register(app: typer.Typer) -> None:
             raise typer.Exit(1)
 
         async def _run():
-            server_ip = await get_tee_server_ip(ip=ip, name=name, hotkey=hotkey, miner_api=miner_api)
+            server_ip = await get_tee_server_ip(
+                ip=ip, name=name, hotkey=hotkey, miner_api=miner_api
+            )
             base_url = build_tee_base_url(server_ip)
             if overview:
                 path = "/status/overview"
@@ -236,7 +240,9 @@ def register(app: typer.Typer) -> None:
         ),
     ):
         async def _run():
-            server_ip = await get_tee_server_ip(ip=ip, name=name, hotkey=hotkey, miner_api=miner_api)
+            server_ip = await get_tee_server_ip(
+                ip=ip, name=name, hotkey=hotkey, miner_api=miner_api
+            )
             base_url = build_tee_base_url(server_ip)
             status, data = await send_tee_request(
                 base_url,
@@ -283,7 +289,9 @@ def register(app: typer.Typer) -> None:
         ),
     ):
         async def _run():
-            server_ip = await get_tee_server_ip(ip=ip, name=name, hotkey=hotkey, miner_api=miner_api)
+            server_ip = await get_tee_server_ip(
+                ip=ip, name=name, hotkey=hotkey, miner_api=miner_api
+            )
             base_url = build_tee_base_url(server_ip)
             params = {
                 "path": path,
@@ -329,7 +337,9 @@ def register(app: typer.Typer) -> None:
             raise typer.Exit(1)
 
         async def _run():
-            server_ip = await get_tee_server_ip(ip=ip, name=name, hotkey=hotkey, miner_api=miner_api)
+            server_ip = await get_tee_server_ip(
+                ip=ip, name=name, hotkey=hotkey, miner_api=miner_api
+            )
             base_url = build_tee_base_url(server_ip)
             # POST with no body; purpose "status"
             status, data = await send_tee_request(

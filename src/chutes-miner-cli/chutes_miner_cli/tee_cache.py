@@ -138,7 +138,9 @@ def register(app: typer.Typer) -> None:
         ),
     ):
         async def _run():
-            server_ip = await get_tee_server_ip(ip=ip, name=name, hotkey=hotkey, miner_api=miner_api)
+            server_ip = await get_tee_server_ip(
+                ip=ip, name=name, hotkey=hotkey, miner_api=miner_api
+            )
             base_url = build_tee_base_url(server_ip)
             status, data = await send_tee_request(
                 base_url,
@@ -177,7 +179,9 @@ def register(app: typer.Typer) -> None:
         ),
     ):
         async def _run():
-            server_ip = await get_tee_server_ip(ip=ip, name=name, hotkey=hotkey, miner_api=miner_api)
+            server_ip = await get_tee_server_ip(
+                ip=ip, name=name, hotkey=hotkey, miner_api=miner_api
+            )
             base_url = build_tee_base_url(server_ip)
             params = {} if chute_id is None else {"chute_id": chute_id}
             status, data = await send_tee_request(
@@ -212,7 +216,9 @@ def register(app: typer.Typer) -> None:
         ),
     ):
         async def _run():
-            server_ip = await get_tee_server_ip(ip=ip, name=name, hotkey=hotkey, miner_api=miner_api)
+            server_ip = await get_tee_server_ip(
+                ip=ip, name=name, hotkey=hotkey, miner_api=miner_api
+            )
             base_url = build_tee_base_url(server_ip)
             status, data = await send_tee_request(base_url, "/cache/overview", "GET", hotkey)
             if status >= 400:
@@ -242,7 +248,9 @@ def register(app: typer.Typer) -> None:
         ),
     ):
         async def _run():
-            server_ip = await get_tee_server_ip(ip=ip, name=name, hotkey=hotkey, miner_api=miner_api)
+            server_ip = await get_tee_server_ip(
+                ip=ip, name=name, hotkey=hotkey, miner_api=miner_api
+            )
             base_url = build_tee_base_url(server_ip)
             status, data = await send_tee_request(base_url, f"/cache/{chute_id}", "DELETE", hotkey)
             if status >= 400:
@@ -278,7 +286,9 @@ def register(app: typer.Typer) -> None:
         ),
     ):
         async def _run():
-            server_ip = await get_tee_server_ip(ip=ip, name=name, hotkey=hotkey, miner_api=miner_api)
+            server_ip = await get_tee_server_ip(
+                ip=ip, name=name, hotkey=hotkey, miner_api=miner_api
+            )
             base_url = build_tee_base_url(server_ip)
             # POST with optional body; use payload for signing
             payload = {"max_age_days": max_age_days, "max_size_gb": max_size_gb}
