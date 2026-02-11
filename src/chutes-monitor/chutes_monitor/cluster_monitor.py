@@ -1,13 +1,21 @@
 # app/health/checker.py
 import asyncio
-from typing import List, Optional
+import time
+from typing import Dict, List, Optional, Set
 from datetime import datetime, timedelta, timezone
-from chutes_common.exceptions import ClusterConflictException, ClusterNotFoundException
+
 from loguru import logger
-from chutes_common.redis import MonitoringRedisClient
-from chutes_monitor.settings import settings
+from sqlalchemy import select
+
+from chutes_common.exceptions import AgentError, ClusterConflictException, ClusterNotFoundException
+from chutes_common.monitoring.client import start_server_monitoring
 from chutes_common.monitoring.models import ClusterState, ClusterStatus
+from chutes_common.redis import MonitoringRedisClient
+from chutes_common.schemas.server import Server
 from chutes_common.k8s import ClusterResources
+
+from chutes_monitor.database import get_session
+from chutes_monitor.settings import settings
 
 
 class HealthChecker:
@@ -22,14 +30,9 @@ class HealthChecker:
         self._task: asyncio.Task = None
 
     def __new__(cls, *args, **kwargs):
-        """
-        Factory method that creates either a SingleClusterK8sOperator or KarmadaK8sOperator
-        based on the detected infrastructure.
-        """
-        # If we don't have an instance, set it (singleton)
+        """Singleton: return the single HealthChecker instance."""
         if cls._instance is None:
             cls._instance = super().__new__(HealthChecker)
-
         return cls._instance
 
     def start(self):
@@ -56,7 +59,7 @@ class HealthChecker:
         logger.info("Health checker stopped")
 
     async def _monitor_loop(self):
-        """Main monitoring loop"""
+        """Main monitoring loop: check cluster health and update status only."""
         while self._running:
             try:
                 await self._check_all_clusters()
@@ -202,6 +205,131 @@ class HealthChecker:
             logger.error(f"Error during stale cluster cleanup: {e}")
 
 
+class MonitoringReconciler:
+    """
+    Reconciliation loop: sync Redis with DB (clear clusters not in DB) and
+    reinitiate monitoring for expected-but-unhealthy clusters. Runs on a
+    configurable interval separate from the health checker.
+    """
+
+    _instance: Optional["MonitoringReconciler"] = None
+
+    def __init__(self):
+        self.redis_client = MonitoringRedisClient()
+        self._running = False
+        self._task: Optional[asyncio.Task] = None
+        self._reinitiate_last_attempt: Dict[str, float] = {}
+
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            cls._instance = super().__new__(MonitoringReconciler)
+        return cls._instance
+
+    def start(self) -> None:
+        """Start the reconciliation loop."""
+        if self._running:
+            logger.warning("Monitoring reconciler is already running")
+            return
+        self._running = True
+        self._task = asyncio.create_task(self._reconcile())
+        logger.info(
+            f"Monitoring reconciler started with "
+            f"{settings.reconciliation_interval_seconds}s interval"
+        )
+
+    async def stop(self) -> None:
+        """Stop the reconciliation loop."""
+        self._running = False
+        if self._task:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+        logger.info("Monitoring reconciler stopped")
+
+    async def _reconcile(self) -> None:
+        """Run cache sync and reinitiate on a timer."""
+        while self._running:
+            try:
+                await asyncio.sleep(settings.reconciliation_interval_seconds)
+                if not self._running:
+                    break
+                await self._reconcile_cache_with_db()
+                await self._restore_unhealthy_clusters()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in reconciliation loop: {e}")
+
+    async def _reconcile_cache_with_db(self) -> None:
+        """Clear Redis for clusters that are in Redis but whose server is no longer in the DB."""
+        try:
+            redis_cluster_names = self.redis_client.get_all_cluster_names()
+            if not redis_cluster_names:
+                return
+            async with get_session() as session:
+                result = await session.execute(
+                    select(Server.name).where(Server.agent_api.isnot(None))
+                )
+                expected_names: Set[str] = {row[0] for row in result.fetchall()}
+            for cluster_name in redis_cluster_names:
+                if cluster_name not in expected_names:
+                    logger.info(f"Clearing Redis for cluster not in DB: {cluster_name}")
+                    try:
+                        await self.redis_client.clear_cluster(cluster_name)
+                    except Exception as e:
+                        logger.warning(f"Failed to clear Redis for {cluster_name}: {e}")
+        except Exception as e:
+            logger.error(f"Error clearing Redis for clusters not in DB: {e}")
+
+    async def _restore_server_monitoring(self, server: Server) -> None:
+        """Reinitiate monitoring for a single agent by sending a signed start-monitoring request. Does not raise."""
+        try:
+            await start_server_monitoring(
+                agent_url=server.agent_api,
+                control_plane_url=settings.monitor_api,
+                timeout=30,
+            )
+            logger.info(f"Restored monitoring for {server.name} at {server.agent_api}")
+        except AgentError as e:
+            logger.warning(
+                f"Failed to restore monitoring for {server.name}: {e.status_code} {e.response_text}"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to restore monitoring for {server.name}: {e}")
+
+    async def _restore_unhealthy_clusters(self) -> None:
+        """Restore monitoring for expected clusters that are unhealthy or missing in Redis."""
+        if not settings.monitor_api:
+            return
+        throttle_seconds = settings.reinitiate_interval_seconds
+        now = time.time()
+        try:
+            async with get_session() as session:
+                result = await session.execute(select(Server).where(Server.agent_api.isnot(None)))
+                servers = result.unique().scalars().all()
+            cluster_statuses = await self.redis_client.get_all_cluster_statuses()
+            status_by_name = {s.cluster_name: s for s in cluster_statuses}
+            for server in servers:
+                cluster_name = server.name
+                status = status_by_name.get(cluster_name)
+                needs_reinitiate = (
+                    status is None
+                    or status.state == ClusterState.UNHEALTHY
+                    or status.state == ClusterState.ERROR
+                )
+                if not needs_reinitiate:
+                    continue
+                last = self._reinitiate_last_attempt.get(cluster_name, 0)
+                if now - last < throttle_seconds:
+                    continue
+                self._reinitiate_last_attempt[cluster_name] = now
+                await self._restore_server_monitoring(server)
+        except Exception as e:
+            logger.error(f"Error during reinitiate unhealthy clusters: {e}")
+
+
 class ClusterMonitor:
     """Initiates monitoring workflows on member clusters"""
 
@@ -212,14 +340,9 @@ class ClusterMonitor:
         self.redis_client = MonitoringRedisClient()
 
     def __new__(cls, *args, **kwargs):
-        """
-        Factory method that creates either a SingleClusterK8sOperator or KarmadaK8sOperator
-        based on the detected infrastructure.
-        """
-        # If we don't have an instance, set it (singleton)
+        """Singleton: return the single ClusterMonitor instance."""
         if cls._instance is None:
             cls._instance = super().__new__(ClusterMonitor)
-
         return cls._instance
 
     async def register_cluster(self, cluster_name: str, resources: ClusterResources) -> bool:

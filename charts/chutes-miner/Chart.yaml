@@ -1,14 +1,12 @@
 apiVersion: v2
 name: chutes-miner
 description: Helm chart for chutes.ai miner
-version: 0.1.6
+version: 0.2.0
 appVersion: "0.0.1"
 type: application
 maintainers:
   - name: Jon Durbin
     email: jon@chutes.ai
-  - name: namoray
-    email: namoray@rayonlabs.ai
   - name: Kyle Widmann
     email: kyle@chutes.ai
 kubeVersion: ">=1.19.0-0"

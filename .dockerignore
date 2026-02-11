@@ -7,3 +7,5 @@
 ansible
 charts
 docker
+# Exception: allow failed-chute-cleanup script so its image can COPY it (parachutes/signable)
+!docker/chutes-failed-chute-cleanup/cleanup.sh

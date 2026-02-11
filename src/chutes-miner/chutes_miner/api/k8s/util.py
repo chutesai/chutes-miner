@@ -5,6 +5,7 @@ from kubernetes.client import (
     V1ObjectMeta,
     V1PodTemplateSpec,
     V1PodSpec,
+    V1PodSecurityContext,
     V1Container,
     V1ResourceRequirements,
     V1ServiceSpec,
@@ -30,30 +31,18 @@ from chutes_miner.api.k8s.constants import (
 )
 from chutes_common.schemas.server import Server
 from chutes_miner.api.config import settings
-from semver import VersionInfo
-
-
-CODE_VOLUME_CUTOFF_VERSION = VersionInfo.parse("0.3.61")
-
-
-def _normalize_chutes_version(version_str: str) -> str:
-    """Ensure rc prerelease tags match semver expectations."""
-    if ".rc" in version_str and "-rc" not in version_str:
-        prefix, suffix = version_str.split(".rc", 1)
-        if prefix and suffix:
-            return f"{prefix}-rc{suffix}"
-    return version_str
+from chutes_miner.api.util import semcomp
 
 
 def _requires_code_volume(chute: Chute) -> bool:
     version_str = chute.chutes_version or chute.version or "0.0.0"
-    version_str = _normalize_chutes_version(version_str)
-    try:
-        version = VersionInfo.parse(version_str)
-    except ValueError:
-        # Unknown versions default to legacy behavior to remain safe.
-        return True
-    return version < CODE_VOLUME_CUTOFF_VERSION
+    return semcomp(version_str, "0.3.61") < 0
+
+
+def _needs_attestation_port(chute: Chute) -> bool:
+    """True when chute is TEE-enabled and chutes runtime version >= 0.6.0."""
+    version_str = chute.chutes_version or chute.version or "0.0.0"
+    return bool(chute.tee and semcomp(version_str, "0.6.0") >= 0)
 
 
 def build_chute_job(
@@ -109,8 +98,12 @@ def build_chute_job(
         ]
 
     # Port mappings must be in the environment variables.
+    # Attestation port 8002 only for TEE chutes on chutes runtime >= 0.6.0.
+    needs_attestation_port = _needs_attestation_port(chute)
     unique_ports = [8000, 8001]
-    for port_object in service.spec.ports[2:]:
+    if needs_attestation_port:
+        unique_ports.append(8002)
+    for port_object in service.spec.ports[3:]:
         proto = (port_object.protocol or "TCP").upper()
         extra_env.append(
             V1EnvVar(
@@ -172,6 +165,10 @@ def build_chute_job(
                     restart_policy="Never",
                     node_name=server.name,  ## Start here
                     runtime_class_name=settings.nvidia_runtime,
+                    security_context=V1PodSecurityContext(
+                        run_as_user=1000,
+                        run_as_group=1000,
+                    ),
                     volumes=[
                         *code_volumes,
                         V1Volume(
@@ -189,12 +186,6 @@ def build_chute_job(
                             ),
                         ),
                         V1Volume(
-                            name="cache-cleanup",
-                            config_map=V1ConfigMapVolumeSource(
-                                name="chutes-cache-cleaner",
-                            ),
-                        ),
-                        V1Volume(
                             name="tmp",
                             empty_dir=V1EmptyDirVolumeSource(size_limit=f"{disk_gb}Gi"),
                         ),
@@ -207,10 +198,6 @@ def build_chute_job(
                         V1Container(
                             name="cache-init",
                             image="parachutes/cache-cleaner:latest",
-                            command=["/bin/bash", "-c"],
-                            args=[
-                                "mkdir -p /cache/hub /cache/civitai && chmod -R 777 /cache && python /scripts/cache_cleanup.py"
-                            ],
                             env=[
                                 V1EnvVar(
                                     name="CLEANUP_EXCLUDE",
@@ -239,10 +226,6 @@ def build_chute_job(
                             ],
                             volume_mounts=[
                                 V1VolumeMount(name="raw-cache", mount_path="/cache"),
-                                V1VolumeMount(
-                                    name="cache-cleanup",
-                                    mount_path="/scripts",
-                                ),
                             ],
                             security_context=V1SecurityContext(
                                 run_as_user=0,
@@ -287,6 +270,16 @@ def build_chute_job(
                                 V1EnvVar(
                                     name="CHUTES_PORT_LOGGING",
                                     value=str(service.spec.ports[1].node_port),
+                                ),
+                                *(
+                                    [
+                                        V1EnvVar(
+                                            name="CHUTES_PORT_ATTESTATION",
+                                            value=str(service.spec.ports[2].node_port),
+                                        )
+                                    ]
+                                    if needs_attestation_port
+                                    else []
                                 ),
                                 V1EnvVar(
                                     name="CHUTES_EXECUTION_CONTEXT",
@@ -362,6 +355,7 @@ def build_chute_job(
 def build_chute_service(
     chute: Chute, deployment_id: str, extra_service_ports: list[dict[str, Any]] = []
 ):
+    needs_attestation_port = _needs_attestation_port(chute)
     return V1Service(
         metadata=V1ObjectMeta(
             name=f"{CHUTE_SVC_PREFIX}-{deployment_id}",
@@ -381,6 +375,11 @@ def build_chute_service(
             ports=[
                 V1ServicePort(port=8000, target_port=8000, protocol="TCP", name="chute-8000"),
                 V1ServicePort(port=8001, target_port=8001, protocol="TCP", name="chute-8001"),
+                *(
+                    [V1ServicePort(port=8002, target_port=8002, protocol="TCP", name="chute-8002")]
+                    if needs_attestation_port
+                    else []
+                ),
             ]
             + [
                 V1ServicePort(

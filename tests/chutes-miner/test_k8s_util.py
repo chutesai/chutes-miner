@@ -20,7 +20,7 @@ def _make_service() -> V1Service:
     )
 
 
-def _make_inputs(version: str):
+def _make_inputs(version: str, tee: bool = False):
     chute = SimpleNamespace(
         chute_id="chute-123",
         version=version,
@@ -29,6 +29,7 @@ def _make_inputs(version: str):
         filename="main.py",
         image="parachutes/test:latest",
         gpu_count=1,
+        tee=tee,
     )
     server = SimpleNamespace(
         cpu_per_gpu=1,

@@ -12,6 +12,7 @@ from chutes_common.exceptions import (
     ClusterNotFoundException,
     ServerNotFoundException,
 )
+from chutes_agent.exceptions import InvalidOperationError
 from kubernetes_asyncio import client, config, watch
 from kubernetes_asyncio.client.exceptions import ApiException
 from chutes_agent.client import ControlPlaneClient
@@ -152,9 +153,14 @@ class ResourceMonitor:
 
         # Clear persisted URL when explicitly stopped
         # Clean up client
-        if self.control_plane_client:
-            await self.control_plane_client.remove_cluster()
-            await self.control_plane_client.close()
+        if not self.control_plane_client:
+            raise InvalidOperationError(
+                "Agent has no active control plane client. "
+                "Agent may have lost state and cannot remove itself from cache."
+            )
+
+        await self.control_plane_client.remove_cluster()
+        await self.control_plane_client.close()
 
         self._clear_control_plane_url()
 

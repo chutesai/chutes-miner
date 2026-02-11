@@ -22,12 +22,15 @@ from chutes_miner.api.redis_pubsub import RedisListener
 from chutes_common.auth import sign_request
 from chutes_common.settings import Validator
 from chutes_miner.api.database import get_session, engine
+import chutes_common.schemas.orms  # noqa: F401 - register validator_migrations table
 from chutes_common.schemas import Base
 from chutes_common.schemas.chute import Chute
 from chutes_common.schemas.server import Server
 from chutes_common.schemas.gpu import GPU
 from chutes_common.schemas.deployment import Deployment
+from chutes_common.exceptions import AgentError
 from chutes_miner.api.exceptions import DeploymentFailure
+from chutes_miner.validator_migrations import run_validator_migrations
 import chutes_miner.api.k8s as k8s
 
 
@@ -76,6 +79,8 @@ class Gepetto:
         """
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+        if settings.validator_migrations_enabled:
+            await run_validator_migrations()
         await self.reconcile()
         asyncio.create_task(self.activator())
         asyncio.create_task(self.autoscaler())
@@ -198,6 +203,26 @@ class Gepetto:
                     .where(Deployment.job_id.is_(None))
                 )
             ).scalar()
+
+    @staticmethod
+    async def has_pending_deployment(chute_id: str, version: str, validator: str) -> bool:
+        """
+        True if there is at least one non-job deployment for this chute that is not yet active
+        (pending activation). Used to avoid deploying additional instances while one is already
+        coming up.
+        """
+        async with get_session() as session:
+            return (
+                await session.execute(
+                    select(func.count())
+                    .select_from(Deployment)
+                    .where(Deployment.chute_id == chute_id)
+                    .where(Deployment.version == version)
+                    .where(Deployment.validator == validator)
+                    .where(Deployment.job_id.is_(None))
+                    .where(Deployment.active.is_(False))
+                )
+            ).scalar() > 0
 
     @staticmethod
     async def get_chute(chute_id: str, validator: str) -> Optional[Chute]:
@@ -467,6 +492,13 @@ class Gepetto:
             chute_info = self.remote_chutes[validator].get(chute_id, {})
             chute = await self.load_chute(chute_id, chute_info.get("version"), validator)
             if chute is None:
+                continue
+
+            # Skip if we already have a deployment pending activation; don't deploy more until it's up.
+            if await self.has_pending_deployment(chute_id, chute.version, validator):
+                logger.debug(
+                    f"Skipping scale of {chute.name} ({chute_id}): already have a deployment pending activation"
+                )
                 continue
 
             logger.info(
@@ -823,15 +855,10 @@ class Gepetto:
         # Check if we have this thing deployed already (or in progress).
         chute = None
         async with get_session() as session:
-            deployment = (
-                (
-                    await session.execute(
-                        select(Deployment).where(Deployment.chute_id == event_data["chute_id"])
-                    )
-                )
-                .unique()
-                .scalar_one_or_none()
+            result = await session.execute(
+                select(Deployment).where(Deployment.chute_id == event_data["chute_id"])
             )
+            deployment = result.unique().scalars().first()
             if deployment:
                 logger.info(
                     f"Ignoring bounty event, already have a deployment pending: {deployment.deployment_id}"
@@ -954,25 +981,36 @@ class Gepetto:
                 .scalar_one_or_none()
             )
             if server:
-                # Remove server once GPUs are removed.  Should probably just switch this
-                # To delete the server and rely on the cascade delete to remove GPUs
+                # Stop monitoring and clear Redis before deleting from DB so there is no
+                # window where the server is gone from DB but Redis still has the cluster.
+                if server.agent_api:
+                    try:
+                        await stop_server_monitoring(server.agent_api)
+                    except AgentError as e:
+                        if e.status_code == 409:
+                            logger.warning(
+                                f"Agent for {server.name} has no active monitoring state (status_code=409). "
+                                f"Agent cannot remove itself from cache. Manually clearing cache as fallback."
+                            )
+                        else:
+                            logger.error(
+                                f"Failed to stop monitoring for {server.name} (status_code={e.status_code}). "
+                                f"Clearing from cache.\n{str(e)}"
+                            )
+                        await clear_server_cache(server.name)
+                    except Exception as e:
+                        logger.error(
+                            f"Unexpected error encountered trying to stop monitoring for {server.name}. "
+                            f"Clearing from cache.\n{str(e)}"
+                        )
+                        await clear_server_cache(server.name)
+
                 if (validator := validator_by_hotkey(server.validator)) is not None:
                     await self.remove_server_from_validator(validator, server.server_id)
 
                 await session.refresh(server)
                 await session.delete(server)
                 await session.commit()
-
-                # If this is a standalone server, we need to stop monitoring from the agent
-                if server.agent_api:
-                    try:
-                        await stop_server_monitoring(server.agent_api)
-                    except Exception as e:
-                        logger.error(
-                            f"Unexpected error encountered trying to stop monitoring for {server.name}.  Clearing from cache.\n{e}"
-                        )
-                        # Since the call failed to stop monitoring for cluster we need to manually clear the cache
-                        await clear_server_cache(server.name)
 
         logger.info(f"Finished processing server_deleted event for {server_id=}")
 
@@ -1183,6 +1221,8 @@ class Gepetto:
                             "version",
                             "supported_gpus",
                             "chutes_version",
+                            "preemptible",
+                            "tee",
                         ):
                             setattr(chute, key, chute_dict.get(key))
                         chute.gpu_count = chute_dict["node_selector"]["gpu_count"]
@@ -1610,7 +1650,7 @@ class Gepetto:
             if deployment:
                 await self.undeploy(deployment.deployment_id)
             if job_id:
-                self.release_job(chute, job_id)
+                await self.release_job(chute, job_id)
         return False
 
     async def scale_chute(self, chute: Chute, desired_count: int, preempt: bool = False) -> bool:

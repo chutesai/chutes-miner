@@ -59,3 +59,5 @@ USER root
 WORKDIR /app
 RUN . .venv/bin/activate && poetry install -P /app/${PROJECT}
 RUN chown ${APP_USER}:${APP_GROUP} .
+
+ENTRYPOINT ["python", "-m", "uvicorn", "--host", "0.0.0.0", "--port", "8000", "--reload", "chutes_registry.main:app"]

@@ -13,6 +13,10 @@
       ansible.builtin.set_fact:
         skip_configuration: "{{ config_marker.stat.exists and 'add-nodes' in ansible_run_tags }}"
 
+    - name: Set public IP for each host
+      ansible.builtin.set_fact:
+        public_ip: "{{ external_ip | default(ansible_host) }}"
+
 - name: Common Setup
   hosts: all
   become: true

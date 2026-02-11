@@ -1,12 +1,13 @@
 [tool.poetry]
 name = "chutes-common"
-version = "0.2.0"
+version = "0.2.1"
 description = "Common library for Chutes Miner"
 authors = ["Kyle Widmann <kyle.widmann@gmail.com>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
 python = ">=3.12,<4.0"
+aiohttp = "^3.11.0"
 orjson = "^3.10.18"
 loguru = "^0.7.3"
 fastapi = "^0.115.4"
