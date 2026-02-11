@@ -33,6 +33,7 @@ def sse_message(message):
         }
     )
 
+
 def semcomp(input_version: str, target_version: str) -> int:
     """
     Semver comparison. Strips prerelease/rc suffix by using only the X.Y.Z prefix.
