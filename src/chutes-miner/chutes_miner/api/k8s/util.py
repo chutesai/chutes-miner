@@ -197,7 +197,7 @@ def build_chute_job(
                     init_containers=[
                         V1Container(
                             name="cache-init",
-                            image="parachutes/cache-cleaner:release-next-latest",
+                            image="parachutes/cache-cleaner:latest",
                             env=[
                                 V1EnvVar(
                                     name="CLEANUP_EXCLUDE",
