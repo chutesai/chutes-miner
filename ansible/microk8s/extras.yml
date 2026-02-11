@@ -5,7 +5,6 @@
     - name: Enable community plugins and third-party helm charts
       shell: |
         microk8s enable community || (sleep 10 && microk8s enable community) || true
-        microk8s helm repo add kubernetes-dashboard https://kubernetes.github.io/dashboard/ || true
         microk8s helm repo add nvidia https://helm.ngc.nvidia.com/nvidia || true
         microk8s helm repo add prometheus-community https://prometheus-community.github.io/helm-charts || true
         microk8s helm repo add metrics-server https://kubernetes-sigs.github.io/metrics-server/ || true
@@ -48,19 +47,5 @@
         microk8s helm upgrade --install metrics-server metrics-server/metrics-server \
           --namespace kube-system \
           --set nodeSelector."kubernetes\.io/hostname"={{ inventory_hostname }} \
-          --set persistence.enabled=false
-      when: is_primary | bool
-
-    - name: Install kubernetes dashboard
-      shell: |
-        microk8s helm upgrade --install kubernetes-dashboard kubernetes-dashboard/kubernetes-dashboard \
-          --create-namespace \
-          --namespace kubernetes-dashboard \
-          --set app.scheduling.nodeSelector."kubernetes\.io/hostname"={{ inventory_hostname }} \
-          --set auth.nodeSelector."kubernetes\.io/hostname"={{ inventory_hostname }} \
-          --set api.nodeSelector."kubernetes\.io/hostname"={{ inventory_hostname }} \
-          --set web.nodeSelector."kubernetes\.io/hostname"={{ inventory_hostname }} \
-          --set metricsScraper.nodeSelector."kubernetes\.io/hostname"={{ inventory_hostname }} \
-          --set kong.nodeSelector."kubernetes\.io/hostname"={{ inventory_hostname }} \
           --set persistence.enabled=false
       when: is_primary | bool
