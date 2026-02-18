@@ -116,7 +116,7 @@ async def send_tee_request(
         if method.upper() == "GET":
             resp = await session.get(url, headers=headers, params=params, timeout=60)
         elif method.upper() == "DELETE":
-            resp = await session.delete(url, headers=headers, timeout=60)
+            resp = await session.delete(url, headers=headers, params=params, timeout=60)
         elif method.upper() == "POST":
             resp = await session.post(
                 url, headers=headers, data=payload_string, params=params, timeout=300

@@ -80,32 +80,75 @@ def display_overview(data: dict[str, Any]) -> None:
 
 
 def display_disk(data: dict[str, Any]) -> None:
-    """Pretty-print disk space (path, total, directories table)."""
+    """Pretty-print disk space (path, total, directories, filesystems)."""
     path = data.get("path", "-")
     total = data.get("total_size_human") or data.get("total_size_bytes", "-")
     console.print(f"[bold]Path:[/bold] {path}")
     console.print(f"[bold]Total:[/bold] {total}")
+
+    if data.get("diagnostic_mode"):
+        max_depth = data.get("max_depth")
+        top_n = data.get("top_n")
+        parts = ["[bold]Diagnostic mode:[/bold] enabled"]
+        if max_depth is not None:
+            parts.append(f"max_depth={max_depth}")
+        if top_n is not None:
+            parts.append(f"top_n={top_n}")
+        console.print("  ".join(parts))
+
+    if data.get("stdout_truncated"):
+        console.print("[yellow]Warning: output was truncated[/yellow]")
+
+    # Filesystem capacity info
+    filesystems = data.get("filesystems") or []
+    if filesystems:
+        fs_table = Table(title="Filesystems", box=box.ROUNDED)
+        fs_table.add_column("Device", style="cyan")
+        fs_table.add_column("Mount")
+        fs_table.add_column("Total", justify="right")
+        fs_table.add_column("Used", justify="right")
+        fs_table.add_column("Available", justify="right")
+        fs_table.add_column("Used %", justify="right")
+        for fs in filesystems:
+            used_pct = fs.get("used_percent")
+            pct_str = f"{used_pct:.1f}%" if used_pct is not None else "-"
+            pct_style = ""
+            if used_pct is not None and used_pct >= 90:
+                pct_style = "red"
+            elif used_pct is not None and used_pct >= 75:
+                pct_style = "yellow"
+            fs_table.add_row(
+                fs.get("source", "-"),
+                fs.get("target", "-"),
+                fs.get("total_human", str(fs.get("total_bytes", "-"))),
+                fs.get("used_human", str(fs.get("used_bytes", "-"))),
+                fs.get("available_human", str(fs.get("available_bytes", "-"))),
+                f"[{pct_style}]{pct_str}[/{pct_style}]" if pct_style else pct_str,
+            )
+        console.print(fs_table)
+
+    # Directory listing
     directories = data.get("directories") or []
     if not directories:
         console.print("No subdirectories.")
         return
-    table = Table(title="Directories", box=box.ROUNDED)
-    table.add_column("Name", style="cyan")
-    table.add_column("Path")
-    table.add_column("Size", justify="right")
-    table.add_column("Depth", justify="right")
-    table.add_column("%", justify="right")
+    dir_table = Table(title="Directories", box=box.ROUNDED)
+    dir_table.add_column("Name", style="cyan")
+    dir_table.add_column("Path")
+    dir_table.add_column("Size", justify="right")
+    dir_table.add_column("Depth", justify="right")
+    dir_table.add_column("%", justify="right")
     for d in directories:
         pct = d.get("percentage")
         pct_str = f"{pct:.1f}%" if pct is not None else "-"
-        table.add_row(
+        dir_table.add_row(
             d.get("name", "-"),
             d.get("path", "-"),
             d.get("size_human", str(d.get("size_bytes", "-"))),
             str(d.get("depth", "-")),
             pct_str,
         )
-    console.print(table)
+    console.print(dir_table)
 
 
 def register(app: typer.Typer) -> None:

@@ -44,6 +44,21 @@ def _format_ts(ts: Optional[float]) -> str:
         return str(ts)
 
 
+_STATUS_STYLES = {
+    "present": "green",
+    "in_progress": "yellow",
+    "missing": "dim",
+    "failed": "red",
+    "incomplete": "yellow",
+    "stale": "red",
+}
+
+
+def _styled_status(status: str) -> str:
+    style = _STATUS_STYLES.get(status)
+    return f"[{style}]{status}[/{style}]" if style else status
+
+
 def display_cache_overview(data: dict[str, Any]) -> None:
     """Pretty-print cache overview (total + table of chutes)."""
     total = data.get("total_size_bytes", 0)
@@ -57,13 +72,16 @@ def display_cache_overview(data: dict[str, Any]) -> None:
     table.add_column("Repo ID", style="green")
     table.add_column("Revision")
     table.add_column("Size", justify="right")
+    table.add_column("Status")
     table.add_column("Last accessed")
     for c in chutes:
+        status = c.get("status", "present")
         table.add_row(
             c.get("chute_id", "-"),
             c.get("repo_id", "-"),
             c.get("revision") or "-",
             _format_bytes(c.get("size_bytes")),
+            _styled_status(status),
             _format_ts(c.get("last_accessed")),
         )
     console.print(table)
@@ -92,7 +110,7 @@ def display_cache_download_status(data: dict[str, Any]) -> None:
             err = f"[red]{err}[/red]"
         table.add_row(
             c.get("chute_id", "-"),
-            status,
+            _styled_status(status),
             pc_str,
             c.get("repo_id") or "-",
             c.get("revision") or "-",
@@ -240,6 +258,9 @@ def register(app: typer.Typer) -> None:
             None, "--name", "-n", help="TEE node (server) name (resolve IP via miner API)"
         ),
         chute_id: str = typer.Option(..., "--chute-id", help="Chute ID to remove from cache"),
+        force: bool = typer.Option(
+            False, "--force", help="Force delete even if download is in progress"
+        ),
         hotkey: str = typer.Option(
             ..., help="Path to the hotkey file for your miner", envvar=HOTKEY_ENVVAR
         ),
@@ -252,7 +273,13 @@ def register(app: typer.Typer) -> None:
                 ip=ip, name=name, hotkey=hotkey, miner_api=miner_api
             )
             base_url = build_tee_base_url(server_ip)
-            status, data = await send_tee_request(base_url, f"/cache/{chute_id}", "DELETE", hotkey)
+            status, data = await send_tee_request(
+                base_url,
+                f"/cache/{chute_id}",
+                "DELETE",
+                hotkey,
+                params={"force": str(force).lower()},
+            )
             if status >= 400:
                 typer.echo(f"Error {status}: {data}", err=True)
                 raise typer.Exit(1)
