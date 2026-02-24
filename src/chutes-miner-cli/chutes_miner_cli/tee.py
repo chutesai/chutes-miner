@@ -2,6 +2,7 @@
 TEE VM system-manager CLI: shared app and helpers for cache/status commands.
 """
 
+import sys
 from typing import Any, Optional
 
 import aiohttp
@@ -116,7 +117,7 @@ async def send_tee_request(
         if method.upper() == "GET":
             resp = await session.get(url, headers=headers, params=params, timeout=60)
         elif method.upper() == "DELETE":
-            resp = await session.delete(url, headers=headers, timeout=60)
+            resp = await session.delete(url, headers=headers, params=params, timeout=60)
         elif method.upper() == "POST":
             resp = await session.post(
                 url, headers=headers, data=payload_string, params=params, timeout=300
@@ -132,3 +133,38 @@ async def send_tee_request(
         else:
             data = await resp.text()
         return resp.status, data
+
+
+async def send_tee_stream_request(
+    base_url: str,
+    path: str,
+    hotkey: str,
+    *,
+    params: Optional[dict[str, Any]] = None,
+) -> int:
+    """
+    Perform a signed GET request and stream the response body to stdout.
+    Used for streaming endpoints (e.g. /status/services/{id}/logs/stream).
+    Returns status_code. Raises typer.Exit(1) on non-2xx.
+    """
+    path = path if path.startswith("/") else f"/{path}"
+    url = f"{base_url.rstrip('/')}{path}"
+    p = _vm_purpose_for_path(path)
+    headers, _ = sign_request(hotkey, purpose=p, remote=True)
+
+    connector = aiohttp.TCPConnector(ssl=False)
+    timeout = aiohttp.ClientTimeout(total=None, sock_read=None)
+    async with aiohttp.ClientSession(
+        connector=connector, raise_for_status=False, timeout=timeout
+    ) as session:
+        async with session.get(url, headers=headers, params=params) as resp:
+            status = resp.status
+            if status >= 400:
+                body = await resp.text()
+                typer.echo(f"Error {status}: {body}", err=True)
+                raise typer.Exit(1)
+            async for chunk in resp.content.iter_chunked(8192):
+                if chunk:
+                    sys.stdout.buffer.write(chunk)
+                    sys.stdout.flush()
+    return status

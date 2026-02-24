@@ -33,6 +33,24 @@ def _format_bytes(n: Optional[int]) -> str:
     return f"{n / 1024**3:.1f} GB"
 
 
+def _format_rate(bps: Optional[float]) -> str:
+    if bps is None:
+        return "-"
+    return f"{_format_bytes(int(bps))}/s"
+
+
+def _format_eta(seconds: Optional[float]) -> str:
+    if seconds is None:
+        return "-"
+    s = int(seconds)
+    if s < 60:
+        return f"{s}s"
+    if s < 3600:
+        return f"{s // 60}m {s % 60}s"
+    h, rem = divmod(s, 3600)
+    return f"{h}h {rem // 60}m"
+
+
 def _format_ts(ts: Optional[float]) -> str:
     if ts is None:
         return "-"
@@ -42,6 +60,21 @@ def _format_ts(ts: Optional[float]) -> str:
         return datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
     except Exception:
         return str(ts)
+
+
+_STATUS_STYLES = {
+    "present": "green",
+    "in_progress": "yellow",
+    "missing": "dim",
+    "failed": "red",
+    "incomplete": "yellow",
+    "stale": "red",
+}
+
+
+def _styled_status(status: str) -> str:
+    style = _STATUS_STYLES.get(status)
+    return f"[{style}]{status}[/{style}]" if style else status
 
 
 def display_cache_overview(data: dict[str, Any]) -> None:
@@ -57,13 +90,16 @@ def display_cache_overview(data: dict[str, Any]) -> None:
     table.add_column("Repo ID", style="green")
     table.add_column("Revision")
     table.add_column("Size", justify="right")
+    table.add_column("Status")
     table.add_column("Last accessed")
     for c in chutes:
+        status = c.get("status", "present")
         table.add_row(
             c.get("chute_id", "-"),
             c.get("repo_id", "-"),
             c.get("revision") or "-",
             _format_bytes(c.get("size_bytes")),
+            _styled_status(status),
             _format_ts(c.get("last_accessed")),
         )
     console.print(table)
@@ -79,6 +115,8 @@ def display_cache_download_status(data: dict[str, Any]) -> None:
     table.add_column("Chute ID", style="cyan")
     table.add_column("Status")
     table.add_column("%", justify="right")
+    table.add_column("Rate", justify="right")
+    table.add_column("ETA", justify="right")
     table.add_column("Repo ID")
     table.add_column("Revision")
     table.add_column("Size", justify="right")
@@ -92,8 +130,10 @@ def display_cache_download_status(data: dict[str, Any]) -> None:
             err = f"[red]{err}[/red]"
         table.add_row(
             c.get("chute_id", "-"),
-            status,
+            _styled_status(status),
             pc_str,
+            _format_rate(c.get("download_rate")),
+            _format_eta(c.get("eta_seconds")),
             c.get("repo_id") or "-",
             c.get("revision") or "-",
             _format_bytes(c.get("size_bytes")),
@@ -240,6 +280,9 @@ def register(app: typer.Typer) -> None:
             None, "--name", "-n", help="TEE node (server) name (resolve IP via miner API)"
         ),
         chute_id: str = typer.Option(..., "--chute-id", help="Chute ID to remove from cache"),
+        force: bool = typer.Option(
+            False, "--force", help="Force delete even if download is in progress"
+        ),
         hotkey: str = typer.Option(
             ..., help="Path to the hotkey file for your miner", envvar=HOTKEY_ENVVAR
         ),
@@ -252,7 +295,13 @@ def register(app: typer.Typer) -> None:
                 ip=ip, name=name, hotkey=hotkey, miner_api=miner_api
             )
             base_url = build_tee_base_url(server_ip)
-            status, data = await send_tee_request(base_url, f"/cache/{chute_id}", "DELETE", hotkey)
+            status, data = await send_tee_request(
+                base_url,
+                f"/cache/{chute_id}",
+                "DELETE",
+                hotkey,
+                params={"force": str(force).lower()},
+            )
             if status >= 400:
                 typer.echo(f"Error {status}: {data}", err=True)
                 raise typer.Exit(1)
@@ -275,6 +324,9 @@ def register(app: typer.Typer) -> None:
             5, "--max-age-days", help="Remove entries older than this many days"
         ),
         max_size_gb: int = typer.Option(100, "--max-size-gb", help="Target max cache size in GB"),
+        exclude_pattern: Optional[str] = typer.Option(
+            None, "--exclude-pattern", help="Skip repos containing this string"
+        ),
         raw_json: bool = typer.Option(
             False, "--raw-json", help="Output raw JSON for programmatic use"
         ),
@@ -292,6 +344,8 @@ def register(app: typer.Typer) -> None:
             base_url = build_tee_base_url(server_ip)
             # POST with optional body; use payload for signing
             payload = {"max_age_days": max_age_days, "max_size_gb": max_size_gb}
+            if exclude_pattern is not None:
+                payload["exclude_pattern"] = exclude_pattern
             status, data = await send_tee_request(
                 base_url, "/cache/cleanup", "POST", hotkey, payload=payload
             )

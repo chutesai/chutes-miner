@@ -16,6 +16,7 @@ from chutes_miner_cli.tee import (
     build_tee_base_url,
     get_tee_server_ip,
     send_tee_request,
+    send_tee_stream_request,
 )
 
 console = Console()
@@ -38,6 +39,15 @@ def display_services_list(data: dict[str, Any]) -> None:
             s.get("description") or "-",
         )
     console.print(table)
+
+
+def display_service_logs(data: dict[str, Any]) -> None:
+    """Pretty-print service logs (ServiceLogsResponse)."""
+    logs = data.get("logs") or []
+    for line in logs:
+        print(line)
+    if data.get("stdout_truncated"):
+        print("(output truncated)")
 
 
 def display_overview(data: dict[str, Any]) -> None:
@@ -80,32 +90,75 @@ def display_overview(data: dict[str, Any]) -> None:
 
 
 def display_disk(data: dict[str, Any]) -> None:
-    """Pretty-print disk space (path, total, directories table)."""
+    """Pretty-print disk space (path, total, directories, filesystems)."""
     path = data.get("path", "-")
     total = data.get("total_size_human") or data.get("total_size_bytes", "-")
     console.print(f"[bold]Path:[/bold] {path}")
     console.print(f"[bold]Total:[/bold] {total}")
+
+    if data.get("diagnostic_mode"):
+        max_depth = data.get("max_depth")
+        top_n = data.get("top_n")
+        parts = ["[bold]Diagnostic mode:[/bold] enabled"]
+        if max_depth is not None:
+            parts.append(f"max_depth={max_depth}")
+        if top_n is not None:
+            parts.append(f"top_n={top_n}")
+        console.print("  ".join(parts))
+
+    if data.get("stdout_truncated"):
+        console.print("[yellow]Warning: output was truncated[/yellow]")
+
+    # Filesystem capacity info
+    filesystems = data.get("filesystems") or []
+    if filesystems:
+        fs_table = Table(title="Filesystems", box=box.ROUNDED)
+        fs_table.add_column("Device", style="cyan")
+        fs_table.add_column("Mount")
+        fs_table.add_column("Total", justify="right")
+        fs_table.add_column("Used", justify="right")
+        fs_table.add_column("Available", justify="right")
+        fs_table.add_column("Used %", justify="right")
+        for fs in filesystems:
+            used_pct = fs.get("used_percent")
+            pct_str = f"{used_pct:.1f}%" if used_pct is not None else "-"
+            pct_style = ""
+            if used_pct is not None and used_pct >= 90:
+                pct_style = "red"
+            elif used_pct is not None and used_pct >= 75:
+                pct_style = "yellow"
+            fs_table.add_row(
+                fs.get("source", "-"),
+                fs.get("target", "-"),
+                fs.get("total_human", str(fs.get("total_bytes", "-"))),
+                fs.get("used_human", str(fs.get("used_bytes", "-"))),
+                fs.get("available_human", str(fs.get("available_bytes", "-"))),
+                f"[{pct_style}]{pct_str}[/{pct_style}]" if pct_style else pct_str,
+            )
+        console.print(fs_table)
+
+    # Directory listing
     directories = data.get("directories") or []
     if not directories:
         console.print("No subdirectories.")
         return
-    table = Table(title="Directories", box=box.ROUNDED)
-    table.add_column("Name", style="cyan")
-    table.add_column("Path")
-    table.add_column("Size", justify="right")
-    table.add_column("Depth", justify="right")
-    table.add_column("%", justify="right")
+    dir_table = Table(title="Directories", box=box.ROUNDED)
+    dir_table.add_column("Name", style="cyan")
+    dir_table.add_column("Path")
+    dir_table.add_column("Size", justify="right")
+    dir_table.add_column("Depth", justify="right")
+    dir_table.add_column("%", justify="right")
     for d in directories:
         pct = d.get("percentage")
         pct_str = f"{pct:.1f}%" if pct is not None else "-"
-        table.add_row(
+        dir_table.add_row(
             d.get("name", "-"),
             d.get("path", "-"),
             d.get("size_human", str(d.get("size_bytes", "-"))),
             str(d.get("depth", "-")),
             pct_str,
         )
-    console.print(table)
+    console.print(dir_table)
 
 
 def register(app: typer.Typer) -> None:
@@ -157,12 +210,17 @@ def register(app: typer.Typer) -> None:
             None, "--status", help="Get systemd status for this service ID"
         ),
         logs_service_id: Optional[str] = typer.Option(
-            None, "--logs", help="Get journal logs for this service ID"
+            None, "--logs", help="Get journal logs for this service ID (historical or stream)"
+        ),
+        stream: bool = typer.Option(
+            False, "--stream", help="Stream live logs (use with --logs; ignores --lines)"
         ),
         overview: bool = typer.Option(
             False, "--overview", help="Get system overview (services + GPUs)"
         ),
-        lines: int = typer.Option(200, "--lines", help="Number of log lines (for --logs)"),
+        lines: int = typer.Option(
+            200, "--lines", help="Number of log lines for historical --logs (ignored when --stream)"
+        ),
         since_minutes: int = typer.Option(
             0, "--since-minutes", help="Only logs from last N minutes (0 = no filter, for --logs)"
         ),
@@ -183,6 +241,9 @@ def register(app: typer.Typer) -> None:
                 err=True,
             )
             raise typer.Exit(1)
+        if stream and not logs_service_id:
+            typer.echo("Error: --stream requires --logs <service_id>.", err=True)
+            raise typer.Exit(1)
 
         async def _run():
             server_ip = await get_tee_server_ip(
@@ -192,33 +253,57 @@ def register(app: typer.Typer) -> None:
             if overview:
                 path = "/status/overview"
                 params = None
-            elif status_service_id:
+                status, data = await send_tee_request(base_url, path, "GET", hotkey, params=params)
+                if status >= 400:
+                    typer.echo(f"Error {status}: {data}", err=True)
+                    raise typer.Exit(1)
+                if raw_json:
+                    print(json.dumps(data, indent=2) if isinstance(data, dict) else data)
+                else:
+                    display_overview(data) if isinstance(data, dict) else print(data)
+                return
+            if status_service_id:
                 path = f"/status/services/{status_service_id}/status"
                 params = None
-            elif logs_service_id:
-                path = f"/status/services/{logs_service_id}/logs"
-                params = {"lines": lines, "since_minutes": since_minutes}
-            else:
-                path = "/status/services"
-                params = None
-            status, data = await send_tee_request(base_url, path, "GET", hotkey, params=params)
+                status, data = await send_tee_request(base_url, path, "GET", hotkey, params=params)
+                if status >= 400:
+                    typer.echo(f"Error {status}: {data}", err=True)
+                    raise typer.Exit(1)
+                print(json.dumps(data, indent=2) if isinstance(data, dict) else data)
+                return
+            if logs_service_id:
+                if stream:
+                    path = f"/status/services/{logs_service_id}/logs/stream"
+                    params = {"since_minutes": since_minutes}
+                    await send_tee_stream_request(base_url, path, hotkey, params=params)
+                else:
+                    path = f"/status/services/{logs_service_id}/logs"
+                    params = {"lines": lines, "since_minutes": since_minutes}
+                    status, data = await send_tee_request(
+                        base_url, path, "GET", hotkey, params=params
+                    )
+                    if status >= 400:
+                        typer.echo(f"Error {status}: {data}", err=True)
+                        raise typer.Exit(1)
+                    if raw_json:
+                        print(json.dumps(data, indent=2) if isinstance(data, dict) else data)
+                    elif isinstance(data, dict):
+                        display_service_logs(data)
+                    else:
+                        print(data)
+                return
+            # List services
+            path = "/status/services"
+            status, data = await send_tee_request(base_url, path, "GET", hotkey)
             if status >= 400:
                 typer.echo(f"Error {status}: {data}", err=True)
                 raise typer.Exit(1)
             if raw_json:
-                if isinstance(data, dict):
-                    print(json.dumps(data, indent=2))
-                else:
-                    print(data)
-            elif overview and isinstance(data, dict):
-                display_overview(data)
-            elif not status_service_id and not logs_service_id and isinstance(data, dict):
+                print(json.dumps(data, indent=2) if isinstance(data, dict) else data)
+            elif isinstance(data, dict):
                 display_services_list(data)
             else:
-                if isinstance(data, dict):
-                    print(json.dumps(data, indent=2))
-                else:
-                    print(data)
+                print(data)
 
         asyncio.run(_run())
 
