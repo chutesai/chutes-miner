@@ -253,9 +253,7 @@ def register(app: typer.Typer) -> None:
             if overview:
                 path = "/status/overview"
                 params = None
-                status, data = await send_tee_request(
-                    base_url, path, "GET", hotkey, params=params
-                )
+                status, data = await send_tee_request(base_url, path, "GET", hotkey, params=params)
                 if status >= 400:
                     typer.echo(f"Error {status}: {data}", err=True)
                     raise typer.Exit(1)
@@ -267,9 +265,7 @@ def register(app: typer.Typer) -> None:
             if status_service_id:
                 path = f"/status/services/{status_service_id}/status"
                 params = None
-                status, data = await send_tee_request(
-                    base_url, path, "GET", hotkey, params=params
-                )
+                status, data = await send_tee_request(base_url, path, "GET", hotkey, params=params)
                 if status >= 400:
                     typer.echo(f"Error {status}: {data}", err=True)
                     raise typer.Exit(1)
