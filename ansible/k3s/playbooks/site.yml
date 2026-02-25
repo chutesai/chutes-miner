@@ -13,9 +13,13 @@
       ansible.builtin.set_fact:
         skip_configuration: "{{ config_marker.stat.exists and 'add-nodes' in ansible_run_tags }}"
 
-    - name: Set public IP for each host
+    - name: Set public IP for all hosts in inventory
       ansible.builtin.set_fact:
-        public_ip: "{{ external_ip | default(ansible_host) }}"
+        public_ip: "{{ hostvars[item].get('external_ip', hostvars[item]['ansible_host']) }}"
+      delegate_to: "{{ item }}"
+      delegate_facts: true
+      loop: "{{ groups['all'] }}"
+      run_once: true
 
 - name: Common Setup
   hosts: all
