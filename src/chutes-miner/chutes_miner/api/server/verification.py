@@ -540,9 +540,7 @@ class GravalVerificationStrategy(VerificationStrategy):
                 nodes=node_args,
             )
             payload = multi_node_args.model_dump(exclude_none=True)
-            headers, payload_string = sign_request(
-                payload=payload
-            )
+            headers, payload_string = sign_request(payload=payload)
             async with session.post(
                 f"{validator.api}/nodes/", data=payload_string, headers=headers
             ) as response:
@@ -803,9 +801,7 @@ class TEEVerificationStrategy(VerificationStrategy):
                 gpus=gpu_args,
             )
             payload = server_args.model_dump(exclude_none=True)
-            headers, payload_string = sign_request(
-                payload=payload
-            )
+            headers, payload_string = sign_request(payload=payload)
             async with session.post(
                 f"{self.validator.api}/servers/", data=payload_string, headers=headers
             ) as response:
