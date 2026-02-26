@@ -9,6 +9,7 @@ import aiohttp
 import backoff
 from chutes_common.settings import Validator
 from chutes_miner.api.config import settings
+from chutes_miner.api.server.schemas import NodeArgs, ServerArgsRequest
 import chutes_common.constants as cst
 from chutes_common.auth import sign_request
 from chutes_common.k8s import WatchEventType
@@ -785,25 +786,25 @@ class TEEVerificationStrategy(VerificationStrategy):
         """
         gpus = self.gpus
         async with aiohttp.ClientSession() as session:
-            device_infos = [
-                {
-                    **gpus[idx].device_info,
-                    **dict(
-                        device_index=idx,
-                        gpu_identifier=gpus[idx].model_short_ref,
-                        verification_host=self.node_ip,
-                        verification_port="30443",
-                    ),
-                }
+            gpu_args = [
+                NodeArgs.from_device_info(
+                    gpus[idx].device_info,
+                    gpus[idx].model_short_ref,
+                    device_index=idx,
+                    verification_host=self.node_ip,
+                    verification_port=30443,
+                )
                 for idx in range(len(gpus))
             ]
+            server_args = ServerArgsRequest(
+                host=self.node_ip,
+                id=self.server.server_id,
+                name=self.server.name,
+                gpus=gpu_args,
+            )
+            payload = server_args.model_dump(exclude_none=True)
             headers, payload_string = sign_request(
-                payload={
-                    "id": self.server.server_id,
-                    "name": self.server.name,
-                    "host": self.node_ip,
-                    "gpus": device_infos,
-                }
+                payload=payload
             )
             async with session.post(
                 f"{self.validator.api}/servers/", data=payload_string, headers=headers
