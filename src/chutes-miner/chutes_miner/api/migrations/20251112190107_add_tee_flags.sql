@@ -1,6 +1,6 @@
 -- migrate:up
-ALTER TABLE servers ADD COLUMN is_tee BOOLEAN DEFAULT false;
-ALTER TABLE chutes ADD COLUMN tee BOOLEAN DEFAULT false;
+ALTER TABLE servers ADD COLUMN IF NOT EXISTS is_tee BOOLEAN DEFAULT false;
+ALTER TABLE chutes ADD COLUMN IF NOT EXISTS tee BOOLEAN DEFAULT false;
 
 -- migrate:down
 ALTER TABLE servers DROP COLUMN is_tee;
