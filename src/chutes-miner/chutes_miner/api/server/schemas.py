@@ -1,4 +1,4 @@
-"""Request schemas for validator server API. Mirrors chutes-api ServerArgs and NodeArgs."""
+"""Request schemas for validator API. Mirrors chutes-api ServerArgs, NodeArgs, MultiNodeArgs."""
 
 from typing import Optional
 from pydantic import BaseModel, Field
@@ -53,9 +53,17 @@ class NodeArgs(BaseModel):
 
 
 class ServerArgsRequest(BaseModel):
-    """API-compliant server registration payload. Mirrors chutes-api ServerArgs."""
+    """API-compliant server registration payload. Mirrors chutes-api ServerArgs (POST /servers/)."""
 
     host: str
     id: str
     name: Optional[str] = None
     gpus: list[NodeArgs]
+
+
+class MultiNodeArgsRequest(BaseModel):
+    """API-compliant node registration payload. Mirrors chutes-api MultiNodeArgs (POST /nodes/)."""
+
+    server_id: str
+    server_name: Optional[str] = None
+    nodes: list[NodeArgs]

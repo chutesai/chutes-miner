@@ -9,7 +9,7 @@ import aiohttp
 import backoff
 from chutes_common.settings import Validator
 from chutes_miner.api.config import settings
-from chutes_miner.api.server.schemas import NodeArgs, ServerArgsRequest
+from chutes_miner.api.server.schemas import MultiNodeArgsRequest, NodeArgs, ServerArgsRequest
 import chutes_common.constants as cst
 from chutes_common.auth import sign_request
 from chutes_common.k8s import WatchEventType
@@ -524,24 +524,24 @@ class GravalVerificationStrategy(VerificationStrategy):
         Post GPU information to one validator, with retries.
         """
         async with aiohttp.ClientSession() as session:
-            device_infos = [
-                {
-                    **gpus[idx].device_info,
-                    **dict(
-                        device_index=idx,
-                        gpu_identifier=gpus[idx].model_short_ref,
-                        verification_host=gpus[idx].server.ip_address,
-                        verification_port=gpus[idx].server.verification_port,
-                    ),
-                }
+            node_args = [
+                NodeArgs.from_device_info(
+                    gpus[idx].device_info,
+                    gpus[idx].model_short_ref,
+                    device_index=idx,
+                    verification_host=gpus[idx].server.ip_address,
+                    verification_port=gpus[idx].server.verification_port,
+                )
                 for idx in range(len(gpus))
             ]
+            multi_node_args = MultiNodeArgsRequest(
+                server_id=gpus[0].server_id,
+                server_name=gpus[0].server.name,
+                nodes=node_args,
+            )
+            payload = multi_node_args.model_dump(exclude_none=True)
             headers, payload_string = sign_request(
-                payload={
-                    "nodes": device_infos,
-                    "server_id": gpus[0].server_id,
-                    "server_name": gpus[0].server.name,
-                }
+                payload=payload
             )
             async with session.post(
                 f"{validator.api}/nodes/", data=payload_string, headers=headers
