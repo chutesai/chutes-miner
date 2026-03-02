@@ -1,8 +1,9 @@
 """HF/CivitAI cache cleanup. Run as module: python -m chutes_cache_cleaner.cache_cleanup"""
 
 import os
-import time
 import shutil
+import subprocess
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -104,57 +105,72 @@ def scan_uuid_cache_dir():
     return SimpleNamespace(size_on_disk=size_on_disk, repos=all_repos)
 
 
-def clean_old_cache(max_age_days=5, max_size_gb=100):
-    # Clean HuggingFace cache
-    cache_info = scan_uuid_cache_dir()
-    max_size_bytes = max_size_gb * 1024 * 1024 * 1024
-    cutoff_time = time.time() - (max_age_days * 24 * 3600)
-    exclude_pattern = os.getenv("CLEANUP_EXCLUDE")
-    print(f"Current HF cache size: {cache_info.size_on_disk / 1024**3:.2f}GB")
-    if exclude_pattern:
-        print(f"Excluding repositories containing: {exclude_pattern}")
+def reset_gpus() -> None:
+    """Reset visible NVIDIA GPUs when NVIDIA_VISIBLE_DEVICES or CHUTES_NVIDIA_DEVICES is set."""
+    devices = os.getenv("NVIDIA_VISIBLE_DEVICES") or os.getenv("CHUTES_NVIDIA_DEVICES")
+    if not devices or devices.strip() in ("", "none", "void"):
+        print("Warning: NVIDIA_VISIBLE_DEVICES/CHUTES_NVIDIA_DEVICES not set, skipping GPU reset")
+    else:
+        print("Resetting GPUs...")
+        try:
+            subprocess.run(["nvidia-smi", "--gpu-reset"], check=True)
+            print("GPU reset succeeded")
+        except (subprocess.CalledProcessError, FileNotFoundError) as e:
+            print(f"GPU reset failed (non-fatal): {e}")
 
-    repos = sorted(cache_info.repos, key=lambda r: r.last_accessed)
-    for repo in repos:
-        # Skip repos that match the exclude pattern
-        if should_exclude_repo(repo.repo_id, exclude_pattern):
-            print(f"Skipping excluded repo: {repo.repo_id}")
-            continue
-        if repo.last_accessed < cutoff_time:
-            print(
-                f"Removing old cache: {repo.repo_id} ({repo.size_on_disk / 1024**3:.2f}GB\n"
-                f"\tlast accessed: {time.strftime('%Y-%m-%d', time.localtime(repo.last_accessed))}\n"
-                f"\t{repo.repo_path.parent.parent}"
-            )
-            shutil.rmtree(repo.repo_path.parent.parent)
-    cache_info = scan_uuid_cache_dir()
-    if cache_info.size_on_disk > max_size_bytes:
-        repos = sorted(cache_info.repos, key=lambda r: r.size_on_disk, reverse=True)
+
+def clean_old_cache(max_age_days=5, max_size_gb=100):
+    try:
+        # Clean HuggingFace cache
+        cache_info = scan_uuid_cache_dir()
+        max_size_bytes = max_size_gb * 1024 * 1024 * 1024
+        cutoff_time = time.time() - (max_age_days * 24 * 3600)
+        exclude_pattern = os.getenv("CLEANUP_EXCLUDE")
+        print(f"Current HF cache size: {cache_info.size_on_disk / 1024**3:.2f}GB")
+        if exclude_pattern:
+            print(f"Excluding repositories containing: {exclude_pattern}")
+
+        repos = sorted(cache_info.repos, key=lambda r: r.last_accessed)
         for repo in repos:
             # Skip repos that match the exclude pattern
             if should_exclude_repo(repo.repo_id, exclude_pattern):
                 print(f"Skipping excluded repo: {repo.repo_id}")
                 continue
-            if repo.repo_path.exists():
+            if repo.last_accessed < cutoff_time:
                 print(
-                    f"Removing large cache: {repo.repo_id} "
-                    f"({repo.size_on_disk / 1024**3:.2f}GB) [{repo.repo_path.parent.parent}]"
+                    f"Removing old cache: {repo.repo_id} ({repo.size_on_disk / 1024**3:.2f}GB\n"
+                    f"\tlast accessed: {time.strftime('%Y-%m-%d', time.localtime(repo.last_accessed))}\n"
+                    f"\t{repo.repo_path.parent.parent}"
                 )
                 shutil.rmtree(repo.repo_path.parent.parent)
-                cache_info = scan_uuid_cache_dir()
-                if cache_info.size_on_disk <= max_size_bytes:
-                    break
+        cache_info = scan_uuid_cache_dir()
+        if cache_info.size_on_disk > max_size_bytes:
+            repos = sorted(cache_info.repos, key=lambda r: r.size_on_disk, reverse=True)
+            for repo in repos:
+                # Skip repos that match the exclude pattern
+                if should_exclude_repo(repo.repo_id, exclude_pattern):
+                    print(f"Skipping excluded repo: {repo.repo_id}")
+                    continue
+                if repo.repo_path.exists():
+                    print(
+                        f"Removing large cache: {repo.repo_id} "
+                        f"({repo.size_on_disk / 1024**3:.2f}GB) [{repo.repo_path.parent.parent}]"
+                    )
+                    shutil.rmtree(repo.repo_path.parent.parent)
+                    cache_info = scan_uuid_cache_dir()
+                    if cache_info.size_on_disk <= max_size_bytes:
+                        break
 
-    civitai_dir = os.getenv("CIVITAI_HOME")
-    if civitai_dir:
-        clean_safetensors_dir(civitai_dir, max_age_days, max_size_gb)
+        civitai_dir = os.getenv("CIVITAI_HOME")
+        if civitai_dir:
+            clean_safetensors_dir(civitai_dir, max_age_days, max_size_gb)
+    except Exception as exc:
+        print(f"Error cleaning up cache: {exc}")
 
 
 if __name__ == "__main__":
-    try:
-        clean_old_cache(
-            max_age_days=int(os.getenv("CACHE_MAX_AGE_DAYS", "5")),
-            max_size_gb=int(os.getenv("CACHE_MAX_SIZE_GB", "500")),
-        )
-    except Exception as exc:
-        print(f"Error cleaning up cache: {exc}")
+    reset_gpus()
+    clean_old_cache(
+        max_age_days=int(os.getenv("CACHE_MAX_AGE_DAYS", "5")),
+        max_size_gb=int(os.getenv("CACHE_MAX_SIZE_GB", "500")),
+    )
