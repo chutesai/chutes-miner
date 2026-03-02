@@ -84,6 +84,10 @@ class Settings(CommonSettings):
     cache_max_size_gb: int = int(os.getenv("CACHE_MAX_SIZE_GB", "500"))
     cache_overrides: dict = json.loads(os.getenv("CACHE_OVERRIDES", "{}")) or {}
 
+    chute_shutdown_time_seconds: int = int(
+        os.getenv("CHUTE_SHUTDOWN_TIME_SECONDS", "180")
+    )
+
     migrations_dir: str = os.getenv("MIGRATIONS_DIR", "chutes-miner/chutes_miner/api/migrations")
 
     validator_migrations_enabled: bool = (

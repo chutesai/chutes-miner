@@ -163,6 +163,7 @@ def build_chute_job(
                 ),
                 spec=V1PodSpec(
                     restart_policy="Never",
+                    termination_grace_period_seconds=settings.chute_shutdown_time_seconds,
                     node_name=server.name,  ## Start here
                     runtime_class_name=settings.nvidia_runtime,
                     security_context=V1PodSecurityContext(
