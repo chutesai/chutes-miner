@@ -1712,7 +1712,10 @@ class SingleClusterK8sOperator(K8sOperator):
 
     def _delete_job(self, name, namespace=settings.namespace):
         k8s_batch_client().delete_namespaced_job(
-            name=name, namespace=namespace, propagation_policy="Foreground"
+            name=name,
+            namespace=namespace,
+            propagation_policy="Foreground",
+            grace_period_seconds=settings.chute_shutdown_time_seconds,
         )
 
     def delete_config_map(self, name, namespace=settings.namespace, timeout_seconds: int = 60):
@@ -2389,6 +2392,7 @@ class MultiClusterK8sOperator(K8sOperator):
                 name=name,
                 namespace=namespace,
                 propagation_policy="Foreground",
+                grace_period_seconds=settings.chute_shutdown_time_seconds,
                 _request_timeout=self._get_request_timeout(timeout_seconds),
             )
         except ApiException as e:
