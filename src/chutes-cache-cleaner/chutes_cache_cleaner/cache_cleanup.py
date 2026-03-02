@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
+import torch
 from huggingface_hub import scan_cache_dir
 
 
@@ -105,18 +106,52 @@ def scan_uuid_cache_dir():
     return SimpleNamespace(size_on_disk=size_on_disk, repos=all_repos)
 
 
-def reset_gpus() -> None:
-    """Reset visible NVIDIA GPUs when NVIDIA_VISIBLE_DEVICES or CHUTES_NVIDIA_DEVICES is set."""
-    devices = os.getenv("NVIDIA_VISIBLE_DEVICES") or os.getenv("CHUTES_NVIDIA_DEVICES")
-    if not devices or devices.strip() in ("", "none", "void"):
-        print("Warning: NVIDIA_VISIBLE_DEVICES/CHUTES_NVIDIA_DEVICES not set, skipping GPU reset")
+def _gpu_uuid_to_index_map() -> dict[str, int]:
+    """Get mapping of GPU UUID to CUDA device index via nvidia-smi."""
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=index,uuid", "--format=csv,noheader"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return {}
+    mapping = {}
+    for line in result.stdout.strip().splitlines():
+        parts = [p.strip() for p in line.split(",", 1)]
+        if len(parts) == 2:
+            mapping[parts[1]] = int(parts[0])
+    return mapping
+
+
+def cuda_warmup() -> None:
+    """Warm up CUDA GPUs listed in CHUTES_NVIDIA_DEVICES.
+
+    Uses nvidia-smi to map GPU UUIDs to device indices, then allocates and frees
+    memory on each to initialize the CUDA context. Replaces GPU reset which is
+    not supported with TDX GPU passthrough.
+    """
+    devices_env = os.getenv("CHUTES_NVIDIA_DEVICES")
+    if not devices_env or devices_env.strip() in ("", "none", "void"):
+        print("CHUTES_NVIDIA_DEVICES not set, skipping CUDA warmup")
+    elif not torch.cuda.is_available():
+        print("CUDA warmup skipped: CUDA not available")
     else:
-        print("Resetting GPUs...")
-        try:
-            subprocess.run(["nvidia-smi", "--gpu-reset"], check=True)
-            print("GPU reset succeeded")
-        except (subprocess.CalledProcessError, FileNotFoundError) as e:
-            print(f"GPU reset failed (non-fatal): {e}")
+        gpu_uuids = [u.strip() for u in devices_env.strip().split(",") if u.strip()]
+        uuid_to_index = _gpu_uuid_to_index_map()
+        warmed = 0
+        for uuid in gpu_uuids:
+            idx = uuid_to_index.get(uuid)
+            if idx is None:
+                print(f"CUDA warmup skipped for {uuid}: could not get device index")
+            else:
+                torch.cuda.set_device(idx)
+                x = torch.empty(1024 * 1024 * 100, device="cuda")
+                del x
+                warmed += 1
+        torch.cuda.empty_cache()
+        print(f"CUDA warmup completed for {warmed} GPU(s)")
 
 
 def clean_old_cache(max_age_days=5, max_size_gb=100):
@@ -169,7 +204,7 @@ def clean_old_cache(max_age_days=5, max_size_gb=100):
 
 
 if __name__ == "__main__":
-    reset_gpus()
+    cuda_warmup()
     clean_old_cache(
         max_age_days=int(os.getenv("CACHE_MAX_AGE_DAYS", "5")),
         max_size_gb=int(os.getenv("CACHE_MAX_SIZE_GB", "500")),
