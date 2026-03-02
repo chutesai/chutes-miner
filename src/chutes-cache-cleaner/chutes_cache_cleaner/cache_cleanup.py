@@ -1,12 +1,60 @@
 """HF/CivitAI cache cleanup. Run as module: python -m chutes_cache_cleaner.cache_cleanup"""
 
 import os
+import subprocess
 import time
 import shutil
 from pathlib import Path
 from types import SimpleNamespace
 
 from huggingface_hub import scan_cache_dir
+
+
+def wait_for_vram_zero(timeout_seconds: int = 180, poll_interval: int = 5) -> None:
+    """
+    Poll nvidia-smi until VRAM usage is 0 on all visible GPUs.
+    No-op if nvidia-smi is unavailable (e.g. standalone cache cleanup without GPUs).
+    """
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        try:
+            out = subprocess.run(
+                ["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if out.returncode != 0:
+                print(f"nvidia-smi failed: {out.stderr}")
+                time.sleep(poll_interval)
+                continue
+
+            # Parse "1234 MiB" or "0 MiB" per line
+            used_mibs = []
+            for line in out.stdout.strip().splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    used_mibs.append(int(line.split()[0]))
+                except (ValueError, IndexError):
+                    used_mibs.append(-1)  # treat parse failure as non-zero
+
+            if used_mibs and all(m == 0 for m in used_mibs):
+                print("Target GPUs VRAM at 0 MiB")
+                return
+
+            print(f"Waiting for VRAM to reach 0 (current: {used_mibs} MiB)...")
+        except FileNotFoundError:
+            return  # nvidia-smi not available, not in GPU context
+        except subprocess.TimeoutExpired as exc:
+            print(f"nvidia-smi timeout: {exc}")
+            time.sleep(poll_interval)
+            continue
+
+        time.sleep(poll_interval)
+
+    print(f"Timeout waiting for VRAM to reach 0 after {timeout_seconds}s")
 
 
 def get_dir_size(path):
@@ -152,6 +200,7 @@ def clean_old_cache(max_age_days=5, max_size_gb=100):
 
 if __name__ == "__main__":
     try:
+        wait_for_vram_zero(timeout_seconds=180)  # 3 min, matches chute shutdown grace
         clean_old_cache(
             max_age_days=int(os.getenv("CACHE_MAX_AGE_DAYS", "5")),
             max_size_gb=int(os.getenv("CACHE_MAX_SIZE_GB", "500")),

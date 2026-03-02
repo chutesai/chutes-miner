@@ -224,6 +224,10 @@ def build_chute_job(
                                         )
                                     ),
                                 ),
+                                V1EnvVar(
+                                    name="NVIDIA_VISIBLE_DEVICES",
+                                    value=",".join(gpu_uuids),
+                                ),
                             ],
                             volume_mounts=[
                                 V1VolumeMount(name="raw-cache", mount_path="/cache"),
