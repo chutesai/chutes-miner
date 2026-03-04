@@ -308,6 +308,14 @@ def build_chute_job(
                                 ),
                                 V1EnvVar(name="HF_HOME", value="/cache"),
                                 V1EnvVar(name="CIVITAI_HOME", value="/cache/civitai"),
+                                V1EnvVar(
+                                    name="HF_HUB_DISABLE_XET",
+                                    value="1",
+                                ),
+                                V1EnvVar(
+                                    name="HF_HUB_ENABLE_HF_TRANSFER",
+                                    value="1",
+                                ),
                             ]
                             + extra_env,
                             resources=V1ResourceRequirements(

@@ -8,7 +8,7 @@ authors = [
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "huggingface_hub>=0.20.0",
+    "huggingface_hub>=0.36.0",
 ]
 
 
