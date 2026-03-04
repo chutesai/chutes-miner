@@ -3,10 +3,13 @@ FROM python:3.12 AS base
 
 ARG PROJECT_DIR
 ARG PROJECT
+ARG KUBECTL_VERSION=v1.33.8
+ARG DBMATE_VERSION=v2.31.0
 
-RUN apt update && apt -y install net-tools procps vim jq bc curl
-RUN curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" && mv kubectl /usr/local/bin/ && chmod 755 /usr/local/bin/kubectl
-RUN curl -fsSL -o /usr/local/bin/dbmate https://github.com/amacneil/dbmate/releases/latest/download/dbmate-linux-amd64 && chmod +x /usr/local/bin/dbmate
+RUN apt-get update && apt-get install -y --no-install-recommends net-tools procps vim jq bc curl \
+    && rm -rf /var/lib/apt/lists/*
+RUN curl -LO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" && mv kubectl /usr/local/bin/ && chmod 755 /usr/local/bin/kubectl
+RUN curl -fsSL -o /usr/local/bin/dbmate "https://github.com/amacneil/dbmate/releases/download/${DBMATE_VERSION}/dbmate-linux-amd64" && chmod +x /usr/local/bin/dbmate
 
 RUN useradd chutes -s /bin/bash -d /home/chutes && mkdir -p /home/chutes && chown chutes:chutes /home/chutes
 RUN mkdir -p /app && chown chutes:chutes /app
