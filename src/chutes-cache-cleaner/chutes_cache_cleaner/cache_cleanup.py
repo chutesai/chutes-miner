@@ -10,9 +10,14 @@ from types import SimpleNamespace
 from huggingface_hub import scan_cache_dir
 
 
-def wait_for_gpu_idle(timeout_seconds: int = 180, poll_interval: int = 5) -> None:
+def wait_for_gpu_idle(
+    timeout_seconds: int = 180,
+    poll_interval: int = 5,
+    vram_threshold_mib: int = 1000,
+) -> None:
     """
-    Poll nvidia-smi until no processes are using the visible GPUs.
+    Poll nvidia-smi until no processes are using the visible GPUs and VRAM is below
+    threshold (driver overhead ~100-200 MiB persists, so we use a threshold not 0).
     No-op if nvidia-smi is unavailable (e.g. standalone cache cleanup without GPUs).
     """
     deadline = time.monotonic() + timeout_seconds
@@ -35,11 +40,36 @@ def wait_for_gpu_idle(timeout_seconds: int = 180, poll_interval: int = 5) -> Non
 
             pids = [p.strip() for p in procs.stdout.splitlines() if p.strip()]
 
-            if not pids:
-                print("GPUs idle (no compute processes)")
+            mem = subprocess.run(
+                [
+                    "nvidia-smi",
+                    "--query-gpu=memory.used",
+                    "--format=csv,noheader,nounits",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            used_mibs = []
+            if mem.returncode == 0:
+                for line in mem.stdout.strip().splitlines():
+                    line = line.strip()
+                    if line:
+                        try:
+                            used_mibs.append(int(line.split()[0]))
+                        except (ValueError, IndexError):
+                            used_mibs.append(vram_threshold_mib + 1)
+
+            vram_ok = not used_mibs or all(m <= vram_threshold_mib for m in used_mibs)
+
+            if not pids and vram_ok:
+                print(f"GPUs idle: no compute processes, VRAM <= {vram_threshold_mib} MiB")
                 return
 
-            print(f"Waiting for GPUs: compute processes pids={pids}")
+            if pids:
+                print(f"Waiting for GPUs: compute processes pids={pids}")
+            if not vram_ok:
+                print(f"Waiting for GPUs: VRAM {used_mibs} MiB (threshold {vram_threshold_mib})")
         except FileNotFoundError:
             return  # nvidia-smi not available, not in GPU context
         except subprocess.TimeoutExpired as exc:
