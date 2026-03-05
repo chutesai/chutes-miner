@@ -513,7 +513,8 @@ class GravalVerificationStrategy(VerificationStrategy):
 
     @backoff.on_exception(
         backoff.constant,
-        Exception,
+        (aiohttp.ClientError, asyncio.TimeoutError),
+        giveup=lambda e: isinstance(e, aiohttp.ClientResponseError),
         jitter=None,
         interval=3,
         max_tries=5,
@@ -521,6 +522,7 @@ class GravalVerificationStrategy(VerificationStrategy):
     async def _advertise_nodes(self, validator: Validator, gpus: list[GPU]):
         """
         Post GPU information to one validator, with retries.
+        Retries only on connection/timeout errors; 4xx/5xx responses are not retried.
         """
         async with aiohttp.ClientSession() as session:
             device_infos = [
