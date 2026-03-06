@@ -13,7 +13,7 @@ from huggingface_hub import scan_cache_dir
 def wait_for_gpu_idle(
     timeout_seconds: int = 180,
     poll_interval: int = 5,
-    vram_threshold_mib: int = 1000,
+    vram_threshold_mib: int = 1024,
 ) -> None:
     """
     Poll nvidia-smi until no processes are using the visible GPUs and VRAM is below
