@@ -1,6 +1,6 @@
 [project]
 name = "chutes-cache-cleaner"
-version = "0.2.0"
+version = "0.2.1"
 description = ""
 authors = [
     {name = "Kyle Widmann",email = "kyle.widmann@gmail.com"}
@@ -8,7 +8,7 @@ authors = [
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "huggingface_hub>=0.20.0",
+    "huggingface_hub>=0.36.0",
 ]
 
 

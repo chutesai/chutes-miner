@@ -1,12 +1,85 @@
 """HF/CivitAI cache cleanup. Run as module: python -m chutes_cache_cleaner.cache_cleanup"""
 
 import os
+import subprocess
 import time
 import shutil
 from pathlib import Path
 from types import SimpleNamespace
 
 from huggingface_hub import scan_cache_dir
+
+
+def wait_for_gpu_idle(
+    timeout_seconds: int = 180,
+    poll_interval: int = 5,
+    vram_threshold_mib: int = 1024,
+) -> None:
+    """
+    Poll nvidia-smi until no processes are using the visible GPUs and VRAM is below
+    threshold (driver overhead ~100-200 MiB persists, so we use a threshold not 0).
+    No-op if nvidia-smi is unavailable (e.g. standalone cache cleanup without GPUs).
+    """
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        try:
+            procs = subprocess.run(
+                [
+                    "nvidia-smi",
+                    "--query-compute-apps=pid",
+                    "--format=csv,noheader,nounits",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if procs.returncode != 0:
+                print(f"nvidia-smi failed: {procs.stderr}")
+                time.sleep(poll_interval)
+                continue
+
+            pids = [p.strip() for p in procs.stdout.splitlines() if p.strip()]
+
+            mem = subprocess.run(
+                [
+                    "nvidia-smi",
+                    "--query-gpu=memory.used",
+                    "--format=csv,noheader,nounits",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            used_mibs = []
+            if mem.returncode == 0:
+                for line in mem.stdout.strip().splitlines():
+                    line = line.strip()
+                    if line:
+                        try:
+                            used_mibs.append(int(line.split()[0]))
+                        except (ValueError, IndexError):
+                            used_mibs.append(vram_threshold_mib + 1)
+
+            vram_ok = not used_mibs or all(m <= vram_threshold_mib for m in used_mibs)
+
+            if not pids and vram_ok:
+                print(f"GPUs idle: no compute processes, VRAM <= {vram_threshold_mib} MiB")
+                return
+
+            if pids:
+                print(f"Waiting for GPUs: compute processes pids={pids}")
+            if not vram_ok:
+                print(f"Waiting for GPUs: VRAM {used_mibs} MiB (threshold {vram_threshold_mib})")
+        except FileNotFoundError:
+            return  # nvidia-smi not available, not in GPU context
+        except subprocess.TimeoutExpired as exc:
+            print(f"nvidia-smi timeout: {exc}")
+            time.sleep(poll_interval)
+            continue
+
+        time.sleep(poll_interval)
+
+    print(f"Timeout waiting for GPU idle after {timeout_seconds}s")
 
 
 def get_dir_size(path):
@@ -152,6 +225,7 @@ def clean_old_cache(max_age_days=5, max_size_gb=100):
 
 if __name__ == "__main__":
     try:
+        wait_for_gpu_idle(timeout_seconds=180)  # 3 min, matches chute shutdown grace
         clean_old_cache(
             max_age_days=int(os.getenv("CACHE_MAX_AGE_DAYS", "5")),
             max_size_gb=int(os.getenv("CACHE_MAX_SIZE_GB", "500")),

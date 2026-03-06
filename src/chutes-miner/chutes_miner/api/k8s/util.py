@@ -163,6 +163,7 @@ def build_chute_job(
                 ),
                 spec=V1PodSpec(
                     restart_policy="Never",
+                    termination_grace_period_seconds=settings.chute_shutdown_time_seconds,
                     node_name=server.name,  ## Start here
                     runtime_class_name=settings.nvidia_runtime,
                     security_context=V1PodSecurityContext(
@@ -198,6 +199,7 @@ def build_chute_job(
                         V1Container(
                             name="cache-init",
                             image="parachutes/cache-cleaner:latest",
+                            image_pull_policy="Always",
                             env=[
                                 V1EnvVar(
                                     name="CLEANUP_EXCLUDE",
@@ -222,6 +224,10 @@ def build_chute_job(
                                             server.name, settings.cache_max_size_gb
                                         )
                                     ),
+                                ),
+                                V1EnvVar(
+                                    name="NVIDIA_VISIBLE_DEVICES",
+                                    value=",".join(gpu_uuids),
                                 ),
                             ],
                             volume_mounts=[

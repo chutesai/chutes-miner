@@ -52,9 +52,10 @@ async def wait_for_deletion(label_selector: str, timeout_seconds: int = 120):
     return await K8sOperator().wait_for_deletion(label_selector, timeout_seconds)
 
 
-async def undeploy(deployment_id: str, timeout_seconds: int = 120):
+async def undeploy(deployment_id: str, timeout_seconds: int | None = None):
     """
     Delete a deployment, and associated service.
+    Uses chute_shutdown_time_seconds when timeout not specified.
     """
     return await K8sOperator().undeploy(deployment_id, timeout_seconds=timeout_seconds)
 

@@ -4,8 +4,6 @@ FROM python:3.12-slim AS base
 ARG PROJECT_DIR
 ARG PROJECT
 
-RUN pip install --no-cache-dir huggingface_hub
-
 WORKDIR /app
 COPY ${PROJECT_DIR} ./
 RUN pip install --no-cache-dir .
