@@ -121,7 +121,7 @@ def build_chute_job(
         "--validator-ss58",
         server.validator,
     ]
-    
+
     code_volumes = []
     code_volume_mounts = []
     if attach_code_volume:
