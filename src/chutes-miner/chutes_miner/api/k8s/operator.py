@@ -871,29 +871,40 @@ class K8sOperator(abc.ABC):
     async def wait_for_deletion(self, label_selector: str, timeout_seconds: int = 120) -> None:
         """
         Wait for a deleted pod to be fully removed.
+        Runs the blocking watch loop in a thread pool so the event loop is not blocked.
         """
-        pods = self.get_pods(settings.namespace, label_selector, timeout=timeout_seconds)
-        if not pods.items:
-            logger.info(f"Nothing to wait for: {label_selector}")
-            return
 
-        try:
-            for _ in self.watch_pods(
-                namespace=settings.namespace, label_selector=label_selector, timeout=timeout_seconds
-            ):
-                # Recheck pods
-                pods = self.get_pods(settings.namespace, label_selector, timeout=timeout_seconds)
-                if not pods.items:
-                    logger.success(f"Deletion of {label_selector=} is complete")
-                    break
-        except Exception as exc:
-            logger.warning(f"Error waiting for pods to be deleted: {exc}")
-            raise
+        def _sync_wait() -> None:
+            pods = self.get_pods(settings.namespace, label_selector, timeout=timeout_seconds)
+            if not pods.items:
+                logger.info(f"Nothing to wait for: {label_selector}")
+                return
+            try:
+                for _ in self.watch_pods(
+                    namespace=settings.namespace,
+                    label_selector=label_selector,
+                    timeout=timeout_seconds,
+                ):
+                    pods = self.get_pods(
+                        settings.namespace, label_selector, timeout=timeout_seconds
+                    )
+                    if not pods.items:
+                        logger.success(f"Deletion of {label_selector=} is complete")
+                        break
+            except Exception as exc:
+                logger.warning(f"Error waiting for pods to be deleted: {exc}")
+                raise
 
-    async def undeploy(self, deployment_id: str, timeout_seconds: int = 120) -> None:
+        await asyncio.to_thread(_sync_wait)
+
+    async def undeploy(self, deployment_id: str, timeout_seconds: int | None = None) -> None:
         """
         Delete a job, and associated service.
         """
+        wait_timeout = (
+            timeout_seconds if timeout_seconds is not None else settings.chute_shutdown_time_seconds
+        )
+
         node_name = None
         try:
             # TODO: This is problematic, if the job is deleted from k8s manually
@@ -925,7 +936,7 @@ class K8sOperator(abc.ABC):
             )
 
         await self.wait_for_deletion(
-            f"chutes/deployment-id={deployment_id}", timeout_seconds=timeout_seconds
+            f"chutes/deployment-id={deployment_id}", timeout_seconds=wait_timeout
         )
 
         if node_name:
@@ -1699,7 +1710,10 @@ class SingleClusterK8sOperator(K8sOperator):
 
     def _delete_job(self, name, namespace=settings.namespace):
         k8s_batch_client().delete_namespaced_job(
-            name=name, namespace=namespace, propagation_policy="Foreground"
+            name=name,
+            namespace=namespace,
+            propagation_policy="Foreground",
+            grace_period_seconds=settings.chute_shutdown_time_seconds,
         )
 
     def delete_config_map(self, name, namespace=settings.namespace, timeout_seconds: int = 60):
@@ -2376,6 +2390,7 @@ class MultiClusterK8sOperator(K8sOperator):
                 name=name,
                 namespace=namespace,
                 propagation_policy="Foreground",
+                grace_period_seconds=settings.chute_shutdown_time_seconds,
                 _request_timeout=self._get_request_timeout(timeout_seconds),
             )
         except ApiException as e:

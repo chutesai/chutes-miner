@@ -122,6 +122,18 @@ def build_chute_job(
         server.validator,
     ]
 
+    if chute.tee:
+        extra_env.append(
+            V1EnvVar(
+                name="HF_HUB_DISABLE_XET",
+                value="1",
+            ),
+            V1EnvVar(
+                name="HF_HUB_ENABLE_HF_TRANSFER",
+                value="1",
+            ),
+        )
+
     code_volumes = []
     code_volume_mounts = []
     if attach_code_volume:
@@ -163,6 +175,7 @@ def build_chute_job(
                 ),
                 spec=V1PodSpec(
                     restart_policy="Never",
+                    termination_grace_period_seconds=settings.chute_shutdown_time_seconds,
                     node_name=server.name,  ## Start here
                     runtime_class_name=settings.nvidia_runtime,
                     security_context=V1PodSecurityContext(
@@ -198,6 +211,7 @@ def build_chute_job(
                         V1Container(
                             name="cache-init",
                             image="parachutes/cache-cleaner:latest",
+                            image_pull_policy="Always",
                             env=[
                                 V1EnvVar(
                                     name="CLEANUP_EXCLUDE",
@@ -222,6 +236,10 @@ def build_chute_job(
                                             server.name, settings.cache_max_size_gb
                                         )
                                     ),
+                                ),
+                                V1EnvVar(
+                                    name="NVIDIA_VISIBLE_DEVICES",
+                                    value=",".join(gpu_uuids),
                                 ),
                             ],
                             volume_mounts=[
