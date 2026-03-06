@@ -902,9 +902,7 @@ class K8sOperator(abc.ABC):
         Delete a job, and associated service.
         """
         wait_timeout = (
-            timeout_seconds
-            if timeout_seconds is not None
-            else settings.chute_shutdown_time_seconds
+            timeout_seconds if timeout_seconds is not None else settings.chute_shutdown_time_seconds
         )
 
         node_name = None
