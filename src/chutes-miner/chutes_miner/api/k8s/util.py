@@ -125,7 +125,7 @@ def build_chute_job(
     ]
 
     if chute.tee:
-        extra_env.append(
+        extra_env += [
             V1EnvVar(
                 name="HF_HUB_DISABLE_XET",
                 value="1",
@@ -134,7 +134,7 @@ def build_chute_job(
                 name="HF_HUB_ENABLE_HF_TRANSFER",
                 value="1",
             ),
-        )
+        ]
 
     code_volumes = []
     code_volume_mounts = []
