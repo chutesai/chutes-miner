@@ -199,6 +199,7 @@ def build_chute_job(
                         V1Container(
                             name="cache-init",
                             image="parachutes/cache-cleaner:latest",
+                            image_pull_policy="Always",
                             env=[
                                 V1EnvVar(
                                     name="CLEANUP_EXCLUDE",
