@@ -10,7 +10,7 @@ class NodeArgs(BaseModel):
     uuid: str
     name: str
     memory: int
-    major: int
+    major: Optional[int] = None
     minor: Optional[int] = None
     processors: Optional[int] = None
     sxm: Optional[bool] = None
@@ -37,7 +37,7 @@ class NodeArgs(BaseModel):
             uuid=device_info["uuid"],
             name=device_info["name"],
             memory=device_info["memory"],
-            major=device_info["major"],
+            major=device_info.get("major"),
             minor=device_info.get("minor"),
             processors=device_info.get("processors"),
             sxm=device_info.get("sxm"),
