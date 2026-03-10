@@ -124,9 +124,7 @@ def register(app: typer.Typer) -> None:
                 ip=ip, name=name, hotkey=hotkey, miner_api=miner_api
             )
             base_url = build_tee_base_url(server_ip)
-            status, data = await send_tee_request(
-                base_url, "/images/", "GET", hotkey
-            )
+            status, data = await send_tee_request(base_url, "/images/", "GET", hotkey)
             if status >= 400:
                 typer.echo(f"Error {status}: {data}", err=True)
                 raise typer.Exit(1)
@@ -225,9 +223,7 @@ def register(app: typer.Typer) -> None:
         image: str = typer.Option(
             ..., "--image", help="Image to remove (short or full form, or ID)"
         ),
-        force: bool = typer.Option(
-            False, "--force", help="Force delete even if in use"
-        ),
+        force: bool = typer.Option(False, "--force", help="Force delete even if in use"),
         hotkey: str = typer.Option(
             ..., help="Path to the hotkey file for your miner", envvar=HOTKEY_ENVVAR
         ),
@@ -280,9 +276,7 @@ def register(app: typer.Typer) -> None:
                 ip=ip, name=name, hotkey=hotkey, miner_api=miner_api
             )
             base_url = build_tee_base_url(server_ip)
-            status, data = await send_tee_request(
-                base_url, "/images/prune", "POST", hotkey
-            )
+            status, data = await send_tee_request(base_url, "/images/prune", "POST", hotkey)
             if status >= 400:
                 typer.echo(f"Error {status}: {data}", err=True)
                 raise typer.Exit(1)
