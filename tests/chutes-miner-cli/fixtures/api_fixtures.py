@@ -41,6 +41,7 @@ MOCK_AGENT_KUBECONFIG = yaml.safe_dump(
     sort_keys=False,
 )
 
+
 @pytest.fixture
 def mock_purge_deployments_response():
     """Mock response from the API."""

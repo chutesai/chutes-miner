@@ -3,7 +3,7 @@ import json
 from chutes_common.k8s import WatchEvent
 from chutes_common.settings import RedisSettings
 import pytest
-from unittest.mock import AsyncMock, Mock, call, patch
+from unittest.mock import Mock, call, patch
 from datetime import datetime, timezone
 from redis import Redis
 
@@ -12,10 +12,11 @@ from chutes_common.redis import MonitoringRedisClient
 
 settings = RedisSettings()
 
+
 @pytest.fixture
 def mock_redis():
     """Mock Redis client"""
-    with patch('chutes_common.redis.Redis') as mock_redis_class:
+    with patch("chutes_common.redis.Redis") as mock_redis_class:
         mock_redis_instance = Mock(spec=Redis)
         mock_redis_class.from_url.return_value = mock_redis_instance
         yield mock_redis_instance
@@ -36,15 +37,13 @@ def sample_cluster_resources():
     return {
         ResourceType.DEPLOYMENT: [
             Mock(metadata=Mock(namespace="default", name="app1")),
-            Mock(metadata=Mock(namespace="kube-system", name="app2"))
+            Mock(metadata=Mock(namespace="kube-system", name="app2")),
         ],
         ResourceType.POD: [
             Mock(metadata=Mock(namespace="default", name="pod1")),
-            Mock(metadata=Mock(namespace="default", name="pod2"))
+            Mock(metadata=Mock(namespace="default", name="pod2")),
         ],
-        ResourceType.SERVICE: [
-            Mock(metadata=Mock(namespace="default", name="service1"))
-        ]
+        ResourceType.SERVICE: [Mock(metadata=Mock(namespace="default", name="service1"))],
     }
 
 
@@ -69,17 +68,17 @@ def sample_cluster_status():
         state=ClusterState.ACTIVE,
         last_heartbeat=datetime.now(timezone.utc),
         error_message=None,
-        heartbeat_failures=0
+        heartbeat_failures=0,
     )
 
 
 def test_singleton_pattern(mock_redis):
     """Test that MonitoringRedisClient follows singleton pattern"""
     MonitoringRedisClient._instance = None
-    
+
     client1 = MonitoringRedisClient()
     client2 = MonitoringRedisClient()
-    
+
     assert client1 is client2
     assert MonitoringRedisClient._instance is client1
 
@@ -88,9 +87,9 @@ def test_initialize_redis_connection_success(mock_redis):
     """Test successful Redis connection initialization"""
     MonitoringRedisClient._instance = None
     mock_redis.ping.return_value = True
-    
+
     client = MonitoringRedisClient()
-    
+
     assert client.redis is mock_redis
     mock_redis.ping.assert_called_once()
 
@@ -98,10 +97,10 @@ def test_initialize_redis_connection_success(mock_redis):
 def test_initialize_redis_connection_failure():
     """Test Redis connection failure"""
     MonitoringRedisClient._instance = None
-    
-    with patch('chutes_common.redis.Redis') as mock_redis_class:
+
+    with patch("chutes_common.redis.Redis") as mock_redis_class:
         mock_redis_class.from_url.side_effect = Exception("Connection failed")
-        
+
         with pytest.raises(Exception, match="Connection failed"):
             MonitoringRedisClient()
 
@@ -116,12 +115,13 @@ def test_close_connection(redis_client, mock_redis):
 async def test_track_cluster(redis_client, mock_redis, sample_cluster_resources):
     """Test tracking a new cluster"""
     cluster_name = "test-cluster"
-    
-    with patch.object(redis_client, 'update_cluster_status') as mock_update_status, \
-         patch.object(redis_client, 'set_cluster_resources') as mock_store_resources:
-        
+
+    with (
+        patch.object(redis_client, "update_cluster_status") as mock_update_status,
+        patch.object(redis_client, "set_cluster_resources") as mock_store_resources,
+    ):
         await redis_client.track_cluster(cluster_name, sample_cluster_resources)
-        
+
         mock_update_status.assert_called_once()
         mock_store_resources.assert_called_once_with(cluster_name, sample_cluster_resources)
 
@@ -130,10 +130,10 @@ async def test_track_cluster(redis_client, mock_redis, sample_cluster_resources)
 async def test_clear_cluster(redis_client, mock_redis):
     """Test clearing cluster data"""
     cluster_name = "test-cluster"
-    
-    with patch.object(redis_client, 'clear_cluster_resources') as mock_clear_resources:
+
+    with patch.object(redis_client, "clear_cluster_resources") as mock_clear_resources:
         await redis_client.clear_cluster(cluster_name)
-        
+
         mock_clear_resources.assert_called_once_with(cluster_name, True)
         mock_redis.delete.assert_called_once_with(f"clusters:{cluster_name}:health")
 
@@ -142,10 +142,10 @@ async def test_clear_cluster(redis_client, mock_redis):
 async def test_clear_cluster_exception(redis_client, mock_redis):
     """Test clear_cluster handles exceptions properly"""
     cluster_name = "test-cluster"
-    
-    with patch.object(redis_client, 'clear_cluster_resources') as mock_clear_resources:
+
+    with patch.object(redis_client, "clear_cluster_resources") as mock_clear_resources:
         mock_clear_resources.side_effect = Exception("Clear failed")
-        
+
         with pytest.raises(Exception, match="Clear failed"):
             await redis_client.clear_cluster(cluster_name)
 
@@ -154,14 +154,15 @@ async def test_clear_cluster_exception(redis_client, mock_redis):
 async def test_set_cluster_resources(redis_client, mock_redis, sample_cluster_resources):
     """Test storing initial resources for a cluster"""
     cluster_name = "test-cluster"
-    
-    with patch.object(redis_client, 'clear_cluster_resources') as mock_clear, \
-         patch('chutes_common.redis.serializer') as mock_serializer:
-        
+
+    with (
+        patch.object(redis_client, "clear_cluster_resources") as mock_clear,
+        patch("chutes_common.redis.serializer") as mock_serializer,
+    ):
         mock_serializer.serialize.return_value = {"test": "data"}
-        
+
         await redis_client.set_cluster_resources(cluster_name, sample_cluster_resources)
-        
+
         mock_clear.assert_called_once_with(cluster_name)
         assert mock_redis.hset.call_count == 3  # deployments, pods, services
 
@@ -170,13 +171,13 @@ async def test_set_cluster_resources(redis_client, mock_redis, sample_cluster_re
 async def test_update_resource_add_or_modify(redis_client, mock_redis, sample_watch_event):
     """Test updating a resource (add or modify)"""
     cluster_name = "test-cluster"
-    
-    with patch('chutes_common.redis.serializer') as mock_serializer:
+
+    with patch("chutes_common.redis.serializer") as mock_serializer:
         test_data = {"test": "data"}
         mock_serializer.serialize.return_value = test_data
-        
+
         await redis_client.update_resource(cluster_name, sample_watch_event)
-        
+
         expected_key = f"clusters:{cluster_name}:resources:deployment"
         expected_field = "default:test-deployment"
         mock_redis.hset.assert_called_once_with(expected_key, expected_field, json.dumps(test_data))
@@ -187,9 +188,9 @@ async def test_update_resource_delete(redis_client, mock_redis, sample_watch_eve
     """Test updating a resource (delete)"""
     cluster_name = "test-cluster"
     sample_watch_event.is_deleted = True
-    
+
     await redis_client.update_resource(cluster_name, sample_watch_event)
-    
+
     expected_key = f"clusters:{cluster_name}:resources:deployment"
     expected_field = "default:test-deployment"
     mock_redis.hdel.assert_called_once_with(expected_key, expected_field)
@@ -199,19 +200,21 @@ def test_get_resources_single_cluster(redis_client, mock_redis):
     """Test getting resources for a specific cluster"""
     cluster_name = "test-cluster"
     resource_type = ResourceType.DEPLOYMENT
-    
+
     mock_redis.keys.return_value = [f"clusters:{cluster_name}:resources:{resource_type.value}"]
     mock_redis.hgetall.return_value = {
         "default:app1": json.dumps({"name": "app1"}),
-        "default:app2": json.dumps({"name": "app2"})
+        "default:app2": json.dumps({"name": "app2"}),
     }
-    
-    with patch('chutes_common.k8s.ClusterResources.from_dict') as mock_from_dict:
+
+    with patch("chutes_common.k8s.ClusterResources.from_dict") as mock_from_dict:
         mock_from_dict.return_value = {"deployments": {"default:app1": {"name": "app1"}}}
-        
-        result = redis_client.get_resources(cluster_name, resource_type)
-        
-        mock_redis.keys.assert_called_once_with(f"clusters:{cluster_name}:resources:{resource_type.value}")
+
+        redis_client.get_resources(cluster_name, resource_type)
+
+        mock_redis.keys.assert_called_once_with(
+            f"clusters:{cluster_name}:resources:{resource_type.value}"
+        )
         mock_redis.hgetall.assert_called_once()
         mock_from_dict.assert_called_once()
 
@@ -220,15 +223,15 @@ def test_get_resources_all_clusters(redis_client, mock_redis):
     """Test getting resources for all clusters"""
     mock_redis.keys.return_value = [
         "clusters:cluster1:resources:deployments",
-        "clusters:cluster2:resources:pods"
+        "clusters:cluster2:resources:pods",
     ]
     mock_redis.hgetall.return_value = {}
-    
-    with patch('chutes_common.k8s.ClusterResources.from_dict') as mock_from_dict:
+
+    with patch("chutes_common.k8s.ClusterResources.from_dict") as mock_from_dict:
         mock_from_dict.return_value = {}
-        
-        result = redis_client.get_resources("*", ResourceType.ALL)
-        
+
+        redis_client.get_resources("*", ResourceType.ALL)
+
         mock_redis.keys.assert_called_once_with("clusters:*:resources:*")
 
 
@@ -237,12 +240,12 @@ def test_get_resource_cluster_found(redis_client, mock_redis):
     resource_name = "test-deployment"
     resource_type = ResourceType.DEPLOYMENT
     namespace = "default"
-    
+
     mock_redis.keys.return_value = ["clusters:test-cluster:resources:deployment"]
     mock_redis.hkeys.return_value = ["default:test-deployment", "kube-system:other-deployment"]
-    
+
     result = redis_client.get_resource_cluster(resource_name, resource_type, namespace)
-    
+
     assert result == "test-cluster"
     mock_redis.keys.assert_called_once_with("clusters:*:resources:deployment")
 
@@ -252,12 +255,12 @@ def test_get_resource_cluster_not_found(redis_client, mock_redis):
     resource_name = "missing-deployment"
     resource_type = ResourceType.DEPLOYMENT
     namespace = "default"
-    
+
     mock_redis.keys.return_value = ["clusters:test-cluster:resources:deployment"]
     mock_redis.hkeys.return_value = ["default:other-deployment"]
-    
+
     result = redis_client.get_resource_cluster(resource_name, resource_type, namespace)
-    
+
     assert result is None
 
 
@@ -266,16 +269,13 @@ def test_get_resource_cluster_multiple_clusters_error(redis_client, mock_redis):
     resource_name = "test-deployment"
     resource_type = ResourceType.DEPLOYMENT
     namespace = "default"
-    
+
     mock_redis.keys.return_value = [
         "clusters:cluster1:resources:deployment",
-        "clusters:cluster2:resources:deployment"
+        "clusters:cluster2:resources:deployment",
     ]
-    mock_redis.hkeys.side_effect = [
-        ["default:test-deployment"],
-        ["default:test-deployment"]
-    ]
-    
+    mock_redis.hkeys.side_effect = [["default:test-deployment"], ["default:test-deployment"]]
+
     with pytest.raises(ValueError, match="Found multiple clusters"):
         redis_client.get_resource_cluster(resource_name, resource_type, namespace)
 
@@ -288,9 +288,7 @@ def test_get_resource_with_context_found(redis_client):
 
     redis_client.get_resource_cluster = Mock(return_value="cluster-a")
     redis_client.get_resources = Mock(
-        return_value=Mock(
-            deployments=[cached_resource], services=[], pods=[], nodes=[], jobs=[]
-        )
+        return_value=Mock(deployments=[cached_resource], services=[], pods=[], nodes=[], jobs=[])
     )
 
     cluster, resource = redis_client.get_resource_with_context(
@@ -334,10 +332,10 @@ async def test_clear_cluster_resources(redis_client, mock_redis):
         f"clusters:{cluster_name}:resources:{ResourceType.DEPLOYMENT.value}",
         f"clusters:{cluster_name}:resources:{ResourceType.SERVICE.value}",
         f"clusters:{cluster_name}:resources:{ResourceType.POD.value}",
-        f"clusters:{cluster_name}:resources:{ResourceType.JOB.value}"
+        f"clusters:{cluster_name}:resources:{ResourceType.JOB.value}",
     ]
     mock_redis.keys.side_effect = [[key] for key in keys]
-    
+
     await redis_client.clear_cluster_resources(cluster_name)
 
     calls = [call(key) for key in keys]
@@ -354,10 +352,10 @@ async def test_clear_cluster_resources_no_keys(redis_client, mock_redis):
         f"clusters:{cluster_name}:resources:{ResourceType.DEPLOYMENT.value}",
         f"clusters:{cluster_name}:resources:{ResourceType.SERVICE.value}",
         f"clusters:{cluster_name}:resources:{ResourceType.POD.value}",
-        f"clusters:{cluster_name}:resources:{ResourceType.JOB.value}"
+        f"clusters:{cluster_name}:resources:{ResourceType.JOB.value}",
     ]
     mock_redis.keys.side_effect = [[] for _ in keys]
-    
+
     await redis_client.clear_cluster_resources(cluster_name)
 
     calls = [call(key) for key in keys]
@@ -370,7 +368,7 @@ async def test_clear_cluster_resources_no_keys(redis_client, mock_redis):
 async def test_update_cluster_status(redis_client, mock_redis, sample_cluster_status):
     """Test updating cluster status"""
     await redis_client.update_cluster_status(sample_cluster_status)
-    
+
     expected_key = f"clusters:{sample_cluster_status.cluster_name}:health"
     mock_redis.hset.assert_called_once()
     call_args = mock_redis.hset.call_args
@@ -384,9 +382,9 @@ async def test_increment_health_failures(redis_client, mock_redis):
     """Test incrementing health failure count"""
     cluster_name = "test-cluster"
     mock_redis.hincrby.return_value = 3
-    
+
     result = await redis_client.increment_health_failures(cluster_name)
-    
+
     assert result == 3
     expected_key = f"clusters:{cluster_name}:health"
     mock_redis.hincrby.assert_called_once_with(expected_key, "failures", 1)
@@ -402,11 +400,11 @@ async def test_get_cluster_status_exists(redis_client, mock_redis):
         "state": "active",
         "last_heartbeat": "2023-01-01T00:00:00+00:00",
         "error_message": "",
-        "heartbeat_failures": "0"
+        "heartbeat_failures": "0",
     }
-    
+
     result = redis_client.get_cluster_status(cluster_name)
-    
+
     assert result is not None
     assert result.cluster_name == cluster_name
     assert result.state == ClusterState.ACTIVE
@@ -418,30 +416,39 @@ async def test_get_cluster_status_not_exists(redis_client, mock_redis):
     """Test getting cluster status when it doesn't exist"""
     cluster_name = "test-cluster"
     mock_redis.hgetall.return_value = {}
-    
+
     result = redis_client.get_cluster_status(cluster_name)
-    
+
     assert result is None
 
 
 @pytest.mark.asyncio
 async def test_get_all_cluster_statuses(redis_client, mock_redis):
     """Test getting all cluster statuses"""
-    mock_redis.keys.return_value = [
-        "clusters:cluster1:health",
-        "clusters:cluster2:health"
-    ]
-    
+    mock_redis.keys.return_value = ["clusters:cluster1:health", "clusters:cluster2:health"]
+
     # Mock pipeline
     mock_pipeline = Mock()
     mock_redis.pipeline.return_value = mock_pipeline
     mock_pipeline.execute.return_value = [
-        {"cluster_name": "cluster1", "state": "active", "last_heartbeat": "", "error_message": "", "heartbeat_failures": "0"},
-        {"cluster_name": "cluster2", "state": "starting", "last_heartbeat": "", "error_message": "", "heartbeat_failures": "1"}
+        {
+            "cluster_name": "cluster1",
+            "state": "active",
+            "last_heartbeat": "",
+            "error_message": "",
+            "heartbeat_failures": "0",
+        },
+        {
+            "cluster_name": "cluster2",
+            "state": "starting",
+            "last_heartbeat": "",
+            "error_message": "",
+            "heartbeat_failures": "1",
+        },
     ]
-    
+
     result = await redis_client.get_all_cluster_statuses()
-    
+
     assert len(result) == 2
     assert result[0].cluster_name == "cluster1"
     assert result[1].cluster_name == "cluster2"
@@ -454,11 +461,11 @@ async def test_get_all_cluster_names(redis_client, mock_redis):
     mock_redis.keys.return_value = [
         "clusters:cluster1:health",
         "clusters:cluster2:health",
-        "clusters:cluster3:health"
+        "clusters:cluster3:health",
     ]
-    
+
     result = redis_client.get_all_cluster_names()
-    
+
     assert result == ["cluster1", "cluster2", "cluster3"]
     mock_redis.keys.assert_called_once_with("clusters:*:health")
 
@@ -469,10 +476,14 @@ async def test_get_resource_counts(redis_client, mock_redis):
     cluster_name = "test-cluster"
     lengths = [1, 5, 10, 3, 2]
     mock_redis.hlen.side_effect = lengths  # nodes, deployments, pods, services, jobs
-    
+
     result = redis_client.get_resource_counts(cluster_name)
-    
-    _resource_types = [_resource_type.value for _resource_type in ResourceType if _resource_type != ResourceType.ALL]
+
+    _resource_types = [
+        _resource_type.value
+        for _resource_type in ResourceType
+        if _resource_type != ResourceType.ALL
+    ]
     expected_results = {k: v for k, v in zip(_resource_types, lengths)}
     assert result == expected_results
     assert mock_redis.hlen.call_count == len(lengths)
@@ -482,9 +493,9 @@ async def test_get_resource_counts(redis_client, mock_redis):
 async def test_get_all_cluster_statuses_empty(redis_client, mock_redis):
     """Test getting all cluster statuses when none exist"""
     mock_redis.keys.return_value = []
-    
+
     result = await redis_client.get_all_cluster_statuses()
-    
+
     assert result == []
     mock_redis.keys.assert_called_once_with("clusters:*:health")
 
@@ -494,23 +505,24 @@ def test_redis_property(redis_client, mock_redis):
     assert redis_client.redis is mock_redis
 
 
-@pytest.mark.asyncio 
+@pytest.mark.asyncio
 async def test_set_cluster_resources_empty_items(redis_client, mock_redis):
     """Test storing initial resources with empty items"""
     cluster_name = "test-cluster"
     resources = {
-        ResourceType.DEPLOYMENT: [], 
-        ResourceType.POD: [], 
-        ResourceType.SERVICE: [Mock(metadata=Mock(namespace="default", name="svc1"))]
+        ResourceType.DEPLOYMENT: [],
+        ResourceType.POD: [],
+        ResourceType.SERVICE: [Mock(metadata=Mock(namespace="default", name="svc1"))],
     }
-    
-    with patch.object(redis_client, 'clear_cluster_resources') as mock_clear, \
-         patch('chutes_common.redis.serializer') as mock_serializer:
-        
+
+    with (
+        patch.object(redis_client, "clear_cluster_resources") as mock_clear,
+        patch("chutes_common.redis.serializer") as mock_serializer,
+    ):
         mock_serializer.serialize.return_value = {"test": "data"}
-        
+
         await redis_client.set_cluster_resources(cluster_name, resources)
-        
+
         mock_clear.assert_called_once_with(cluster_name)
         # Should only call hset once for services (deployments and pods are empty/None)
         mock_redis.hset.assert_called_once()
@@ -522,11 +534,11 @@ def test_filter_resources_no_filters(redis_client):
     resources = {
         "default:app1": json.dumps({"name": "app1"}),
         "kube-system:app2": json.dumps({"name": "app2"}),
-        "default:app3": json.dumps({"name": "app3"})
+        "default:app3": json.dumps({"name": "app3"}),
     }
-    
+
     result = redis_client._filter_resources(resources)
-    
+
     assert result == resources
 
 
@@ -535,14 +547,14 @@ def test_filter_resources_by_namespace(redis_client):
     resources = {
         "default:app1": json.dumps({"name": "app1"}),
         "kube-system:app2": json.dumps({"name": "app2"}),
-        "default:app3": json.dumps({"name": "app3"})
+        "default:app3": json.dumps({"name": "app3"}),
     }
-    
+
     result = redis_client._filter_resources(resources, namespace="default")
-    
+
     expected = {
         "default:app1": json.dumps({"name": "app1"}),
-        "default:app3": json.dumps({"name": "app3"})
+        "default:app3": json.dumps({"name": "app3"}),
     }
     assert result == expected
 
@@ -552,14 +564,12 @@ def test_filter_resources_by_resource_name(redis_client):
     resources = {
         "default:app1": json.dumps({"name": "app1"}),
         "kube-system:app2": json.dumps({"name": "app2"}),
-        "default:app3": json.dumps({"name": "app3"})
+        "default:app3": json.dumps({"name": "app3"}),
     }
-    
+
     result = redis_client._filter_resources(resources, resource_name="app1")
-    
-    expected = {
-        "default:app1": json.dumps({"name": "app1"})
-    }
+
+    expected = {"default:app1": json.dumps({"name": "app1"})}
     assert result == expected
 
 
@@ -568,14 +578,12 @@ def test_filter_resources_by_both_namespace_and_name(redis_client):
     resources = {
         "default:app1": json.dumps({"name": "app1"}),
         "kube-system:app1": json.dumps({"name": "app1"}),
-        "default:app2": json.dumps({"name": "app2"})
+        "default:app2": json.dumps({"name": "app2"}),
     }
-    
+
     result = redis_client._filter_resources(resources, resource_name="app1", namespace="default")
-    
-    expected = {
-        "default:app1": json.dumps({"name": "app1"})
-    }
+
+    expected = {"default:app1": json.dumps({"name": "app1"})}
     assert result == expected
 
 
@@ -583,20 +591,20 @@ def test_filter_resources_no_matches(redis_client):
     """Test _filter_resources with no matches"""
     resources = {
         "default:app1": json.dumps({"name": "app1"}),
-        "kube-system:app2": json.dumps({"name": "app2"})
+        "kube-system:app2": json.dumps({"name": "app2"}),
     }
-    
+
     result = redis_client._filter_resources(resources, resource_name="nonexistent")
-    
+
     assert result == {}
 
 
 def test_filter_resources_empty_input(redis_client):
     """Test _filter_resources with empty input"""
     resources = {}
-    
+
     result = redis_client._filter_resources(resources, resource_name="app1", namespace="default")
-    
+
     assert result == {}
 
 
@@ -605,27 +613,26 @@ def test_get_resources_with_namespace_filter(redis_client, mock_redis):
     cluster_name = "test-cluster"
     resource_type = ResourceType.DEPLOYMENT
     namespace = "default"
-    
-    target_deployments = [
-        {"name": "app1"},
-        {"name": "app3"}
-    ]
+
+    target_deployments = [{"name": "app1"}, {"name": "app3"}]
 
     mock_redis.keys.return_value = [f"clusters:{cluster_name}:resources:{resource_type.value}"]
     mock_redis.hgetall.return_value = {
         "default:app1": json.dumps(target_deployments[0]),
         "kube-system:app2": json.dumps({"name": "app2"}),
-        "default:app3": json.dumps(target_deployments[1])
+        "default:app3": json.dumps(target_deployments[1]),
     }
-    
-    with patch('chutes_common.k8s.ClusterResources.from_dict') as mock_from_dict:
+
+    with patch("chutes_common.k8s.ClusterResources.from_dict") as mock_from_dict:
         mock_from_dict.return_value = {resource_type.value: [{"name": "app1"}]}
-        
-        result = redis_client.get_resources(cluster_name, resource_type, namespace=namespace)
-        
-        mock_redis.keys.assert_called_once_with(f"clusters:{cluster_name}:resources:{resource_type.value}")
+
+        redis_client.get_resources(cluster_name, resource_type, namespace=namespace)
+
+        mock_redis.keys.assert_called_once_with(
+            f"clusters:{cluster_name}:resources:{resource_type.value}"
+        )
         mock_redis.hgetall.assert_called_once()
-        
+
         # Verify that from_dict was called with filtered resources
         call_args = mock_from_dict.call_args[0][0]
         assert target_deployments[0] in call_args["deployments"]
@@ -638,24 +645,26 @@ def test_get_resources_with_resource_name_filter(redis_client, mock_redis):
     cluster_name = "test-cluster"
     resource_type = ResourceType.DEPLOYMENT
     resource_name = "app1"
-    
+
     target_app = {"name": "app1"}
 
     mock_redis.keys.return_value = [f"clusters:{cluster_name}:resources:{resource_type.value}"]
     mock_redis.hgetall.return_value = {
         "default:app1": json.dumps(target_app),
         "kube-system:app1": json.dumps(target_app),
-        "default:app2": json.dumps({"name": "app2"})
+        "default:app2": json.dumps({"name": "app2"}),
     }
-    
-    with patch('chutes_common.k8s.ClusterResources.from_dict') as mock_from_dict:
+
+    with patch("chutes_common.k8s.ClusterResources.from_dict") as mock_from_dict:
         mock_from_dict.return_value = {"deployments": [target_app, target_app]}
-        
-        result = redis_client.get_resources(cluster_name, resource_type, resource_name=resource_name)
-        
-        mock_redis.keys.assert_called_once_with(f"clusters:{cluster_name}:resources:{resource_type.value}")
+
+        redis_client.get_resources(cluster_name, resource_type, resource_name=resource_name)
+
+        mock_redis.keys.assert_called_once_with(
+            f"clusters:{cluster_name}:resources:{resource_type.value}"
+        )
         mock_redis.hgetall.assert_called_once()
-        
+
         # Verify that from_dict was called with filtered resources
         call_args = mock_from_dict.call_args[0][0]
         assert target_app in call_args["deployments"]
@@ -669,24 +678,28 @@ def test_get_resources_with_both_filters(redis_client, mock_redis):
     resource_type = ResourceType.DEPLOYMENT
     resource_name = "app1"
     namespace = "default"
-    
+
     target_app = {"name": "app1"}
 
     mock_redis.keys.return_value = [f"clusters:{cluster_name}:resources:{resource_type.value}"]
     mock_redis.hgetall.return_value = {
         "default:app1": json.dumps(target_app),
         "kube-system:app1": json.dumps(target_app),
-        "default:app2": json.dumps({"name": "app2"})
+        "default:app2": json.dumps({"name": "app2"}),
     }
-    
-    with patch('chutes_common.k8s.ClusterResources.from_dict') as mock_from_dict:
+
+    with patch("chutes_common.k8s.ClusterResources.from_dict") as mock_from_dict:
         mock_from_dict.return_value = {"deployments": [target_app]}
-        
-        result = redis_client.get_resources(cluster_name, resource_type, resource_name=resource_name, namespace=namespace)
-        
-        mock_redis.keys.assert_called_once_with(f"clusters:{cluster_name}:resources:{resource_type.value}")
+
+        redis_client.get_resources(
+            cluster_name, resource_type, resource_name=resource_name, namespace=namespace
+        )
+
+        mock_redis.keys.assert_called_once_with(
+            f"clusters:{cluster_name}:resources:{resource_type.value}"
+        )
         mock_redis.hgetall.assert_called_once()
-        
+
         # Verify that from_dict was called with filtered resources
         call_args = mock_from_dict.call_args[0][0]
         assert target_app in call_args["deployments"]
@@ -699,21 +712,23 @@ def test_get_resources_with_filters_no_matches(redis_client, mock_redis):
     cluster_name = "test-cluster"
     resource_type = ResourceType.DEPLOYMENT
     resource_name = "nonexistent"
-    
+
     mock_redis.keys.return_value = [f"clusters:{cluster_name}:resources:{resource_type.value}"]
     mock_redis.hgetall.return_value = {
         "default:app1": json.dumps({"name": "app1"}),
-        "kube-system:app2": json.dumps({"name": "app2"})
+        "kube-system:app2": json.dumps({"name": "app2"}),
     }
-    
-    with patch('chutes_common.k8s.ClusterResources.from_dict') as mock_from_dict:
+
+    with patch("chutes_common.k8s.ClusterResources.from_dict") as mock_from_dict:
         mock_from_dict.return_value = {"deployments": {}}
-        
-        result = redis_client.get_resources(cluster_name, resource_type, resource_name=resource_name)
-        
-        mock_redis.keys.assert_called_once_with(f"clusters:{cluster_name}:resources:{resource_type.value}")
+
+        redis_client.get_resources(cluster_name, resource_type, resource_name=resource_name)
+
+        mock_redis.keys.assert_called_once_with(
+            f"clusters:{cluster_name}:resources:{resource_type.value}"
+        )
         mock_redis.hgetall.assert_called_once()
-        
+
         # Verify that from_dict was called with empty filtered resources
         call_args = mock_from_dict.call_args[0][0]
         assert call_args["deployments"] == []
@@ -724,36 +739,36 @@ def test_get_resources_multiple_resource_types_with_filters(redis_client, mock_r
     cluster_name = "test-cluster"
     resource_type = ResourceType.ALL
     namespace = "default"
-    
+
     mock_redis.keys.return_value = [
         f"clusters:{cluster_name}:resources:deployment",
-        f"clusters:{cluster_name}:resources:pod"
+        f"clusters:{cluster_name}:resources:pod",
     ]
-    
+
     # Mock hgetall to return different data for different resource types
     def mock_hgetall(key):
         if key.endswith(":deployment"):
             return {
                 "default:deploy1": json.dumps({"name": "deploy1"}),
-                "kube-system:deploy2": json.dumps({"name": "deploy2"})
+                "kube-system:deploy2": json.dumps({"name": "deploy2"}),
             }
         elif key.endswith(":pod"):
             return {
                 "default:pod1": json.dumps({"name": "pod1"}),
-                "kube-system:pod2": json.dumps({"name": "pod2"})
+                "kube-system:pod2": json.dumps({"name": "pod2"}),
             }
         return {}
-    
+
     mock_redis.hgetall.side_effect = mock_hgetall
-    
-    with patch('chutes_common.k8s.ClusterResources.from_dict') as mock_from_dict:
+
+    with patch("chutes_common.k8s.ClusterResources.from_dict") as mock_from_dict:
         mock_from_dict.return_value = {"deployment": {}, "pod": {}}
-        
-        result = redis_client.get_resources(cluster_name, resource_type, namespace=namespace)
-        
+
+        redis_client.get_resources(cluster_name, resource_type, namespace=namespace)
+
         mock_redis.keys.assert_called_once_with(f"clusters:{cluster_name}:resources:*")
         assert mock_redis.hgetall.call_count == 2
-        
+
         # Verify that from_dict was called with filtered resources from both types
         call_args = mock_from_dict.call_args[0][0]
         assert "deployments" in call_args
@@ -770,22 +785,24 @@ def test_get_resources_with_filters_single_resource_type(redis_client, mock_redi
     cluster_name = "test-cluster"
     resource_type = ResourceType.POD
     resource_name = "pod1"
-    
+
     mock_redis.keys.return_value = [f"clusters:{cluster_name}:resources:{resource_type.value}"]
     mock_redis.hgetall.return_value = {
         "default:pod1": json.dumps({"name": "pod1"}),
         "default:pod2": json.dumps({"name": "pod2"}),
-        "kube-system:pod1": json.dumps({"name": "pod1"})
+        "kube-system:pod1": json.dumps({"name": "pod1"}),
     }
-    
-    with patch('chutes_common.k8s.ClusterResources.from_dict') as mock_from_dict:
+
+    with patch("chutes_common.k8s.ClusterResources.from_dict") as mock_from_dict:
         mock_from_dict.return_value = {"pods": {}}
-        
-        result = redis_client.get_resources(cluster_name, resource_type, resource_name=resource_name)
-        
-        mock_redis.keys.assert_called_once_with(f"clusters:{cluster_name}:resources:{resource_type.value}")
+
+        redis_client.get_resources(cluster_name, resource_type, resource_name=resource_name)
+
+        mock_redis.keys.assert_called_once_with(
+            f"clusters:{cluster_name}:resources:{resource_type.value}"
+        )
         mock_redis.hgetall.assert_called_once()
-        
+
         # Verify that from_dict was called with filtered resources
         call_args = mock_from_dict.call_args[0][0]
         assert {"name": "pod1"} in call_args["pods"]
@@ -798,18 +815,18 @@ def test_get_resources_with_namespace_filter_empty_namespace(redis_client, mock_
     cluster_name = "test-cluster"
     resource_type = ResourceType.DEPLOYMENT
     namespace = ""
-    
+
     mock_redis.keys.return_value = [f"clusters:{cluster_name}:resources:{resource_type.value}"]
     mock_redis.hgetall.return_value = {
         "default:app1": json.dumps({"name": "app1"}),
-        "kube-system:app2": json.dumps({"name": "app2"})
+        "kube-system:app2": json.dumps({"name": "app2"}),
     }
-    
-    with patch('chutes_common.k8s.ClusterResources.from_dict') as mock_from_dict:
+
+    with patch("chutes_common.k8s.ClusterResources.from_dict") as mock_from_dict:
         mock_from_dict.return_value = {"deployments": {}}
-        
-        result = redis_client.get_resources(cluster_name, resource_type, namespace=namespace)
-        
+
+        redis_client.get_resources(cluster_name, resource_type, namespace=namespace)
+
         # Empty namespace should return all resources (no filtering)
         call_args = mock_from_dict.call_args[0][0]
         assert {"name": "app1"} in call_args["deployments"]
@@ -820,18 +837,18 @@ def test_get_resources_with_none_filters(redis_client, mock_redis):
     """Test get_resources with None filters"""
     cluster_name = "test-cluster"
     resource_type = ResourceType.DEPLOYMENT
-    
+
     mock_redis.keys.return_value = [f"clusters:{cluster_name}:resources:{resource_type.value}"]
     mock_redis.hgetall.return_value = {
         "default:app1": json.dumps({"name": "app1"}),
-        "kube-system:app2": json.dumps({"name": "app2"})
+        "kube-system:app2": json.dumps({"name": "app2"}),
     }
-    
-    with patch('chutes_common.k8s.ClusterResources.from_dict') as mock_from_dict:
+
+    with patch("chutes_common.k8s.ClusterResources.from_dict") as mock_from_dict:
         mock_from_dict.return_value = {"deployments": {}}
-        
-        result = redis_client.get_resources(cluster_name, resource_type, resource_name=None, namespace=None)
-        
+
+        redis_client.get_resources(cluster_name, resource_type, resource_name=None, namespace=None)
+
         # None filters should return all resources (no filtering)
         call_args = mock_from_dict.call_args[0][0]
         assert {"name": "app1"} in call_args["deployments"]
@@ -843,22 +860,22 @@ def test_filter_resources_case_sensitive(redis_client):
     resources = {
         "default:App1": json.dumps({"name": "App1"}),
         "default:app1": json.dumps({"name": "app1"}),
-        "Default:app1": json.dumps({"name": "app1"})
+        "Default:app1": json.dumps({"name": "app1"}),
     }
-    
+
     # Test case sensitive resource name filtering
     result = redis_client._filter_resources(resources, resource_name="app1")
     expected = {
         "default:app1": json.dumps({"name": "app1"}),
-        "Default:app1": json.dumps({"name": "app1"})
+        "Default:app1": json.dumps({"name": "app1"}),
     }
     assert result == expected
-    
+
     # Test case sensitive namespace filtering
     result = redis_client._filter_resources(resources, namespace="default")
     expected = {
         "default:App1": json.dumps({"name": "App1"}),
-        "default:app1": json.dumps({"name": "app1"})
+        "default:app1": json.dumps({"name": "app1"}),
     }
     assert result == expected
 
@@ -869,21 +886,17 @@ def test_filter_resources_special_characters(redis_client):
         "default:app-with-dashes": json.dumps({"name": "app-with-dashes"}),
         "default:app_with_underscores": json.dumps({"name": "app_with_underscores"}),
         "default:app.with.dots": json.dumps({"name": "app.with.dots"}),
-        "namespace-with-dashes:app1": json.dumps({"name": "app1"})
+        "namespace-with-dashes:app1": json.dumps({"name": "app1"}),
     }
-    
+
     # Test filtering by resource name with special characters
     result = redis_client._filter_resources(resources, resource_name="app-with-dashes")
-    expected = {
-        "default:app-with-dashes": json.dumps({"name": "app-with-dashes"})
-    }
+    expected = {"default:app-with-dashes": json.dumps({"name": "app-with-dashes"})}
     assert result == expected
-    
+
     # Test filtering by namespace with special characters
     result = redis_client._filter_resources(resources, namespace="namespace-with-dashes")
-    expected = {
-        "namespace-with-dashes:app1": json.dumps({"name": "app1"})
-    }
+    expected = {"namespace-with-dashes:app1": json.dumps({"name": "app1"})}
     assert result == expected
 
 
@@ -895,11 +908,11 @@ def test_filter_resources_performance_with_large_dataset(redis_client):
         namespace = f"namespace-{i % 10}"
         resource_name = f"app-{i}"
         resources[f"{namespace}:{resource_name}"] = json.dumps({"name": resource_name})
-    
+
     # Filter by namespace should return 100 resources (1000 / 10 namespaces)
     result = redis_client._filter_resources(resources, namespace="namespace-1")
     assert len(result) == 100
-    
+
     # Filter by specific resource name should return 1 resource
     result = redis_client._filter_resources(resources, resource_name="app-500")
     assert len(result) == 1
@@ -910,35 +923,35 @@ def test_get_resources_with_wildcard_cluster_and_filters(redis_client, mock_redi
     """Test get_resources with wildcard cluster and filters"""
     resource_type = ResourceType.DEPLOYMENT
     namespace = "default"
-    
+
     mock_redis.keys.return_value = [
         "clusters:cluster1:resources:deployment",
-        "clusters:cluster2:resources:deployment"
+        "clusters:cluster2:resources:deployment",
     ]
-    
+
     def mock_hgetall(key):
         if "cluster1" in key:
             return {
                 "default:app1": json.dumps({"name": "app1"}),
-                "kube-system:app2": json.dumps({"name": "app2"})
+                "kube-system:app2": json.dumps({"name": "app2"}),
             }
         elif "cluster2" in key:
             return {
                 "default:app3": json.dumps({"name": "app3"}),
-                "kube-system:app4": json.dumps({"name": "app4"})
+                "kube-system:app4": json.dumps({"name": "app4"}),
             }
         return {}
-    
+
     mock_redis.hgetall.side_effect = mock_hgetall
-    
-    with patch('chutes_common.k8s.ClusterResources.from_dict') as mock_from_dict:
+
+    with patch("chutes_common.k8s.ClusterResources.from_dict") as mock_from_dict:
         mock_from_dict.return_value = {"deployment": {}}
-        
-        result = redis_client.get_resources("*", resource_type, namespace=namespace)
-        
+
+        redis_client.get_resources("*", resource_type, namespace=namespace)
+
         mock_redis.keys.assert_called_once_with("clusters:*:resources:deployment")
         assert mock_redis.hgetall.call_count == 2
-        
+
         # Verify that from_dict was called with filtered resources from both clusters
         call_args = mock_from_dict.call_args[0][0]
         assert "deployments" in call_args

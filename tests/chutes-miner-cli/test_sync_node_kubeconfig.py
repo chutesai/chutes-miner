@@ -68,8 +68,7 @@ def test_sync_node_kubeconfig_adds_context(
     assert merged["current-context"] == "test-node"
     assert any(ctx["name"] == "test-node" for ctx in merged["contexts"])
     assert any(
-        cluster["cluster"]["server"] == "https://test-node:6443"
-        for cluster in merged["clusters"]
+        cluster["cluster"]["server"] == "https://test-node:6443" for cluster in merged["clusters"]
     )
 
 

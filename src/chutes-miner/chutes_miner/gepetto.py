@@ -14,7 +14,7 @@ import semver
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from loguru import logger
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 from sqlalchemy import select, func, case, text, or_, update
 from sqlalchemy.orm import selectinload
 from chutes_miner.api.config import settings, validator_by_hotkey
@@ -32,6 +32,23 @@ from chutes_common.exceptions import AgentError
 from chutes_miner.api.exceptions import DeploymentFailure
 from chutes_miner.validator_migrations import run_validator_migrations
 import chutes_miner.api.k8s as k8s
+
+
+def normalize_node_selector(node_selector) -> list:
+    """Normalize node_selector: flat dict -> [dict], list -> list."""
+    if isinstance(node_selector, dict):
+        return [node_selector]
+    return list(node_selector)
+
+
+def _stable_selector_hash(node_selector) -> str:
+    """
+    Produce a deterministic string for hashing node selectors.
+    Normalizes to list first, then uses sorted JSON to avoid dict key ordering issues.
+    """
+    import json
+
+    return json.dumps(normalize_node_selector(node_selector), sort_keys=True)
 
 
 class Gepetto:
@@ -81,11 +98,50 @@ class Gepetto:
             await conn.run_sync(Base.metadata.create_all)
         if settings.validator_migrations_enabled:
             await run_validator_migrations()
+        await self._backfill_node_selectors()
         await self.reconcile()
         asyncio.create_task(self.activator())
         asyncio.create_task(self.autoscaler())
         asyncio.create_task(self.reconciler())
         await self.pubsub.start()
+
+    async def _backfill_node_selectors(self):
+        """
+        On startup, check for chute rows with NULL node_selector and populate
+        them from the validator API. Deletes chutes that no longer exist remotely.
+        """
+        async with get_session() as session:
+            has_null = (
+                await session.execute(
+                    select(func.count()).select_from(Chute).where(Chute.node_selector.is_(None))
+                )
+            ).scalar()
+        if not has_null:
+            return
+
+        logger.info(
+            f"Found {has_null} chutes with NULL node_selector, backfilling from validators..."
+        )
+        await self.remote_refresh_all()
+
+        async with get_session() as session:
+            chutes = (
+                (await session.execute(select(Chute).where(Chute.node_selector.is_(None))))
+                .unique()
+                .scalars()
+                .all()
+            )
+
+            for chute in chutes:
+                remote = self.remote_chutes.get(chute.validator, {}).get(chute.chute_id)
+                if remote and "node_selector" in remote:
+                    chute.node_selector = remote["node_selector"]
+                    logger.info(f"Backfilled node_selector for {chute.chute_id}")
+                else:
+                    logger.warning(f"Chute {chute.chute_id} not found on validator, deleting")
+                    await session.delete(chute)
+
+            await session.commit()
 
     @staticmethod
     async def _remote_refresh_objects(
@@ -456,9 +512,10 @@ class Gepetto:
                         continue
 
                     # See if we have a server that could handle it.
-                    potential_server = await self.optimal_scale_up_server(chute)
-                    if not potential_server:
+                    scale_result = await self.optimal_scale_up_server(chute)
+                    if not scale_result:
                         continue
+                    potential_server, matched_gpu_count = scale_result
 
                     # XXX Miners you can choose two options here:
                     # 1. use the effective multiplier directly, which
@@ -471,7 +528,7 @@ class Gepetto:
                     #    on the table.
                     # Default strategy is to maximize value, i.e. highest multiplier per GPU/option 2.
                     chute_value = effective_multiplier / (
-                        potential_server.hourly_cost * chute.gpu_count
+                        potential_server.hourly_cost * matched_gpu_count
                     )
                     # alternative
                     # chute_value = effective_multiplier
@@ -680,7 +737,13 @@ class Gepetto:
         return extra_services
 
     async def run_job(
-        self, chute: Chute, job_id: str, server: Server, validator: Validator, disk_gb: int = 10
+        self,
+        chute: Chute,
+        job_id: str,
+        server: Server,
+        validator: Validator,
+        disk_gb: int = 10,
+        gpu_count: int = None,
     ):
         """
         Run a job on the specified server.
@@ -701,6 +764,7 @@ class Gepetto:
                 extra_labels={"chutes/job": "true"},
                 disk_gb=disk_gb,
                 extra_service_ports=extra_ports,
+                gpu_count=gpu_count,
             )
             logger.success(
                 f"Successfully deployed {job_id=} {chute.chute_id=} on {server.server_id=}: {deployment.deployment_id=}"
@@ -756,13 +820,12 @@ class Gepetto:
                     "filename",
                     "ref_str",
                     "version",
-                    "supported_gpus",
                     "chutes_version",
                     "preemptible",
                     "tee",
                 ):
                     setattr(chute, key, chute_dict.get(key))
-                chute.gpu_count = chute_dict["node_selector"]["gpu_count"]
+                chute.node_selector = chute_dict["node_selector"]
                 chute.ban_reason = None
             else:
                 chute = Chute(
@@ -774,8 +837,8 @@ class Gepetto:
                     filename=chute_dict["filename"],
                     ref_str=chute_dict["ref_str"],
                     version=chute_dict["version"],
-                    supported_gpus=chute_dict["supported_gpus"],
-                    gpu_count=chute_dict["node_selector"]["gpu_count"],
+                    supported_gpus=[],
+                    node_selector=chute_dict["node_selector"],
                     chutes_version=chute_dict["chutes_version"],
                     ban_reason=None,
                     preemptible=chute_dict["preemptible"],
@@ -817,14 +880,17 @@ class Gepetto:
         if not chute:
             logger.warning(f"Failed to load chute: {chute_id}")
             return
-        server = await self.optimal_scale_up_server(chute, disk_gb=disk_gb)
-        if server:
-            await self.run_job(chute, job_id, server, validator, disk_gb)
+        result = await self.optimal_scale_up_server(chute, disk_gb=disk_gb)
+        if result:
+            server, matched_gpu_count = result
+            await self.run_job(
+                chute, job_id, server, validator, disk_gb, gpu_count=matched_gpu_count
+            )
             return
 
         # XXX This is where you as a miner definitely want to customize the strategy!
         logger.info(
-            f"Attempting a pre-empting deploy of {job_id=} {chute_id=} with {chute.supported_gpus=} and {gpu_count=}"
+            f"Attempting a pre-empting deploy of {job_id=} {chute_id=} with {chute.node_selector=} and {gpu_count=}"
         )
         await self.preempting_deploy(chute, job_id=job_id, disk_gb=disk_gb)
 
@@ -1125,8 +1191,8 @@ class Gepetto:
                 filename=chute_dict["filename"],
                 ref_str=chute_dict["ref_str"],
                 version=chute_dict["version"],
-                supported_gpus=chute_dict["supported_gpus"],
-                gpu_count=chute_dict["node_selector"]["gpu_count"],
+                supported_gpus=[],
+                node_selector=chute_dict["node_selector"],
                 chutes_version=chute_dict["chutes_version"],
                 ban_reason=None,
                 preemptible=chute_dict["preemptible"],
@@ -1219,13 +1285,12 @@ class Gepetto:
                             "filename",
                             "ref_str",
                             "version",
-                            "supported_gpus",
                             "chutes_version",
                             "preemptible",
                             "tee",
                         ):
                             setattr(chute, key, chute_dict.get(key))
-                        chute.gpu_count = chute_dict["node_selector"]["gpu_count"]
+                        chute.node_selector = chute_dict["node_selector"]
                         chute.ban_reason = None
                     else:
                         chute = Chute(
@@ -1237,8 +1302,8 @@ class Gepetto:
                             filename=chute_dict["filename"],
                             ref_str=chute_dict["ref_str"],
                             version=chute_dict["version"],
-                            supported_gpus=chute_dict["supported_gpus"],
-                            gpu_count=chute_dict["node_selector"]["gpu_count"],
+                            supported_gpus=[],
+                            node_selector=chute_dict["node_selector"],
                             chutes_version=chute_dict["chutes_version"],
                             ban_reason=None,
                             preemptible=chute_dict["preemptible"],
@@ -1250,10 +1315,22 @@ class Gepetto:
                     await k8s.create_code_config_map(chute, force=True)
 
             # Deploy the new version.
+            effective_selectors = normalize_node_selector(chute.node_selector)
+            all_supported_gpus = {
+                gpu for s in effective_selectors for gpu in s.get("supported_gpus", [])
+            }
             logger.info(
-                f"Determining if we can deploy {chute.chute_id=} on {server_id=} with {server_gpu_type=} and supported={chute.supported_gpus}"
+                f"Determining if we can deploy {chute.chute_id=} on {server_id=} with {server_gpu_type=} and supported={all_supported_gpus}"
             )
-            if server_id and server_gpu_type in chute.supported_gpus and server_is_tee == chute.tee:
+            # Find the matching selector's gpu_count for this server's GPU type.
+            matched_gpu_count = None
+            if server_id and server_gpu_type in all_supported_gpus and server_is_tee == chute.tee:
+                for selector in effective_selectors:
+                    if server_gpu_type in selector.get("supported_gpus", []):
+                        matched_gpu_count = selector["gpu_count"]
+                        break
+                if matched_gpu_count is None:
+                    matched_gpu_count = effective_selectors[0]["gpu_count"]
                 logger.info(f"Attempting to deploy {chute.chute_id=} on {server_id=}")
                 deployment = None
                 try:
@@ -1263,6 +1340,7 @@ class Gepetto:
                         server_id,
                         token=launch_token["token"] if launch_token else None,
                         config_id=launch_token["config_id"] if launch_token else None,
+                        gpu_count=matched_gpu_count,
                     )
                     logger.success(
                         f"Successfully updated {chute_id=} to {version=} on {server_id=}: {deployment.deployment_id=}"
@@ -1317,69 +1395,87 @@ class Gepetto:
             return (await session.execute(query)).unique().scalar_one_or_none()
 
     @staticmethod
-    async def optimal_scale_up_server(chute: Chute, disk_gb: int = 10) -> Optional[Server]:
+    async def optimal_scale_up_server(
+        chute: Chute, disk_gb: int = 10
+    ) -> Optional[Tuple[Server, int]]:
         """
         Find the optimal server for scaling up a chute deployment.
+        Returns (server, matched_gpu_count) or None.
+        Iterates over all node_selectors (OR'd) and returns the cheapest match.
         """
         if chute.ban_reason:
             logger.warning(f"Will not scale up banned chute {chute.chute_id=}: {chute.ban_reason=}")
             return None
-        supported_gpus = list(chute.supported_gpus)
-        total_gpus_per_server = (
-            select(Server.server_id, func.count(GPU.gpu_id).label("total_gpus"))
-            .select_from(Server)
-            .join(GPU, Server.server_id == GPU.server_id)
-            .where(GPU.model_short_ref.in_(supported_gpus), GPU.verified.is_(True))
-            .group_by(Server.server_id)
-            .subquery()
-        )
-        used_gpus_per_server = (
-            select(Server.server_id, func.count(GPU.gpu_id).label("used_gpus"))
-            .select_from(Server)
-            .join(GPU, Server.server_id == GPU.server_id)
-            .where(GPU.verified.is_(True), GPU.deployment_id.isnot(None))
-            .group_by(Server.server_id)
-            .subquery()
-        )
-        query = (
-            select(
-                Server,
-                total_gpus_per_server.c.total_gpus,
-                func.coalesce(used_gpus_per_server.c.used_gpus, 0).label("used_gpus"),
-                (
-                    total_gpus_per_server.c.total_gpus
-                    - func.coalesce(used_gpus_per_server.c.used_gpus, 0)
-                ).label("free_gpus"),
+
+        best_result = None
+        best_cost = float("inf")
+
+        for selector in normalize_node_selector(chute.node_selector):
+            selector_gpus = list(selector.get("supported_gpus", []))
+            selector_gpu_count = selector["gpu_count"]
+            if not selector_gpus:
+                continue
+
+            total_gpus_per_server = (
+                select(Server.server_id, func.count(GPU.gpu_id).label("total_gpus"))
+                .select_from(Server)
+                .join(GPU, Server.server_id == GPU.server_id)
+                .where(GPU.model_short_ref.in_(selector_gpus), GPU.verified.is_(True))
+                .group_by(Server.server_id)
+                .subquery()
             )
-            .select_from(Server)
-            .join(
-                total_gpus_per_server,
-                Server.server_id == total_gpus_per_server.c.server_id,
+            used_gpus_per_server = (
+                select(Server.server_id, func.count(GPU.gpu_id).label("used_gpus"))
+                .select_from(Server)
+                .join(GPU, Server.server_id == GPU.server_id)
+                .where(GPU.verified.is_(True), GPU.deployment_id.isnot(None))
+                .group_by(Server.server_id)
+                .subquery()
             )
-            .outerjoin(
-                used_gpus_per_server,
-                Server.server_id == used_gpus_per_server.c.server_id,
+            query = (
+                select(
+                    Server,
+                    total_gpus_per_server.c.total_gpus,
+                    func.coalesce(used_gpus_per_server.c.used_gpus, 0).label("used_gpus"),
+                    (
+                        total_gpus_per_server.c.total_gpus
+                        - func.coalesce(used_gpus_per_server.c.used_gpus, 0)
+                    ).label("free_gpus"),
+                )
+                .select_from(Server)
+                .join(
+                    total_gpus_per_server,
+                    Server.server_id == total_gpus_per_server.c.server_id,
+                )
+                .outerjoin(
+                    used_gpus_per_server,
+                    Server.server_id == used_gpus_per_server.c.server_id,
+                )
+                .join(GPU, Server.server_id == GPU.server_id)
+                .where(
+                    GPU.model_short_ref.in_(selector_gpus),
+                    GPU.verified.is_(True),
+                    (
+                        total_gpus_per_server.c.total_gpus
+                        - func.coalesce(used_gpus_per_server.c.used_gpus, 0)
+                        >= selector_gpu_count
+                    ),
+                    Server.locked.is_(False),
+                    Server.is_tee.is_(chute.tee),
+                )
+                .order_by(Server.hourly_cost.asc(), text("free_gpus ASC"))
             )
-            .join(GPU, Server.server_id == GPU.server_id)
-            .where(
-                GPU.model_short_ref.in_(supported_gpus),
-                GPU.verified.is_(True),
-                (
-                    total_gpus_per_server.c.total_gpus
-                    - func.coalesce(used_gpus_per_server.c.used_gpus, 0)
-                    >= chute.gpu_count
-                ),
-                Server.locked.is_(False),
-                Server.is_tee.is_(chute.tee),
-            )
-            .order_by(Server.hourly_cost.asc(), text("free_gpus ASC"))
-        )
-        async with get_session() as session:
-            servers = (await session.execute(query)).unique().scalars().all()
-            for server in servers:
-                if await k8s.check_node_has_disk_available(server.name, disk_gb):
-                    return server
-        return None
+            async with get_session() as session:
+                servers = (await session.execute(query)).unique().scalars().all()
+                for server in servers:
+                    if server.hourly_cost >= best_cost:
+                        break
+                    if await k8s.check_node_has_disk_available(server.name, disk_gb):
+                        best_result = (server, selector_gpu_count)
+                        best_cost = server.hourly_cost
+                        break
+
+        return best_result
 
     def _get_global_instance_count(self, validator: str, chute_id: str) -> int:
         """
@@ -1417,8 +1513,6 @@ class Gepetto:
             )
             return False
 
-        supported_gpus = list(chute.supported_gpus)
-
         # Get the new chute's effective multiplier - this is what we'd gain
         new_chute_info = self.remote_chutes.get(chute.validator, {}).get(chute.chute_id, {})
         new_effective_multiplier = new_chute_info.get("effective_compute_multiplier", 1.0)
@@ -1439,65 +1533,6 @@ class Gepetto:
                 )
                 return False
 
-        # Find all servers that support this chute, sorted by cheapest & most already free GPUs.
-        total_gpus_per_server = (
-            select(Server.server_id, func.count(GPU.gpu_id).label("total_gpus"))
-            .select_from(Server)
-            .join(GPU, Server.server_id == GPU.server_id)
-            .where(GPU.model_short_ref.in_(supported_gpus), GPU.verified.is_(True))
-            .group_by(Server.server_id)
-            .subquery()
-        )
-        used_gpus_per_server = (
-            select(Server.server_id, func.count(GPU.gpu_id).label("used_gpus"))
-            .select_from(Server)
-            .join(GPU, Server.server_id == GPU.server_id)
-            .where(GPU.verified.is_(True), GPU.deployment_id.isnot(None))
-            .group_by(Server.server_id)
-            .subquery()
-        )
-        query = (
-            select(
-                Server,
-                total_gpus_per_server.c.total_gpus,
-                func.coalesce(used_gpus_per_server.c.used_gpus, 0).label("used_gpus"),
-                (
-                    total_gpus_per_server.c.total_gpus
-                    - func.coalesce(used_gpus_per_server.c.used_gpus, 0)
-                ).label("free_gpus"),
-            )
-            .select_from(Server)
-            .join(
-                total_gpus_per_server,
-                Server.server_id == total_gpus_per_server.c.server_id,
-            )
-            .outerjoin(
-                used_gpus_per_server,
-                Server.server_id == used_gpus_per_server.c.server_id,
-            )
-            .join(GPU, Server.server_id == GPU.server_id)
-            .where(
-                GPU.model_short_ref.in_(supported_gpus),
-                GPU.verified.is_(True),
-                total_gpus_per_server.c.total_gpus >= chute.gpu_count,
-                Server.locked.is_(False),
-                Server.is_tee.is_(chute.tee),
-            )
-            .order_by(Server.hourly_cost.asc(), text("free_gpus ASC"))
-        )
-        async with get_session() as session:
-            servers = (await session.execute(query)).unique().scalars()
-        if not servers:
-            logger.warning(f"No servers in inventory are capable of running {chute.chute_id=}")
-            return False
-
-        # Fetch disk space.
-        servers = [
-            server
-            for server in servers
-            if await k8s.check_node_has_disk_available(server.name, disk_gb)
-        ]
-
         # Build global instance counts from global_active_instances
         global_counts = {}
         for instance in self.global_active_instances.get(chute.validator, []):
@@ -1506,94 +1541,164 @@ class Gepetto:
 
         to_preempt = None
         target_server = None
-        for server in servers:
-            available_gpus = sum([1 for gpu in server.gpus if not gpu.deployment_id])
-            if available_gpus >= chute.gpu_count:
-                logger.info(
-                    f"Server {server.name} already has {available_gpus=}, no preemption necessary!"
+        matched_gpu_count = None
+
+        # Try each selector independently (OR'd)
+        for selector in normalize_node_selector(chute.node_selector):
+            selector_gpus = list(selector.get("supported_gpus", []))
+            selector_gpu_count = selector["gpu_count"]
+            if not selector_gpus:
+                continue
+
+            # Find all servers that support this selector, sorted by cheapest & most already free GPUs.
+            total_gpus_per_server = (
+                select(Server.server_id, func.count(GPU.gpu_id).label("total_gpus"))
+                .select_from(Server)
+                .join(GPU, Server.server_id == GPU.server_id)
+                .where(GPU.model_short_ref.in_(selector_gpus), GPU.verified.is_(True))
+                .group_by(Server.server_id)
+                .subquery()
+            )
+            used_gpus_per_server = (
+                select(Server.server_id, func.count(GPU.gpu_id).label("used_gpus"))
+                .select_from(Server)
+                .join(GPU, Server.server_id == GPU.server_id)
+                .where(GPU.verified.is_(True), GPU.deployment_id.isnot(None))
+                .group_by(Server.server_id)
+                .subquery()
+            )
+            query = (
+                select(
+                    Server,
+                    total_gpus_per_server.c.total_gpus,
+                    func.coalesce(used_gpus_per_server.c.used_gpus, 0).label("used_gpus"),
+                    (
+                        total_gpus_per_server.c.total_gpus
+                        - func.coalesce(used_gpus_per_server.c.used_gpus, 0)
+                    ).label("free_gpus"),
                 )
-                target_server = server
-                break
+                .select_from(Server)
+                .join(
+                    total_gpus_per_server,
+                    Server.server_id == total_gpus_per_server.c.server_id,
+                )
+                .outerjoin(
+                    used_gpus_per_server,
+                    Server.server_id == used_gpus_per_server.c.server_id,
+                )
+                .join(GPU, Server.server_id == GPU.server_id)
+                .where(
+                    GPU.model_short_ref.in_(selector_gpus),
+                    GPU.verified.is_(True),
+                    total_gpus_per_server.c.total_gpus >= selector_gpu_count,
+                    Server.locked.is_(False),
+                    Server.is_tee.is_(chute.tee),
+                )
+                .order_by(Server.hourly_cost.asc(), text("free_gpus ASC"))
+            )
+            async with get_session() as session:
+                servers = (await session.execute(query)).unique().scalars()
 
-            proposed_counts = deepcopy(global_counts)
-            to_delete = []
+            # Fetch disk space.
+            servers = [
+                server
+                for server in servers
+                if await k8s.check_node_has_disk_available(server.name, disk_gb)
+            ]
 
-            # Sort deployments by their instance compute_multiplier (lowest first = best to preempt)
-            def get_deployment_multiplier(d):
-                return self._get_instance_multiplier_from_global(chute.validator, d.instance_id)
+            for server in servers:
+                available_gpus = sum([1 for gpu in server.gpus if not gpu.deployment_id])
+                if available_gpus >= selector_gpu_count:
+                    logger.info(
+                        f"Server {server.name} already has {available_gpus=}, no preemption necessary!"
+                    )
+                    target_server = server
+                    matched_gpu_count = selector_gpu_count
+                    break
 
-            for deployment in sorted(server.deployments, key=get_deployment_multiplier):
-                # Never preempt jobs.
-                if deployment.job_id:
-                    continue
+                proposed_counts = deepcopy(global_counts)
+                to_delete = []
 
-                # Never preempt non-preemptible (private) deployments.
-                if not deployment.preemptible:
-                    continue
+                # Sort deployments by their instance compute_multiplier (lowest first = best to preempt)
+                def get_deployment_multiplier(d):
+                    return self._get_instance_multiplier_from_global(chute.validator, d.instance_id)
 
-                # Can't preempt deployments that aren't active (still booting).
-                if not deployment.activated_at:
-                    continue
+                for deployment in sorted(server.deployments, key=get_deployment_multiplier):
+                    # Never preempt jobs.
+                    if deployment.job_id:
+                        continue
 
-                # Make sure we don't replace an instance of the target chute.
-                if deployment.chute_id == chute.chute_id:
-                    continue
+                    # Never preempt non-preemptible (private) deployments.
+                    if not deployment.preemptible:
+                        continue
 
-                # Can't preempt deployments that are too new (< 62 minutes since activation).
-                if deployment.activated_at:
-                    age = datetime.now(timezone.utc).replace(
-                        tzinfo=None
-                    ) - deployment.activated_at.replace(tzinfo=None)
-                    if age <= timedelta(minutes=62):
+                    # Can't preempt deployments that aren't active (still booting).
+                    if not deployment.activated_at:
+                        continue
+
+                    # Make sure we don't replace an instance of the target chute.
+                    if deployment.chute_id == chute.chute_id:
+                        continue
+
+                    # Can't preempt deployments that are too new (< 62 minutes since activation).
+                    if deployment.activated_at:
+                        age = datetime.now(timezone.utc).replace(
+                            tzinfo=None
+                        ) - deployment.activated_at.replace(tzinfo=None)
+                        if age <= timedelta(minutes=62):
+                            logger.warning(
+                                f"Cannot preempt {deployment.deployment_id=}, time since active is only {age}"
+                            )
+                            continue
+                    else:
                         logger.warning(
-                            f"Cannot preempt {deployment.deployment_id=}, time since active is only {age}"
+                            f"Cannot preempt {deployment.deployment_id=}, time active unknown."
                         )
                         continue
-                else:
-                    logger.warning(
-                        f"Cannot preempt {deployment.deployment_id=}, time active unknown."
+
+                    # Get the existing instance's compute multiplier
+                    existing_multiplier = self._get_instance_multiplier_from_global(
+                        chute.validator, deployment.instance_id
                     )
-                    continue
 
-                # Get the existing instance's compute multiplier
-                existing_multiplier = self._get_instance_multiplier_from_global(
-                    chute.validator, deployment.instance_id
-                )
+                    # Never preempt if existing multiplier >= new chute's effective multiplier
+                    if existing_multiplier >= new_effective_multiplier:
+                        logger.info(
+                            f"Skipping {deployment.chute_id} - existing multiplier {existing_multiplier:.2f} "
+                            f">= new multiplier {new_effective_multiplier:.2f}"
+                        )
+                        continue
 
-                # Never preempt if existing multiplier >= new chute's effective multiplier
-                if existing_multiplier >= new_effective_multiplier:
+                    # Never remove the only global instance of a chute
+                    if proposed_counts.get(deployment.chute_id, 0) <= 1:
+                        logger.warning(
+                            f"Skipping {deployment.chute_id} - would remove only global instance"
+                        )
+                        continue
+
+                    # This deployment is eligible for preemption
+                    to_delete.append(deployment.deployment_id)
+                    available_gpus += len(deployment.gpus)
+                    proposed_counts[deployment.chute_id] -= 1
+
                     logger.info(
-                        f"Skipping {deployment.chute_id} - existing multiplier {existing_multiplier:.2f} "
-                        f">= new multiplier {new_effective_multiplier:.2f}"
+                        f"Proposing preemption of {deployment.chute_id} "
+                        f"(multiplier={existing_multiplier:.2f}) for {chute.chute_id} "
+                        f"(multiplier={new_effective_multiplier:.2f})"
                     )
-                    continue
 
-                # Never remove the only global instance of a chute
-                if proposed_counts.get(deployment.chute_id, 0) <= 1:
-                    logger.warning(
-                        f"Skipping {deployment.chute_id} - would remove only global instance"
-                    )
-                    continue
-
-                # This deployment is eligible for preemption
-                to_delete.append(deployment.deployment_id)
-                available_gpus += len(deployment.gpus)
-                proposed_counts[deployment.chute_id] -= 1
-
-                logger.info(
-                    f"Proposing preemption of {deployment.chute_id} "
-                    f"(multiplier={existing_multiplier:.2f}) for {chute.chute_id} "
-                    f"(multiplier={new_effective_multiplier:.2f})"
-                )
-
-                # Would we reach a sufficient number of free GPUs?
-                if available_gpus >= chute.gpu_count:
-                    logger.info(f"Found a server to preempt deployments on: {server.name}")
-                    to_preempt = to_delete
-                    target_server = server
+                    # Would we reach a sufficient number of free GPUs?
+                    if available_gpus >= selector_gpu_count:
+                        logger.info(f"Found a server to preempt deployments on: {server.name}")
+                        to_preempt = to_delete
+                        target_server = server
+                        matched_gpu_count = selector_gpu_count
+                        break
+                if target_server:
                     break
             if target_server:
                 break
+
         if not target_server:
             logger.warning(
                 f"Could not find a server with sufficient preemptable deployments for {chute.chute_id=}"
@@ -1636,16 +1741,17 @@ class Gepetto:
                 config_id=launch_token["config_id"] if launch_token else None,
                 disk_gb=disk_gb,
                 extra_service_ports=extra_ports,
+                gpu_count=matched_gpu_count,
             )
             logger.success(
-                f"Successfully deployed {chute.chute_id=} {job_id=} via preemption on {server.server_id=}: {deployment.deployment_id=}"
+                f"Successfully deployed {chute.chute_id=} {job_id=} via preemption on {target_server.server_id=}: {deployment.deployment_id=}"
             )
             if not launch_token:
                 await self.announce_deployment(deployment)
             return True
         except DeploymentFailure as exc:
             logger.error(
-                f"Error attempting to deploy {chute.chute_id=} {job_id=} on {server.server_id=} via preemption: {exc}\n{traceback.format_exc()}"
+                f"Error attempting to deploy {chute.chute_id=} {job_id=} on {target_server.server_id=} via preemption: {exc}\n{traceback.format_exc()}"
             )
             if deployment:
                 await self.undeploy(deployment.deployment_id)
@@ -1691,7 +1797,8 @@ class Gepetto:
                     # - select server with the fewest GPUs available which suite the chute, like bin-packing
                     # - select the cheapest server that is capable of running the chute
                     # - select the server which already has the image and/or model warm (would be custom)
-                    if (server := await self.optimal_scale_up_server(chute)) is None:
+                    scale_result = await self.optimal_scale_up_server(chute)
+                    if scale_result is None:
                         logger.warning(
                             f"No servers available to accept additional chute deployment: {chute.chute_id}"
                         )
@@ -1702,6 +1809,7 @@ class Gepetto:
                         scaled = False
                         break
                     else:
+                        server, matched_gpu_count = scale_result
                         logger.info(
                             f"Attempting to deploy {chute.chute_id=} on {server.server_id=}"
                         )
@@ -1713,6 +1821,7 @@ class Gepetto:
                                 server.server_id,
                                 token=launch_token["token"] if launch_token else None,
                                 config_id=launch_token["config_id"] if launch_token else None,
+                                gpu_count=matched_gpu_count,
                             )
                             logger.success(
                                 f"Successfully deployed {chute.chute_id=} on {server.server_id=}: {deployment.deployment_id=}"
@@ -1756,9 +1865,8 @@ class Gepetto:
                             chute.code,
                             chute.ref_str,
                             f"{chute.preemptible}",
-                            f"{chute.gpu_count}",
+                            _stable_selector_hash(chute.node_selector),
                             f"{chute.chutes_version}",
-                            f"{set(sorted(chute.supported_gpus))}",
                         ]
                     ).encode()
                 ).hexdigest()
@@ -1774,9 +1882,8 @@ class Gepetto:
                             chute_data["code"],
                             chute_data["ref_str"],
                             f"{chute_data['preemptible']}",
-                            f"{chute_data['node_selector']['gpu_count']}",
+                            _stable_selector_hash(chute_data["node_selector"]),
                             f"{chute_data['chutes_version']}",
-                            f"{set(sorted(chute_data['supported_gpus']))}",
                         ]
                     ).encode()
                 ).hexdigest()

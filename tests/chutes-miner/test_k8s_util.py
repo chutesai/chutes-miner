@@ -28,7 +28,7 @@ def _make_inputs(version: str, tee: bool = False):
         ref_str="gh://chutes/test",
         filename="main.py",
         image="parachutes/test:latest",
-        gpu_count=1,
+        node_selector=[{"gpu_count": 1, "supported_gpus": ["a100"]}],
         tee=tee,
     )
     server = SimpleNamespace(
@@ -72,6 +72,7 @@ def test_build_chute_job_skips_code_volume_for_min_version():
     assert all(volume.name != "code" for volume in volumes)
     assert all(mount.name != "code" for mount in mounts)
 
+
 def test_build_chute_job_skips_code_volume_for_newer_version():
     job = _build_job("0.3.65")
     volumes = job.spec.template.spec.volumes
@@ -79,6 +80,7 @@ def test_build_chute_job_skips_code_volume_for_newer_version():
 
     assert all(volume.name != "code" for volume in volumes)
     assert all(mount.name != "code" for mount in mounts)
+
 
 @pytest.mark.parametrize("version", ["0.4.0.rc2", "0.4.0.rc16", "0.4.49.rc100"])
 def test_build_chute_job_skips_code_volume_for_newer_rc_version(version):

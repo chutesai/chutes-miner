@@ -1,7 +1,5 @@
 """Unit tests for chutes_miner.api.util (e.g. semcomp)."""
 
-import pytest
-
 from chutes_miner.api.util import semcomp
 
 

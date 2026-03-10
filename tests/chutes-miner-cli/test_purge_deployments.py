@@ -146,7 +146,7 @@ def test_purge_deployment_by_node(
     # Run the command
     with (
         patch("builtins.open", create=True) as mock_open,
-        patch('chutes_miner_cli.cli.delete_preflight') as mock_preflight
+        patch("chutes_miner_cli.cli.delete_preflight") as mock_preflight,
     ):
         mock_preflight.return_value = True
         mock_open.return_value.__enter__ = lambda s: s
@@ -199,7 +199,7 @@ def test_purge_deployment_by_node_name(
     # Run the command
     with (
         patch("builtins.open", create=True) as mock_open,
-        patch('chutes_miner_cli.cli.delete_preflight') as mock_preflight
+        patch("chutes_miner_cli.cli.delete_preflight") as mock_preflight,
     ):
         mock_preflight.return_value = True
         mock_open.return_value.__enter__ = lambda s: s
