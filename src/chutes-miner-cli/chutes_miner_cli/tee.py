@@ -80,11 +80,13 @@ async def resolve_server_by_name(
 
 
 def _vm_purpose_for_path(path: str) -> str:
-    """Return purpose 'status' or 'cache' based on path (for no-body requests)."""
+    """Return purpose 'status', 'cache', or 'images' based on path (for no-body requests)."""
     if path.startswith("/status") or path.startswith("status"):
         return "status"
     if path.startswith("/cache") or path.startswith("cache"):
         return "cache"
+    if path.startswith("/images") or path.startswith("images"):
+        return "images"
     raise ValueError(f"Unsupported API path: {path}")
 
 
