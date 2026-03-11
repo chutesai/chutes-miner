@@ -16,6 +16,7 @@ from chutes_miner_cli.constants import (
 )
 from chutes_miner_cli.tee import tee_app
 from chutes_miner_cli import tee_cache
+from chutes_miner_cli import tee_images
 from chutes_miner_cli import tee_status
 from chutes_miner_cli.util import sign_request
 from loguru import logger
@@ -801,8 +802,9 @@ app.command(
 app.command(name="lock", help="Lock a server's deployments")(lock_server)
 app.command(name="unlock", help="Unlock a server's deployments")(unlock_server)
 
-# TEE VM system-manager commands (cache + status)
+# TEE VM system-manager commands (cache + status + images)
 tee_cache.register(tee_app)
+tee_images.register(tee_app)
 tee_status.register(tee_app)
 app.add_typer(tee_app, name="tee")
 
