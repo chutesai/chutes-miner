@@ -46,22 +46,74 @@ def _styled_pull_status(status: str) -> str:
     return f"[{style}]{status}[/{style}]" if style else status
 
 
+def _shorten_digest(s: str, max_len: int = 19) -> str:
+    """Shorten sha256/sha512 digest for display."""
+    if not s or len(s) <= max_len:
+        return s
+    if s.startswith(("sha256:", "sha512:")):
+        prefix = "sha256:" if s.startswith("sha256:") else "sha512:"
+        return s[: len(prefix) + 12] + "..."
+    return s[:max_len] + "..."
+
+
+def _parse_image_ref(ref: str) -> tuple[str, str, str, str]:
+    """Parse image ref into (registry, org, image, tag). Handles all OCI/containerd ref formats."""
+    if not ref:
+        return "-", "-", "-", "-"
+    # Digest-only ref (containerd): sha256:hex or sha512:hex - no structure
+    if ref.startswith("sha256:") or ref.startswith("sha512:"):
+        return "-", "-", "-", _shorten_digest(ref)
+    # Extract path and tag/digest
+    path_part = ref
+    tag = "-"
+    if "@" in ref:
+        path_part, tag = ref.split("@", 1)
+        tag = _shorten_digest(tag)
+    elif ":" in ref:
+        path_part, maybe_tag = ref.rsplit(":", 1)
+        if "/" not in maybe_tag:
+            tag = maybe_tag
+    # Split path into registry/org/image
+    parts = path_part.split("/")
+    if len(parts) == 1:
+        return parts[0], "-", "-", tag
+    if len(parts) == 2:
+        return parts[0], "-", parts[1], tag
+    # 3+ parts: registry/org/.../image
+    registry = parts[0]
+    org = parts[1]
+    image = parts[-1]
+    if len(parts) > 3:
+        org = "/".join(parts[1:-1])
+    return registry, org, image, tag
+
+
 def display_image_list(data: dict[str, Any]) -> None:
-    """Pretty-print image list (ref, digest, size)."""
+    """Pretty-print image list (registry, org, image, tag, digest, size) for easier scanning."""
     images = data.get("images") or []
     if not images:
         console.print("No images.")
         return
+    rows = []
+    for img in images:
+        ref = img.get("ref", "")
+        registry, org, image, tag = _parse_image_ref(ref)
+        digest = img.get("digest") or "-"
+        if digest != "-":
+            digest = _shorten_digest(digest)
+        rows.append((registry, org, image, tag, digest, _format_bytes(img.get("size_bytes"))))
+    # Sort by registry, org, image, tag; put digest-only refs at the end
+    rows.sort(key=lambda r: (r[0] == "-", r[0], r[1], r[2], r[3]))
+
     table = Table(title="Containerd images", box=box.ROUNDED)
-    table.add_column("Ref", style="cyan")
+    table.add_column("Registry", style="cyan")
+    table.add_column("Org")
+    table.add_column("Image")
+    table.add_column("Tag")
     table.add_column("Digest")
     table.add_column("Size", justify="right")
-    for img in images:
-        table.add_row(
-            img.get("ref", "-"),
-            img.get("digest") or "-",
-            _format_bytes(img.get("size_bytes")),
-        )
+    for registry, org, image, tag, digest, size in rows:
+        table.add_row(registry, org, image, tag, digest, size)
     console.print(table)
 
 
