@@ -1024,6 +1024,7 @@ class K8sOperator(abc.ABC):
         disk_gb: int = 10,
         extra_labels: dict[str, str] = {},
         extra_service_ports: list[dict[str, Any]] = [],
+        gpu_count: int = None,
     ) -> Tuple[Deployment, V1Job]:
         """Deploy a chute!"""
         try:
@@ -1039,10 +1040,20 @@ class K8sOperator(abc.ABC):
                 chute = await self._get_chute(session, chute_id)
                 chute_version = chute.version
                 server = await self._get_server(session, server_id)
-                available_gpus = self._verify_gpus(chute, server)
+                if not gpu_count:
+                    raise DeploymentFailure(
+                        "gpu_count must be provided — it depends on the matched node selector entry"
+                    )
+                available_gpus = self._verify_gpus(chute, server, gpu_count=gpu_count)
                 await self._verify_disk_space(server, disk_gb)
                 deployment_id, gpu_uuids = await self._track_deployment(
-                    session, chute, server, available_gpus, job_id, config_id
+                    session,
+                    chute,
+                    server,
+                    available_gpus,
+                    job_id,
+                    config_id,
+                    gpu_count=gpu_count,
                 )
 
             # Build the service that exposes it.
@@ -1061,6 +1072,7 @@ class K8sOperator(abc.ABC):
                 job_id=job_id,
                 config_id=config_id,
                 disk_gb=disk_gb,
+                gpu_count=gpu_count,
             )
 
             # Deploy the chute
@@ -1115,16 +1127,16 @@ class K8sOperator(abc.ABC):
 
         return server
 
-    def _verify_gpus(self, chute: Chute, server: Server):
+    def _verify_gpus(self, chute: Chute, server: Server, gpu_count: int):
         # Make sure the node has capacity.
         gpus_allocated = 0
         available_gpus = {gpu.gpu_id for gpu in server.gpus if gpu.verified}
         for deployment in server.deployments:
             gpus_allocated += len(deployment.gpus)
             available_gpus -= {gpu.gpu_id for gpu in deployment.gpus}
-        if len(available_gpus) - chute.gpu_count < 0:
+        if len(available_gpus) - gpu_count < 0:
             raise DeploymentFailure(
-                f"Server {server.server_id} name={server.name} cannot allocate {chute.gpu_count} GPUs, already using {gpus_allocated} of {len(server.gpus)}"
+                f"Server {server.server_id} name={server.name} cannot allocate {gpu_count} GPUs, already using {gpus_allocated} of {len(server.gpus)}"
             )
         return available_gpus
 
@@ -1136,10 +1148,11 @@ class K8sOperator(abc.ABC):
         available_gpus,
         job_id: str = None,
         config_id: str = None,
+        gpu_count: int = None,
     ):
         # Immediately track this deployment (before actually creating it) to avoid allocation contention.
         deployment_id = str(uuid.uuid4())
-        gpus = list([gpu for gpu in server.gpus if gpu.gpu_id in available_gpus])[: chute.gpu_count]
+        gpus = list([gpu for gpu in server.gpus if gpu.gpu_id in available_gpus])[:gpu_count]
         gpu_uuids = [f"GPU-{str(uuid.UUID(gpu.gpu_id))}" for gpu in gpus]
         logger.info(
             f"Assigning {len(gpu_uuids)} GPUs [{gpu_uuids}] to {chute.chute_id=} on {server.name=}"
@@ -1439,6 +1452,7 @@ class K8sOperator(abc.ABC):
         job_id: Optional[str] = None,
         config_id: Optional[str] = None,
         disk_gb: int = 10,
+        gpu_count: int = None,
     ) -> V1Job:
         probe_port = self._get_probe_port(chute)
         job = build_chute_job(
@@ -1452,6 +1466,7 @@ class K8sOperator(abc.ABC):
             job_id=job_id,
             config_id=config_id,
             disk_gb=disk_gb,
+            gpu_count=gpu_count,
         )
 
         try:

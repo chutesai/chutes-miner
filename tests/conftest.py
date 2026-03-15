@@ -25,4 +25,4 @@ def pytest_configure(config):
 
 # pytest_configure(None)
 
-from constants import *
+from constants import *  # noqa: E402, F403

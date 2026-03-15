@@ -42,6 +42,7 @@ def mock_job():
     deployment.spec.replicas = 1
     return deployment
 
+
 @pytest.fixture
 def mock_deployment():
     """Create a mock V1Deployment object"""
@@ -80,6 +81,7 @@ def mock_devices():
             "memory": "24GB",
         },
     ]
+
 
 async def gather_gpu_info(
     *,
@@ -122,6 +124,7 @@ def mock_validator_lookup():
         side_effect=_build_validator,
     ):
         yield
+
 
 @pytest.mark.asyncio
 async def test_successful_gpu_gathering(mock_node, mock_job, mock_service, mock_devices):
@@ -236,9 +239,7 @@ async def test_job_failure_condition(mock_node, mock_job, mock_service):
 
 
 @pytest.mark.asyncio
-async def test_deployment_timeout(
-    mock_node, mock_job, mock_service
-):
+async def test_deployment_timeout(mock_node, mock_job, mock_service):
     """Test deployment timeout handling"""
     mock_not_ready_job = Mock()
     mock_not_ready_job.status = Mock()
@@ -259,7 +260,8 @@ async def test_deployment_timeout(
         mock_operator.return_value.watch_pods.return_value = iter([mock_watch_event])
 
         with pytest.raises(
-            GraValBootstrapFailure, match="Error waiting for graval bootstrap job: GraVal bootstrap job not ready after 65 seconds!"
+            GraValBootstrapFailure,
+            match="Error waiting for graval bootstrap job: GraVal bootstrap job not ready after 65 seconds!",
         ):
             await gather_gpu_info(
                 server_id="server-123",
@@ -352,9 +354,7 @@ async def test_gpu_count_mismatch(mock_node, mock_job, mock_service):
 
     with (
         patch("chutes_miner.api.server.verification.K8sOperator") as mock_operator,
-        patch.object(
-            GravalVerificationStrategy, "_fetch_devices", return_value=mock_devices
-        ),
+        patch.object(GravalVerificationStrategy, "_fetch_devices", return_value=mock_devices),
         patch("chutes_miner.api.server.verification.settings") as mock_settings,
     ):
         mock_settings.graval_bootstrap_timeout = 60
@@ -416,9 +416,7 @@ async def test_no_node_port_in_service(mock_node, mock_job):
 
 
 @pytest.mark.asyncio
-async def test_default_namespace_fallback(
-    mock_node, mock_service, mock_devices
-):
+async def test_default_namespace_fallback(mock_node, mock_service, mock_devices):
     """Test fallback to 'chutes' namespace when deployment namespace is None"""
     job = Mock(spec=V1Deployment)
     job.metadata = Mock(spec=V1ObjectMeta)
@@ -426,7 +424,6 @@ async def test_default_namespace_fallback(
     job.metadata.namespace = None  # Test fallback
     job.spec = Mock(spec=V1DeploymentSpec)
     job.spec.replicas = 1
-    
 
     mock_ready_job = Mock()
     mock_ready_job.status = Mock()
@@ -445,9 +442,7 @@ async def test_default_namespace_fallback(
 
     with (
         patch("chutes_miner.api.server.verification.K8sOperator") as mock_operator,
-        patch.object(
-            GravalVerificationStrategy, "_fetch_devices", return_value=mock_devices
-        ),
+        patch.object(GravalVerificationStrategy, "_fetch_devices", return_value=mock_devices),
         patch("chutes_miner.api.server.verification.get_session") as mock_get_session,
         patch("chutes_miner.api.server.verification.GPU") as mock_gpu_class,
         patch("chutes_miner.api.server.verification.settings") as mock_settings,
@@ -541,9 +536,7 @@ async def test_database_commit_failure(mock_node, mock_job, mock_service, mock_d
 
     with (
         patch("chutes_miner.api.server.verification.K8sOperator") as mock_operator,
-        patch.object(
-            GravalVerificationStrategy, "_fetch_devices", return_value=mock_devices
-        ),
+        patch.object(GravalVerificationStrategy, "_fetch_devices", return_value=mock_devices),
         patch("chutes_miner.api.server.verification.get_session") as mock_get_session,
         patch("chutes_miner.api.server.verification.GPU") as mock_gpu_class,
         patch("chutes_miner.api.server.verification.settings") as mock_settings,
@@ -582,7 +575,6 @@ async def test_missing_external_ip_label(mock_job, mock_service):
     mock_ready_job.spec.replicas = 1
     mock_ready_job.status.phase = "Running"
     mock_ready_job.status.container_statuses = [MagicMock(ready=True)]
-    
 
     mock_watch_event = Mock()
     mock_watch_event.object = mock_ready_job

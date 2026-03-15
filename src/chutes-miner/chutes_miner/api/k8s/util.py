@@ -56,9 +56,13 @@ def build_chute_job(
     job_id: Optional[str] = None,
     config_id: Optional[str] = None,
     disk_gb: int = 10,
+    gpu_count: int = None,
 ) -> V1Job:
-    cpu = str(server.cpu_per_gpu * chute.gpu_count)
-    ram = str(server.memory_per_gpu * chute.gpu_count) + "Gi"
+    from chutes_miner.gepetto import normalize_node_selector
+
+    effective_gpu_count = gpu_count or normalize_node_selector(chute.node_selector)[0]["gpu_count"]
+    cpu = str(server.cpu_per_gpu * effective_gpu_count)
+    ram = str(server.memory_per_gpu * effective_gpu_count) + "Gi"
     deployment_labels = {
         "chutes/deployment-id": deployment_id,
         "chutes/chute": "true",

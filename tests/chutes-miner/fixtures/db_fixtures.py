@@ -41,18 +41,21 @@ def mock_db_session():
     for patcher in patches:
         patcher.stop()
 
+
 def mock_refresh(obj: Any):
     if isinstance(obj, GPU):
         gpu = obj
         # Populate server on refresh
-        gpu.server = MagicMock()
-        gpu.server.ip_address = "192.168.1.100"
-        gpu.server.verification_port = 8080
+        mock_server = MagicMock()
+        mock_server.ip_address = "192.168.1.100"
+        mock_server.verification_port = 8080
+        mock_server.configure_mock(name="test-server")
+        gpu.server = mock_server
+
 
 # TODO: Update uses of mock_db_session from above to use this instead
 @pytest.fixture
 def get_mock_db_session():
-
     # Create a specific __aexit__ function that returns False only when an exception is raised
     async def mock_aexit(self, exc_type, exc_val, exc_tb):
         # Return False only if there's an exception (exc_type is not None)
@@ -73,14 +76,15 @@ def get_mock_db_session():
 
     return session
 
+
 @pytest.fixture
 def set_mock_db_session_result(get_mock_db_session):
-
     def _set_mock_db_session_result(query_data: list[Any] = []):
         get_mock_db_session.execute.return_value.scalar_one_or_none.return_value = query_data[0]
         get_mock_db_session.execute.return_value.all.return_value = query_data
 
     return _set_mock_db_session_result
+
 
 @pytest.fixture
 def mock_get_db_session(get_mock_db_session):
@@ -92,7 +96,9 @@ def mock_get_db_session(get_mock_db_session):
 
     session = get_mock_db_session
 
-    mock_context_manager = AsyncMock(__aenter__=AsyncMock(return_value=session), __aexit__=mock_aexit)
+    mock_context_manager = AsyncMock(
+        __aenter__=AsyncMock(return_value=session), __aexit__=mock_aexit
+    )
     mock_get_session = Mock(return_value=mock_context_manager)
 
     # Yield the shared mock for use in tests

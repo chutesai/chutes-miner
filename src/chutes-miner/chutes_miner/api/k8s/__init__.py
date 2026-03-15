@@ -81,12 +81,21 @@ async def deploy_chute(
     disk_gb: int = 10,
     extra_labels: dict[str, str] = {},
     extra_service_ports: list[dict[str, Any]] = [],
+    gpu_count: int = None,
 ) -> Tuple[Deployment, V1Job]:
     """
     Deploy a chute!
     """
     return await K8sOperator().deploy_chute(
-        chute_id, server_id, token, job_id, config_id, disk_gb, extra_labels, extra_service_ports
+        chute_id,
+        server_id,
+        token,
+        job_id,
+        config_id,
+        disk_gb,
+        extra_labels,
+        extra_service_ports,
+        gpu_count=gpu_count,
     )
 
 

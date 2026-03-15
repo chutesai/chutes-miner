@@ -1,6 +1,7 @@
 import json
 import os
 
+
 def pytest_configure(config):
     """Set up environment variables before any modules are imported."""
     os.environ["MINER_SS58"] = "5E6xfU3oNU7y1a7pQwoc31fmUjwBZ2gKcNCw8EXsdtCQieUQ"
@@ -24,10 +25,10 @@ def pytest_configure(config):
 
 pytest_configure(None)
 
-from fixtures.monitor import *
-from fixtures.k8s import *
-from fixtures.router import *
-from fixtures.requests import *
-from fixtures.redis import *
-from fixtures.health_checker import *
-from fixtures.db import *
+from fixtures.monitor import *  # noqa: E402, F403
+from fixtures.k8s import *  # noqa: E402, F403
+from fixtures.router import *  # noqa: E402, F403
+from fixtures.requests import *  # noqa: E402, F403
+from fixtures.redis import *  # noqa: E402, F403
+from fixtures.health_checker import *  # noqa: E402, F403
+from fixtures.db import *  # noqa: E402, F403

@@ -25,7 +25,8 @@ def pytest_configure(config):
 
 pytest_configure(None)
 
-from fixtures.db_fixtures import *  # noqa
-from fixtures.k8s_fixtures import *  # noqa
-from fixtures.redis_fixutres import * # noqa
-from fixtures.aiohttp_fixtures import * # noqa
+import chutes_common.schemas.orms  # noqa: E402, F401 - register all ORM models before fixture imports
+from fixtures.db_fixtures import *  # noqa: E402, F403
+from fixtures.k8s_fixtures import *  # noqa: E402, F403
+from fixtures.redis_fixutres import *  # noqa: E402, F403
+from fixtures.aiohttp_fixtures import *  # noqa: E402, F403

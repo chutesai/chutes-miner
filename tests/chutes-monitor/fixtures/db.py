@@ -2,9 +2,9 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
+
 @pytest.fixture
 def mock_db_session():
-
     # Create a list of paths where k8s_core_client is imported
     import_paths = ["chutes_monitor.api.cluster.router.get_session"]
 
