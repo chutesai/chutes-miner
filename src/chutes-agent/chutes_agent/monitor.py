@@ -556,9 +556,7 @@ class ResourceMonitor:
             kwargs = {"name": event.obj_name}
 
         if not read_func:
-            logger.warning(
-                f"No read function for resource type: {resource_type.value}"
-            )
+            logger.warning(f"No read function for resource type: {resource_type.value}")
             return False
 
         try:
@@ -639,9 +637,7 @@ class ResourceMonitor:
                 check_count += 1
                 if check_count % warn_interval_checks == 0:
                     elapsed = check_count * check_interval
-                    logger.warning(
-                        f"Resource {resource_id} still terminating after {elapsed}s"
-                    )
+                    logger.warning(f"Resource {resource_id} still terminating after {elapsed}s")
 
                 await asyncio.sleep(check_interval)
 
