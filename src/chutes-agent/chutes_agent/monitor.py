@@ -537,45 +537,38 @@ class ResourceMonitor:
             logger.error(f"Error handling {event.obj_type} event: {e}")
 
     async def _check_resource_exists(self, event: WatchEvent) -> bool:
-        """Check if a resource still exists in the cluster"""
+        """Check if a resource still exists in the cluster.
+
+        Uses the Kubernetes read API — a successful response means the resource
+        exists; a 404 ApiException means it has been removed.
+        """
         try:
-            # Convert string to enum for type safety
-            try:
-                resource_type = KubernetesResourceType.from_string(event.obj_type)
-            except ValueError:
-                logger.warning(f"Unknown resource type: {event.obj_type}")
-                return False
+            resource_type = KubernetesResourceType.from_string(event.obj_type)
+        except ValueError:
+            logger.warning(f"Unknown resource type: {event.obj_type}")
+            return False
 
-            if resource_type.is_namespaced:
-                # Namespaced resource
-                read_func = self._get_namespaced_read_function(resource_type)
-                if read_func:
-                    await read_func(name=event.obj_name, namespace=event.obj_namespace)
-                else:
-                    logger.warning(
-                        f"No read function found for namespaced resource type: {resource_type.value}"
-                    )
-                    return False
-            else:
-                # Cluster-scoped resource
-                read_func = self._get_cluster_read_function(resource_type)
-                if read_func:
-                    await read_func(name=event.obj_name)
-                else:
-                    logger.warning(
-                        f"No read function found for cluster-scoped resource type: {resource_type.value}"
-                    )
-                    return False
+        if resource_type.is_namespaced:
+            read_func = self._get_namespaced_read_function(resource_type)
+            kwargs = {"name": event.obj_name, "namespace": event.obj_namespace}
+        else:
+            read_func = self._get_cluster_read_function(resource_type)
+            kwargs = {"name": event.obj_name}
 
-            return True  # If we get here, resource still exists
+        if not read_func:
+            logger.warning(
+                f"No read function for resource type: {resource_type.value}"
+            )
+            return False
 
+        try:
+            await read_func(**kwargs)
+            return True
         except ApiException as e:
             if e.status == 404:
-                return False  # Resource doesn't exist
-            else:
-                # Some other error - assume it exists to be safe
-                logger.error(f"Error checking if {event.obj_type} exists: {e}")
-                return True
+                return False
+            logger.error(f"Error checking if {event.obj_type} exists: {e}")
+            return True
 
     def _get_namespaced_read_function(self, resource_type: KubernetesResourceType):
         """Get the appropriate read function for namespaced resources"""
@@ -612,10 +605,14 @@ class ResourceMonitor:
         return read_functions.get(resource_type)
 
     async def _monitor_resource_actual_deletion(self, original_event: WatchEvent):
-        """Monitor for when a resource is actually deleted from the cluster"""
-        max_wait = 300  # 5 minutes max wait
+        """Monitor for when a resource is actually deleted from the cluster.
+
+        Waits indefinitely until the resource is confirmed gone. Never sends a
+        DELETED event until the resource is actually removed to avoid scheduling
+        conflicts on standalone clusters.
+        """
         check_interval = 2  # Check every 2 seconds
-        elapsed = 0
+        warn_interval_checks = 60  # Log warning every ~2 minutes
 
         resource_id = f"{original_event.obj_type}/{original_event.obj_name}"
         if original_event.obj_namespace:
@@ -623,12 +620,14 @@ class ResourceMonitor:
 
         logger.debug(f"Starting deletion monitoring for {resource_id}")
 
-        while elapsed < max_wait:
+        check_count = 0
+        while True:
             try:
                 still_exists = await self._check_resource_exists(original_event)
 
                 if not still_exists:
                     # Resource is actually gone now - send the real DELETED event
+                    elapsed = check_count * check_interval
                     deleted_event = WatchEvent(
                         type=WatchEventType.DELETED, object=original_event.object
                     )
@@ -637,25 +636,19 @@ class ResourceMonitor:
                     return
 
                 # Resource still exists, wait and check again
+                check_count += 1
+                if check_count % warn_interval_checks == 0:
+                    elapsed = check_count * check_interval
+                    logger.warning(
+                        f"Resource {resource_id} still terminating after {elapsed}s"
+                    )
+
                 await asyncio.sleep(check_interval)
-                elapsed += check_interval
 
             except Exception as e:
                 logger.error(f"Error monitoring deletion of {resource_id}: {e}")
                 # Continue monitoring despite errors
                 await asyncio.sleep(check_interval)
-                elapsed += check_interval
-
-        # If we get here, something went wrong or resource took too long to delete
-        logger.warning(f"Resource {resource_id} deletion monitoring timed out after {max_wait}s")
-
-        # Send the DELETED event anyway after timeout to prevent cache leaks
-        try:
-            deleted_event = WatchEvent(type=WatchEventType.DELETED, object=original_event.object)
-            await self.control_plane_client.send_resource_update(deleted_event)
-            logger.info(f"Sent DELETED event for {resource_id} after timeout")
-        except Exception as e:
-            logger.error(f"Failed to send timeout DELETED event for {resource_id}: {e}")
 
     async def send_heartbeat(self):
         """Send periodic heartbeat to control plane"""
