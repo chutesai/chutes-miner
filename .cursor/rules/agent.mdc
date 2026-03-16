@@ -1,0 +1,6 @@
+---
+description: Project-wide agent constraints
+alwaysApply: true
+---
+
+Read and follow all instructions in AGENT.md at the repository root before making any changes. Treat it as the permanent constraints layer for this codebase.
