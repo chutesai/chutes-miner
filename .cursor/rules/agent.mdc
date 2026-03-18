@@ -3,4 +3,15 @@ description: Project-wide agent constraints
 alwaysApply: true
 ---
 
-Read and follow all instructions in AGENT.md at the repository root before making any changes. Treat it as the permanent constraints layer for this codebase.
+# Agent Context
+
+Before making any changes to this repository:
+
+1. **Read AGENT.md** at the project root. It defines project identity, stack, hard rules, patterns, and architecture. Follow these constraints for all work.
+
+2. **Use spec templates** for task planning when appropriate. For features, bugfixes, or refactors, use the Prompt Contracts structure in `docs/specs/templates/`:
+   - `feature.md` — features with Goal, Constraints, Output Format, Failure Conditions
+   - `bugfix.md` — bug fixes with reproduction steps, root cause, regression prevention
+   - `refactor.md` — refactors with scope, before/after, migration strategy
+
+3. **Confirm understanding** at session start: if starting a new task, read AGENT.md and confirm you understand the project constraints before proceeding.
