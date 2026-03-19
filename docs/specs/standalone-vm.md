@@ -11,7 +11,7 @@
 - **Key files**:
   - `src/chutes-miner/chutes_miner/gepetto.py` -- current scheduler/reconciler (~2200 lines)
   - `src/chutes-miner/chutes_miner/api/server/router.py` -- server registration (add-node)
-  - `src/chutes-miner/chutes_miner/api/server/verification.py` -- GraVal/TEE verification, hardcoded port 30443
+  - `src/chutes-miner/chutes_miner/common/verification.py` -- GraVal/TEE verification, hardcoded port 30443
   - `src/chutes-miner/chutes_miner/api/k8s/operator.py` -- SingleCluster/MultiCluster K8s operators
   - `src/chutes-miner/chutes_miner/api/socket_client.py` -- WebSocket connection to validator, publishes to Redis
   - `src/chutes-miner/chutes_miner/api/redis_pubsub.py` -- Redis pubsub listener, dispatches events to handlers
@@ -42,7 +42,7 @@
   3. If match found: skip registration, proceed to normal reconciliation/scheduling.
   4. If not found: run full registration (verification + advertise to validator).
   5. If conflict (exists but config differs, or 409): **fail fast and shut down**. Operator must investigate. This avoids accidentally removing an active VM due to misconfiguration (duplicate name, duplicate ports). Smarter auto-reconciliation can be added later.
-- **Registration module**: Extract registration logic from the miner API servers endpoint into a shared module so both the existing add-node flow and the standalone registration API can consume it without duplication.
+- **Common module**: Shared verification and bootstrap flow in `chutes_miner/common/`. Miner API adds track_server (DB) and monitoring via `api/server/util.py`; registration API uses validator inventory as state. Both consume the shared logic.
 - **Lightweight registration API**: A small API endpoint that accepts hotkey, server name, and GPU config from the VM guest (sek8s). Returns success/conflict/error so the guest can handle fail-fast shutdown (k3s cannot shut down the VM from inside the cluster). Guest-side logic lives in sek8s.
 - **chutes-api changes** (external repo): Add optional `cluster_name` query parameter to miner-facing endpoints. Scopes responses to resources for that cluster under the hotkey. Omitting preserves existing behavior. Minimal and backward-compatible.
 - **Port discovery via K8s service labels**: K8s operator queries services by label to discover NodePort values per cluster. Works across all topologies.
@@ -81,13 +81,13 @@ Additional features that need to be supported:
 
 ## Output Format
 
-1. **Registration module** -- Extract registration logic from the miner API servers endpoint (`src/chutes-miner/chutes_miner/api/server/`) into a shared module (e.g., `chutes_miner/registration/`). Covers inventory check against `/miner/servers`, verification (GraVal/TEE), and server advertisement. Consumed by the miner API (existing add-node flow) and the standalone registration API.
+1. **Common module** -- Shared registration logic in `chutes_miner/common/`: verification (GraVal/TEE), bootstrap flow (`verify_server`), inventory check. Caller handles tracking: miner API does `track_server` + monitoring before `verify_server`; registration API uses validator inventory. `verify_server` is verification-only; `bootstrap_server` is the miner-API wrapper that does track + monitor + verify. Server tracking lives in `api/server/util.py`.
 2. **Lightweight registration API** -- A small API endpoint that accepts hotkey, server name, and GPU config from the VM guest. Returns success/conflict/error so the guest (managed in sek8s) can handle fail-fast shutdown. Guest-side logic lives in sek8s, not this repo.
 3. **Gepetto-lite** -- `src/chutes-miner/chutes_miner/gepetto_lite.py` (or `standalone/gepetto_lite.py`). Full scheduling feature parity: reconciliation, autoscaling, preemption, activator, pubsub. Cluster-scoped API queries via `cluster_name`. Port-range-aware NodePort allocation for NAT environments.
 4. **K8s operator changes** -- `src/chutes-miner/chutes_miner/api/k8s/operator.py`: MultiClusterK8sOperator detects local cluster and uses in-cluster kubeconfig (Scenario 3). Port discovery via K8s service labels across all operator types.
 5. **Helm chart** -- `charts/chutes-executor/`: Redis, gepetto-lite, registry. No Postgres, no agent (only needed for central control coordination), no attestation proxy (static manifest in VM). Service NodePorts set via Helm values (non-TEE) or via helm upgrade / manifest patching at first boot (TEE where ports aren't known at build time). ConfigMap provides the job NodePort range to gepetto-lite.
 6. **NodeArgs / server advertisement contract** -- Add `agent_port` and `attestation_port` fields with backward-compatible defaults (32000, 30443). No port range in the schema -- scheduler knows its range internally; job ports come from the workload during verification.
-7. **Verification module updates** -- `src/chutes-miner/chutes_miner/api/server/verification.py`: replace hardcoded port 30443 with value resolved from K8s service label discovery.
+7. **Verification module updates** -- `src/chutes-miner/chutes_miner/common/verification.py`: replace hardcoded port 30443 with value resolved from K8s service label discovery.
 
 ---
 

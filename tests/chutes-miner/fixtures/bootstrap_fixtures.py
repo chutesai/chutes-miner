@@ -103,7 +103,8 @@ def mock_node(mock_gpus):
     node.metadata.name = "test-node-name"
     node.metadata.labels = {
         "nvidia.com/gpu.count": str(len(mock_gpus)),
-        "gpu-short-ref": "rtx4090"
+        "gpu-short-ref": "rtx4090",
+        "chutes/external-ip": "192.168.1.100",  # Required for TEE verification_host
     }
     return node
 
@@ -144,12 +145,21 @@ def mock_kubeconfig():
     return MockKubeConfig()
 
 
+# Device info fields required by NodeArgs.from_device_info
+_DEVICE_INFO_BASE = {
+    "name": "NVIDIA GeForce RTX 4090",
+    "memory": 24 * 1024,  # MB
+    "clock_rate": 2.52,
+    "uuid": "gpu_1",
+}
+
+
 @pytest.fixture
 def mock_gpus():
-    """Create mock GPU list"""
+    """Create mock GPU list with device_info compatible with NodeArgs.from_device_info"""
     return [
-        MockGPU("gpu_1", {"name": "RTX 4090"}),
-        MockGPU("gpu_2", {"name": "RTX 4090"}),
+        MockGPU("gpu_1", {**_DEVICE_INFO_BASE, "uuid": "gpu_1"}),
+        MockGPU("gpu_2", {**_DEVICE_INFO_BASE, "uuid": "gpu_2"}),
     ]
 
 
@@ -161,12 +171,13 @@ def mock_gpu():
 def mock_server():
     """Create mock Server object"""
     _mock_server = Mock(spec=Server)
-    _mock_server.server_id="test-node-uid-123",
-    _mock_server.validator="test_validator",
-    _mock_server.cpu_per_gpu=8,
-    _mock_server.memory_per_gpu=32
+    _mock_server.server_id = "test-node-uid-123"
+    _mock_server.name = "test-node-name"
+    _mock_server.validator = "test_validator"
+    _mock_server.cpu_per_gpu = 8
+    _mock_server.memory_per_gpu = 32
     _mock_server.ip_address = "192.168.0.1"
-    _mock_server.verification_prot = "32689"
+    _mock_server.verification_port = 8080
 
     return _mock_server
 
@@ -268,23 +279,21 @@ def mock_dependencies(
 
     mock_server = Mock(spec=Server)
 
+    # Bootstrap flow lives in common; patch common and verification
     dependency_config = {
-        "chutes_miner.api.server.util": {
-            MockDependencies.K8S_OPERATOR: mock_k8s_operator,
-            MockDependencies.GET_SESSION: mock_get_db_session,
-            MockDependencies.SERVER: mock_server,
-            MockDependencies.GPU: mock_gpu,
-            MockDependencies.UPDATE: mock_update,
-            MockDependencies.SIGN_REQUEST: mock_sign_request,
-            MockDependencies.STOP_SERVER_MONITORING: mock_stop_server_monitoring,
-            MockDependencies.START_SERVER_MONITORING: mock_start_server_monitoring,
-            MockDependencies.MULTI_CLUSTER_KUBE_CONFIG: mock_multicluster_kubeconfig,
+        "chutes_miner.common.bootstrap": {
             MockDependencies.TRACK_SERVER: mock_track_server,
-            MockDependencies.SETTINGS: mock_settings,
-            MockDependencies.LOGGER: mock_logger,
-            MockDependencies.SSE_MESSAGE: mock_sse_message,
+            MockDependencies.START_SERVER_MONITORING: mock_start_server_monitoring,
+            MockDependencies.STOP_SERVER_MONITORING: mock_stop_server_monitoring,
+            MockDependencies.MULTI_CLUSTER_KUBE_CONFIG: mock_multicluster_kubeconfig,
+            MockDependencies.GET_SESSION: mock_get_db_session,
+            MockDependencies.UPDATE: mock_update,
+            MockDependencies.GPU: mock_gpu,
         },
-        "chutes_miner.api.server.verification": {
+        "chutes_miner.api.database": {
+            "get_session": mock_get_db_session,
+        },
+        "chutes_miner.common.verification": {
             MockStrategyDependencies.K8S_OPERATOR: mock_k8s_operator,
             MockStrategyDependencies.GET_SESSION: mock_get_db_session,
             MockStrategyDependencies.SELECT: mock_select,
@@ -319,8 +328,8 @@ def mock_dependencies(
 def mock_check_verification_task_status():
 
     _mock = AsyncMock()
-    with patch("chutes_miner.api.server.verification.GravalVerificationStrategy._check_verification_task_status", _mock):
-        # patch("chutes_miner.api.server.verification.TEEVerificationStrategy._check_verification_task_status", _mock):
+    with patch("chutes_miner.common.verification.GravalVerificationStrategy._check_verification_task_status", _mock):
+        # patch("chutes_miner.common.verification.TEEVerificationStrategy._check_verification_task_status", _mock):
         _mock.return_value = True
         yield _mock
 
@@ -335,6 +344,6 @@ def mock_graval_service():
 
 # @pytest.fixture(autouse=True)
 # def mock_check_attestation_service():
-#     with patch("chutes_miner.api.server.verification.VerificationStrategy._check_attestation_service") as mock_check:
+#     with patch("chutes_miner.common.verification.VerificationStrategy._check_attestation_service") as mock_check:
 #         mock_check.return_value = False
 #         yield mock_check

@@ -18,8 +18,8 @@ from chutes_common.auth import authorize
 from chutes_common.schemas.deployment import Deployment
 from chutes_miner.api.k8s.operator import K8sOperator
 from chutes_common.schemas.server import Server, ServerArgs
+from chutes_miner.common import bootstrap_server
 from chutes_miner.api.server.util import (
-    bootstrap_server,
     get_server_kubeconfig,
     populate_control_node_kubeconfig,
 )

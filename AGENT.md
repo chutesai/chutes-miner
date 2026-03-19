@@ -29,17 +29,21 @@ Do not introduce alternate frameworks (e.g., Prisma, NextAuth, Firebase). Stay w
 - **Environment variables** go in `.env`, `local.env`, or Helm values — never hardcoded
 - **90% test coverage target** — if you change code, add tests for it
 - **Run `make lint-local` and `make reformat`** before committing
+- **Use Make commands for tooling** — never run `python`, `pytest`, or `ruff` directly. The global Python interpreter does not have project dependencies installed. Use `make test-local`, `make lint-local`, `make reformat` instead.
 - **No new top-level packages** under `src/` without discussion
 - **Version bumps** — each package has a `VERSION` file; update when releasing
 
 ## Patterns
 
+- **Module-level imports** — Prefer imports at the top of the file. Do not use imports inside functions or methods without explicit approval; keep imports at module level for clarity.
 - **Async-first**: Use `async def`, `asyncio`, async DB sessions. Avoid blocking calls in request handlers
 - **Pydantic models** for request/response schemas; use `chutes_common.schemas` for shared types
 - **Shared utilities** go in `chutes-common` — auth, Redis, K8s client, monitoring, schemas
 - **One concern per module** — keep files focused; split when they grow large
 - **Follow existing naming** — check neighboring files and packages for conventions
+- **Meaningful method names** — Avoid `run_...` or `do_...` prefixes. Methods clearly execute; use verbs that describe the action (e.g. `verify_server`, `bootstrap_server`, not `run_bootstrap` or `do_verify`).
 - **Error handling**: Use custom exceptions from `chutes_common.exceptions` or package-specific `exceptions.py`; avoid bare `except`
+
 
 ## Architecture Overview
 
@@ -58,12 +62,14 @@ Helm charts: `charts/chutes-miner`, `charts/chutes-miner-gpu`, `charts/chutes-mo
 
 ## Development Commands
 
+**Always use Make commands** — they run tools via the project's Poetry venv. Do not invoke `python`, `pytest`, or `ruff` directly; the global interpreter lacks project dependencies.
+
 ```bash
 make help              # List all targets
 make list-packages     # List packages in monorepo
-make venv              # Create shared venv
-make test-local        # Run tests locally (or: make test-local <package>)
-make lint-local        # Run Ruff (or: make lint-local <package>)
+make venv              # Create shared venv in .venv/ (run once; poetry.toml sets in-project)
+make test-local        # Run tests via venv (or: make test-local <package>)
+make lint-local        # Run Ruff via venv (or: make lint-local <package>)
 make reformat          # Format code
 make build             # Build Docker images (or: make build <package>)
 make ci                # Full CI pipeline

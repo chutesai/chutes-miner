@@ -1,7 +1,7 @@
 from chutes_common.schemas.gpu import GPU
 from chutes_common.schemas.server import ServerArgs
 from chutes_miner.api.exceptions import GraValBootstrapFailure
-from chutes_miner.api.server.verification import GravalVerificationStrategy
+from chutes_miner.common.verification import GravalVerificationStrategy
 import pytest
 from unittest.mock import ANY, AsyncMock, MagicMock, Mock, patch
 from kubernetes.client import (
@@ -118,7 +118,7 @@ def mock_validator_lookup():
         return validator_obj
 
     with patch(
-        "chutes_miner.api.server.verification.validator_by_hotkey",
+        "chutes_miner.common.verification.validator_by_hotkey",
         side_effect=_build_validator,
     ):
         yield
@@ -148,13 +148,13 @@ async def test_successful_gpu_gathering(mock_node, mock_job, mock_service, mock_
         gpu.device_info = {"name": "RTX 4090"}
 
     with (
-        patch("chutes_miner.api.server.verification.K8sOperator") as mock_operator,
+        patch("chutes_miner.common.verification.K8sOperator") as mock_operator,
         patch.object(
             GravalVerificationStrategy, "_fetch_devices", return_value=mock_devices
         ) as mock_fetch,
-        patch("chutes_miner.api.server.verification.get_session") as mock_get_session,
-        patch("chutes_miner.api.server.verification.GPU") as mock_gpu_class,
-        patch("chutes_miner.api.server.verification.settings") as mock_settings,
+        patch("chutes_miner.common.verification.get_session") as mock_get_session,
+        patch("chutes_miner.common.verification.GPU") as mock_gpu_class,
+        patch("chutes_miner.common.verification.settings") as mock_settings,
     ):
         # Setup mocks
         mock_settings.graval_bootstrap_timeout = 60
@@ -219,8 +219,8 @@ async def test_job_failure_condition(mock_node, mock_job, mock_service):
     mock_watch_event.object = mock_failed_job
 
     with (
-        patch("chutes_miner.api.server.verification.K8sOperator") as mock_operator,
-        patch("chutes_miner.api.server.verification.settings") as mock_settings,
+        patch("chutes_miner.common.verification.K8sOperator") as mock_operator,
+        patch("chutes_miner.common.verification.settings") as mock_settings,
     ):
         mock_settings.graval_bootstrap_timeout = 60
         mock_operator.return_value.watch_pods.return_value = iter([mock_watch_event])
@@ -251,8 +251,8 @@ async def test_deployment_timeout(
     mock_watch_event.object = mock_not_ready_job
 
     with (
-        patch("chutes_miner.api.server.verification.K8sOperator") as mock_operator,
-        patch("chutes_miner.api.server.verification.settings") as mock_settings,
+        patch("chutes_miner.common.verification.K8sOperator") as mock_operator,
+        patch("chutes_miner.common.verification.settings") as mock_settings,
         patch("time.time", side_effect=[0, 65]),
     ):  # Simulate timeout
         mock_settings.graval_bootstrap_timeout = 60
@@ -274,8 +274,8 @@ async def test_deployment_timeout(
 async def test_watch_stream_exception(mock_node, mock_job, mock_service):
     """Test handling of exceptions during deployment watching"""
     with (
-        patch("chutes_miner.api.server.verification.K8sOperator") as mock_operator,
-        patch("chutes_miner.api.server.verification.settings") as mock_settings,
+        patch("chutes_miner.common.verification.K8sOperator") as mock_operator,
+        patch("chutes_miner.common.verification.settings") as mock_settings,
     ):
         mock_settings.graval_bootstrap_timeout = 60
         mock_operator.return_value.watch_pods.side_effect = Exception("Connection error")
@@ -309,13 +309,13 @@ async def test_device_fetch_failure(mock_node, mock_job, mock_service):
     mock_watch_event.object = mock_ready_job
 
     with (
-        patch("chutes_miner.api.server.verification.K8sOperator") as mock_operator,
+        patch("chutes_miner.common.verification.K8sOperator") as mock_operator,
         patch.object(
             GravalVerificationStrategy,
             "_fetch_devices",
             side_effect=Exception("Connection failed"),
         ),
-        patch("chutes_miner.api.server.verification.settings") as mock_settings,
+        patch("chutes_miner.common.verification.settings") as mock_settings,
     ):
         mock_settings.graval_bootstrap_timeout = 60
         mock_operator.return_value.watch_pods.return_value = iter([mock_watch_event])
@@ -351,11 +351,11 @@ async def test_gpu_count_mismatch(mock_node, mock_job, mock_service):
     mock_devices = [{"uuid": "GPU-12345", "name": "RTX 4090"}]
 
     with (
-        patch("chutes_miner.api.server.verification.K8sOperator") as mock_operator,
+        patch("chutes_miner.common.verification.K8sOperator") as mock_operator,
         patch.object(
             GravalVerificationStrategy, "_fetch_devices", return_value=mock_devices
         ),
-        patch("chutes_miner.api.server.verification.settings") as mock_settings,
+        patch("chutes_miner.common.verification.settings") as mock_settings,
     ):
         mock_settings.graval_bootstrap_timeout = 60
         mock_operator.return_value.watch_pods.return_value = iter([mock_watch_event])
@@ -394,13 +394,13 @@ async def test_no_node_port_in_service(mock_node, mock_job):
     mock_watch_event.object = mock_ready_job
 
     with (
-        patch("chutes_miner.api.server.verification.K8sOperator") as mock_operator,
+        patch("chutes_miner.common.verification.K8sOperator") as mock_operator,
         patch.object(
             GravalVerificationStrategy,
             "_fetch_devices",
             side_effect=Exception("Connection failed"),
         ),
-        patch("chutes_miner.api.server.verification.settings") as mock_settings,
+        patch("chutes_miner.common.verification.settings") as mock_settings,
     ):
         mock_settings.graval_bootstrap_timeout = 60
         mock_operator.return_value.watch_pods.return_value = iter([mock_watch_event])
@@ -444,13 +444,13 @@ async def test_default_namespace_fallback(
     mock_session.refresh = AsyncMock()
 
     with (
-        patch("chutes_miner.api.server.verification.K8sOperator") as mock_operator,
+        patch("chutes_miner.common.verification.K8sOperator") as mock_operator,
         patch.object(
             GravalVerificationStrategy, "_fetch_devices", return_value=mock_devices
         ),
-        patch("chutes_miner.api.server.verification.get_session") as mock_get_session,
-        patch("chutes_miner.api.server.verification.GPU") as mock_gpu_class,
-        patch("chutes_miner.api.server.verification.settings") as mock_settings,
+        patch("chutes_miner.common.verification.get_session") as mock_get_session,
+        patch("chutes_miner.common.verification.GPU") as mock_gpu_class,
+        patch("chutes_miner.common.verification.settings") as mock_settings,
     ):
         mock_settings.graval_bootstrap_timeout = 60
         mock_operator.return_value.watch_pods.return_value = iter([mock_watch_event])
@@ -500,10 +500,10 @@ async def test_zero_gpu_count(mock_job, mock_service):
     mock_session.refresh = AsyncMock()
 
     with (
-        patch("chutes_miner.api.server.verification.K8sOperator") as mock_operator,
+        patch("chutes_miner.common.verification.K8sOperator") as mock_operator,
         patch.object(GravalVerificationStrategy, "_fetch_devices", return_value=[]),
-        patch("chutes_miner.api.server.verification.get_session") as mock_get_session,
-        patch("chutes_miner.api.server.verification.settings") as mock_settings,
+        patch("chutes_miner.common.verification.get_session") as mock_get_session,
+        patch("chutes_miner.common.verification.settings") as mock_settings,
     ):
         mock_settings.graval_bootstrap_timeout = 60
         mock_operator.return_value.watch_pods.return_value = iter([mock_watch_event])
@@ -540,13 +540,13 @@ async def test_database_commit_failure(mock_node, mock_job, mock_service, mock_d
     mock_session.refresh = AsyncMock()
 
     with (
-        patch("chutes_miner.api.server.verification.K8sOperator") as mock_operator,
+        patch("chutes_miner.common.verification.K8sOperator") as mock_operator,
         patch.object(
             GravalVerificationStrategy, "_fetch_devices", return_value=mock_devices
         ),
-        patch("chutes_miner.api.server.verification.get_session") as mock_get_session,
-        patch("chutes_miner.api.server.verification.GPU") as mock_gpu_class,
-        patch("chutes_miner.api.server.verification.settings") as mock_settings,
+        patch("chutes_miner.common.verification.get_session") as mock_get_session,
+        patch("chutes_miner.common.verification.GPU") as mock_gpu_class,
+        patch("chutes_miner.common.verification.settings") as mock_settings,
     ):
         mock_settings.graval_bootstrap_timeout = 60
         mock_operator.return_value.watch_pods.return_value = iter([mock_watch_event])
@@ -588,13 +588,13 @@ async def test_missing_external_ip_label(mock_job, mock_service):
     mock_watch_event.object = mock_ready_job
 
     with (
-        patch("chutes_miner.api.server.verification.K8sOperator") as mock_operator,
+        patch("chutes_miner.common.verification.K8sOperator") as mock_operator,
         patch.object(
             GravalVerificationStrategy,
             "_fetch_devices",
             side_effect=Exception("Connection failed"),
         ),
-        patch("chutes_miner.api.server.verification.settings") as mock_settings,
+        patch("chutes_miner.common.verification.settings") as mock_settings,
     ):
         mock_settings.graval_bootstrap_timeout = 60
         mock_operator.return_value.watch_pods.return_value = iter([mock_watch_event])
@@ -625,9 +625,9 @@ async def test_empty_devices_response(mock_node, mock_job, mock_service):
     mock_watch_event.object = mock_ready_job
 
     with (
-        patch("chutes_miner.api.server.verification.K8sOperator") as mock_operator,
+        patch("chutes_miner.common.verification.K8sOperator") as mock_operator,
         patch.object(GravalVerificationStrategy, "_fetch_devices", return_value=None),
-        patch("chutes_miner.api.server.verification.settings") as mock_settings,
+        patch("chutes_miner.common.verification.settings") as mock_settings,
     ):
         mock_settings.graval_bootstrap_timeout = 60
         mock_operator.return_value.watch_pods.return_value = iter([mock_watch_event])
@@ -660,8 +660,8 @@ async def test_deployment_never_becomes_ready(mock_node, mock_job, mock_service)
     mock_watch_event.object = mock_not_ready_job
 
     with (
-        patch("chutes_miner.api.server.verification.K8sOperator") as mock_operator,
-        patch("chutes_miner.api.server.verification.settings") as mock_settings,
+        patch("chutes_miner.common.verification.K8sOperator") as mock_operator,
+        patch("chutes_miner.common.verification.settings") as mock_settings,
         patch("time.time", return_value=0),
     ):  # No timeout, just stream ends
         mock_settings.graval_bootstrap_timeout = 60

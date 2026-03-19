@@ -44,8 +44,10 @@ def mock_db_session():
 def mock_refresh(obj: Any):
     if isinstance(obj, GPU):
         gpu = obj
-        # Populate server on refresh
+        # Populate server on refresh (required by NodeArgs/MultiNodeArgsRequest)
         gpu.server = MagicMock()
+        gpu.server.server_id = getattr(gpu, "server_id", "test-node-uid-123")
+        gpu.server.name = "test-node-name"
         gpu.server.ip_address = "192.168.1.100"
         gpu.server.verification_port = 8080
 

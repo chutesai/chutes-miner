@@ -1,3 +1,10 @@
+"""
+Server verification (GraVal/TEE).
+
+Shared by miner API and registration API. Both must verify before registering
+with the validator. Verification gathers GPU info and advertises to validator.
+"""
+
 from abc import ABC, abstractmethod
 import asyncio
 from contextlib import asynccontextmanager

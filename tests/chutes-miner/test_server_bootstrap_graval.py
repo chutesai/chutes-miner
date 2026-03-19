@@ -11,7 +11,7 @@ from fixtures.bootstrap_fixtures import * # noqa
 def mock_fetch_devices(mock_gpus):
 
     _mock = AsyncMock()
-    with patch("chutes_miner.api.server.verification.GravalVerificationStrategy._fetch_devices", _mock):
+    with patch("chutes_miner.common.verification.GravalVerificationStrategy._fetch_devices", _mock):
         _mock.return_value = [
         {
             "uuid": gpu.gpu_id,
@@ -27,7 +27,7 @@ async def test_bootstrap_server_success_without_kubeconfig(
 ):
     """Test successful server bootstrapping without kubeconfig"""
     # Mock aiohttp session for advertise nodes
-    from chutes_miner.api.server.util import bootstrap_server
+    from chutes_miner.common import bootstrap_server
     messages = await collect_sse_messages(
         bootstrap_server(mock_node, mock_server_args, None)
     )
@@ -48,7 +48,7 @@ async def test_bootstrap_server_success_with_kubeconfig(
     """Test successful server bootstrapping with kubeconfig"""
     
     # Execute test
-    from chutes_miner.api.server.util import bootstrap_server
+    from chutes_miner.common import bootstrap_server
     messages = await collect_sse_messages(
         bootstrap_server(mock_node, mock_server_args, mock_kubeconfig)
     )
@@ -65,7 +65,7 @@ async def test_bootstrap_server_success_with_agent_api(
 ):
     """Test successful server bootstrapping with agent API monitoring"""
     # Execute test
-    from chutes_miner.api.server.util import bootstrap_server
+    from chutes_miner.common import bootstrap_server
     messages = await collect_sse_messages(
         bootstrap_server(mock_node, mock_server_args_with_agent, None)
     )
@@ -92,7 +92,7 @@ async def test_bootstrap_server_graval_pod_failure(
     set_mock_db_session_result([mock_server])
 
     # Execute test and expect exception
-    from chutes_miner.api.server.util import bootstrap_server
+    from chutes_miner.common import bootstrap_server
     from chutes_miner.api.exceptions import GraValBootstrapFailure
     
     with pytest.raises(GraValBootstrapFailure):
@@ -119,7 +119,7 @@ async def test_bootstrap_server_fetch_devices_failure(
     set_mock_db_session_result([mock_server])
 
     # Execute test and expect exception
-    from chutes_miner.api.server.util import bootstrap_server
+    from chutes_miner.common import bootstrap_server
     from chutes_miner.api.exceptions import GraValBootstrapFailure
     
     with pytest.raises(GraValBootstrapFailure):
@@ -143,11 +143,11 @@ async def test_bootstrap_server_advertise_nodes_failure(
     mock_server.gpus = mock_gpus
     set_mock_db_session_result([mock_server])
 
-    with patch("chutes_miner.api.server.verification.GravalVerificationStrategy._advertise_nodes") as mock_advertise:
+    with patch("chutes_miner.common.verification.GravalVerificationStrategy._advertise_nodes") as mock_advertise:
         mock_advertise.side_effect = Exception("Advertisement failed")
     
         # Execute test and expect exception
-        from chutes_miner.api.server.util import bootstrap_server
+        from chutes_miner.common import bootstrap_server
         
         with pytest.raises(Exception, match="Advertisement failed"):
             await collect_sse_messages(
@@ -169,7 +169,7 @@ async def test_bootstrap_server_track_server_failure(
     mock_track_server.side_effect = Exception("Tracking failed")
     
     # Execute test and expect exception
-    from chutes_miner.api.server.util import bootstrap_server
+    from chutes_miner.common import bootstrap_server
     
     with pytest.raises(Exception, match="Tracking failed"):
         await collect_sse_messages(
@@ -200,7 +200,7 @@ async def test_bootstrap_server_multiple_seeds_assertion_error(
     })
     
     # Execute test and expect assertion error
-    from chutes_miner.api.server.util import bootstrap_server
+    from chutes_miner.common import bootstrap_server
     
     with pytest.raises(AssertionError, match="more than one seed"):
         await collect_sse_messages(
@@ -218,14 +218,14 @@ async def test_bootstrap_server_verification_timeout_simulation(
     mock_check_verification_task_status.side_effect = [None, None, True]
     
     # Execute test
-    from chutes_miner.api.server.util import bootstrap_server
+    from chutes_miner.common import bootstrap_server
     messages = await collect_sse_messages(
         bootstrap_server(mock_node, mock_server_args, None)
     )
     
     # Verify verification was checked multiple times
-    mock_check_verification_task_status.call_count == 3
-    
+    assert mock_check_verification_task_status.call_count == 3
+
     # Verify we got waiting messages
     waiting_messages = [msg for msg in messages if "waiting for validator" in str(msg)]
     assert len(waiting_messages) >= 2
@@ -242,9 +242,9 @@ async def test_bootstrap_server_timing_measurement(
     start_time = 1000.0
     end_time = 1045.5  # 45.5 seconds
     
-    with patch('chutes_miner.api.server.util.time') as mock_time:
+    with patch('chutes_miner.common.bootstrap.time') as mock_time:
         mock_time.time.side_effect=[start_time, end_time]
-        from chutes_miner.api.server.util import bootstrap_server
+        from chutes_miner.common import bootstrap_server
         messages = await collect_sse_messages(
             bootstrap_server(mock_node, mock_server_args, None)
         )
@@ -259,7 +259,7 @@ async def test_bootstrap_server_timing_measurement(
 @pytest.mark.asyncio
 async def test_bootstrap_server_sse_message_flow(mock_node, mock_server_args):
     """Test that SSE messages are yielded in the expected order"""
-    from chutes_miner.api.server.util import bootstrap_server
+    from chutes_miner.common import bootstrap_server
     
     messages = await collect_sse_messages(
         bootstrap_server(mock_node, mock_server_args, None)
@@ -276,3 +276,92 @@ async def test_bootstrap_server_sse_message_flow(mock_node, mock_server_args):
     assert any("advertising node" in msg for msg in message_strs)
     assert any("successfully advertised node" in msg for msg in message_strs)
     assert any("completed server bootstrapping" in msg for msg in message_strs)
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_server_verification_failure_409(
+    mock_node, mock_server_args, mock_k8s_operator, mock_server,
+    mock_gpus, set_mock_db_session_result, mock_aiohttp_session
+):
+    """Test VerificationFailure (409 conflict): cleanup runs, no exception raised to caller."""
+    from chutes_miner.api.exceptions import VerificationFailure
+
+    mock_server.gpus = mock_gpus
+    set_mock_db_session_result([mock_server])
+
+    with patch("chutes_miner.common.verification.GravalVerificationStrategy._advertise_nodes") as mock_advertise:
+        mock_advertise.side_effect = VerificationFailure("409 conflict")
+
+        from chutes_miner.common import bootstrap_server
+
+        messages = await collect_sse_messages(
+            bootstrap_server(mock_node, mock_server_args, None)
+        )
+
+    # No exception raised - VerificationFailure is caught and swallowed
+    assert len(messages) > 0
+    # Cleanup should have run: server purged from validator
+    assert mock_aiohttp_session.delete.call_count == 1
+    mock_k8s_operator.cleanup_graval.assert_called()
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_server_stop_monitoring_on_verification_failure(
+    mock_node, mock_server_args_with_agent, mock_k8s_operator, mock_server,
+    mock_gpus, set_mock_db_session_result, mock_stop_server_monitoring,
+    mock_start_server_monitoring, mock_fetch_devices
+):
+    """Test that stop_server_monitoring is called when verification fails and agent_api is set."""
+    mock_fetch_devices.side_effect = Exception("Failure to fetch.")
+    mock_server.gpus = mock_gpus
+    set_mock_db_session_result([mock_server])
+
+    from chutes_miner.common import bootstrap_server
+    from chutes_miner.api.exceptions import GraValBootstrapFailure
+
+    with pytest.raises(GraValBootstrapFailure):
+        await collect_sse_messages(
+            bootstrap_server(mock_node, mock_server_args_with_agent, None)
+        )
+
+    mock_start_server_monitoring.assert_called_once_with("http://agent-api.com")
+    mock_stop_server_monitoring.assert_called_once_with("http://agent-api.com")
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_server_gpu_verified_on_success(
+    mock_node, mock_server_args, get_mock_db_session
+):
+    """Test that GPUs are marked verified on successful bootstrap."""
+    from chutes_miner.common import bootstrap_server
+
+    await collect_sse_messages(
+        bootstrap_server(mock_node, mock_server_args, None)
+    )
+
+    # Session is used for _track_gpus, seed update, and GPU verified update
+    assert get_mock_db_session.execute.called, "Expected session.execute for DB operations"
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_server_gpu_not_verified_on_failure(
+    mock_node, mock_server_args, mock_k8s_operator, mock_server,
+    mock_gpus, set_mock_db_session_result, mock_fetch_devices, mock_update
+):
+    """Test that GPUs are not marked verified when verification fails."""
+    from chutes_miner.common import bootstrap_server
+    from chutes_common.schemas.gpu import GPU
+    from chutes_miner.api.exceptions import GraValBootstrapFailure
+
+    mock_fetch_devices.side_effect = Exception("Failure to fetch.")
+    mock_server.gpus = mock_gpus
+    set_mock_db_session_result([mock_server])
+
+    with pytest.raises(GraValBootstrapFailure):
+        await collect_sse_messages(
+            bootstrap_server(mock_node, mock_server_args, None)
+        )
+
+    # update(GPU) should not have been called - verification failed before that
+    gpu_update_calls = [c for c in mock_update.call_args_list if c.args and c.args[0] == GPU]
+    assert len(gpu_update_calls) == 0

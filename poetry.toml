@@ -1,0 +1,5 @@
+# Local Poetry configuration for this project.
+# Ensures the virtual environment is created in .venv/ inside the project
+# so make test-local, make lint-local, etc. can find it reliably.
+[virtualenvs]
+in-project = true
