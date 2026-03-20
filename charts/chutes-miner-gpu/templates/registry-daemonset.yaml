@@ -49,9 +49,9 @@ spec:
           startupProbe:
             tcpSocket:
               port: {{ .Values.auth.port }}
-            initialDelaySeconds: 1
+            initialDelaySeconds: 5
             periodSeconds: 2
-            failureThreshold: 15
+            failureThreshold: 60
           resources:
             {{- toYaml .Values.auth.resources | nindent 12 }}
       containers:
