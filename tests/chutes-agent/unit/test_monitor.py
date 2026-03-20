@@ -3,7 +3,8 @@ import pytest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 from chutes_common.monitoring.models import ClusterState, MonitoringState
-from chutes_common.k8s import WatchEvent
+from chutes_common.k8s import WatchEvent, WatchEventType
+from kubernetes_asyncio.client.exceptions import ApiException
 
 @pytest.fixture(autouse=True)
 def setup(
@@ -404,3 +405,191 @@ async def test_watch_resources_exception_handling(resource_monitor):
     # Verify error state is set
     assert resource_monitor._status.state == MonitoringState.ERROR
     assert resource_monitor._status.error_message == "Gather failed"
+
+
+# --- Delete event handling tests (no timeout) ---
+
+
+def _make_deleted_event(obj_type: str, name: str, namespace: str = "default"):
+    """Create a WatchEvent for a DELETED resource."""
+    obj = MagicMock()
+    obj.kind = obj_type
+    obj.metadata = MagicMock()
+    obj.metadata.name = name
+    obj.metadata.namespace = namespace
+    return WatchEvent(type=WatchEventType.DELETED, object=obj)
+
+
+@pytest.mark.asyncio
+async def test_check_resource_exists_returns_true_when_resource_exists(resource_monitor):
+    """_check_resource_exists returns True when K8s read succeeds."""
+    resource_monitor.control_plane_client = AsyncMock()
+    event = _make_deleted_event("Pod", "test-pod")
+    resource_monitor.core_v1.read_namespaced_pod = AsyncMock()
+
+    result = await resource_monitor._check_resource_exists(event)
+
+    assert result is True
+    resource_monitor.core_v1.read_namespaced_pod.assert_called_once_with(
+        name="test-pod", namespace="default"
+    )
+
+
+@pytest.mark.asyncio
+async def test_check_resource_exists_returns_false_on_404(resource_monitor):
+    """_check_resource_exists returns False when resource is gone (404)."""
+    resource_monitor.control_plane_client = AsyncMock()
+    event = _make_deleted_event("Pod", "test-pod")
+    resource_monitor.core_v1.read_namespaced_pod = AsyncMock(
+        side_effect=ApiException(status=404)
+    )
+
+    result = await resource_monitor._check_resource_exists(event)
+
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_check_resource_exists_returns_true_on_other_api_error(resource_monitor):
+    """_check_resource_exists assumes resource exists on non-404 ApiException."""
+    resource_monitor.control_plane_client = AsyncMock()
+    event = _make_deleted_event("Pod", "test-pod")
+    resource_monitor.core_v1.read_namespaced_pod = AsyncMock(
+        side_effect=ApiException(status=500)
+    )
+
+    result = await resource_monitor._check_resource_exists(event)
+
+    assert result is True
+
+
+@pytest.mark.asyncio
+async def test_check_resource_exists_returns_false_for_unknown_resource_type(resource_monitor):
+    """_check_resource_exists returns False for unknown resource type."""
+    resource_monitor.control_plane_client = AsyncMock()
+    event = _make_deleted_event("UnknownKind", "test-unknown")
+    event.object.kind = "UnknownKind"
+
+    result = await resource_monitor._check_resource_exists(event)
+
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_check_resource_exists_cluster_scoped_resource(resource_monitor):
+    """_check_resource_exists uses cluster-scoped read for Node."""
+    resource_monitor.control_plane_client = AsyncMock()
+    event = _make_deleted_event("Node", "test-node")
+    event.object.metadata.namespace = None
+    resource_monitor.core_v1.read_node = AsyncMock()
+
+    result = await resource_monitor._check_resource_exists(event)
+
+    assert result is True
+    resource_monitor.core_v1.read_node.assert_called_once_with(name="test-node")
+
+
+@pytest.mark.asyncio
+async def test_handle_resource_event_deleted_when_resource_gone_sends_deleted(resource_monitor):
+    """When DELETED event received and resource is already gone, send DELETED immediately."""
+    resource_monitor.control_plane_client = AsyncMock()
+    event = _make_deleted_event("Pod", "test-pod")
+    resource_monitor._check_resource_exists = AsyncMock(return_value=False)
+
+    await resource_monitor.handle_resource_event(event)
+
+    resource_monitor.control_plane_client.send_resource_update.assert_called_once_with(event)
+    resource_monitor._check_resource_exists.assert_called_once_with(event)
+
+
+@pytest.mark.asyncio
+async def test_handle_resource_event_deleted_when_still_exists_sends_terminating_and_monitors(
+    resource_monitor,
+):
+    """When DELETED event received but resource still exists, send TERMINATING and monitor."""
+    resource_monitor.control_plane_client = AsyncMock()
+    event = _make_deleted_event("Pod", "test-pod")
+    resource_monitor._check_resource_exists = AsyncMock(return_value=True)
+
+    with patch("asyncio.create_task") as mock_create_task:
+        await resource_monitor.handle_resource_event(event)
+
+    # Should send TERMINATING event
+    call_args = resource_monitor.control_plane_client.send_resource_update.call_args[0][0]
+    assert call_args.type == WatchEventType.TERMINATING
+    assert call_args.object == event.object
+
+    # Should schedule monitoring task for actual deletion
+    mock_create_task.assert_called_once()
+    created_coro = mock_create_task.call_args[0][0]
+    assert created_coro.cr_code.co_name == "_monitor_resource_actual_deletion"
+
+
+@pytest.mark.asyncio
+async def test_monitor_resource_actual_deletion_sends_deleted_only_when_resource_gone(
+    resource_monitor,
+):
+    """_monitor_resource_actual_deletion sends DELETED only when resource is confirmed gone."""
+    resource_monitor.control_plane_client = AsyncMock()
+    event = _make_deleted_event("Pod", "test-pod")
+
+    # First call: still exists, second call: gone
+    resource_monitor._check_resource_exists = AsyncMock(side_effect=[True, False])
+    with patch("asyncio.sleep", AsyncMock()):
+        await resource_monitor._monitor_resource_actual_deletion(event)
+
+    # Should have sent exactly one DELETED event
+    resource_monitor.control_plane_client.send_resource_update.assert_called_once()
+    sent_event = resource_monitor.control_plane_client.send_resource_update.call_args[0][0]
+    assert sent_event.type == WatchEventType.DELETED
+    assert sent_event.object == event.object
+
+
+@pytest.mark.asyncio
+async def test_monitor_resource_actual_deletion_no_timeout_keeps_waiting(resource_monitor):
+    """_monitor_resource_actual_deletion waits indefinitely - no timeout, no premature DELETED."""
+    resource_monitor.control_plane_client = AsyncMock()
+    event = _make_deleted_event("Pod", "test-pod")
+
+    # Resource stays "existing" for 9 checks, then is gone on 10th - simulates long termination
+    check_count = 0
+
+    async def mock_check(_):
+        nonlocal check_count
+        check_count += 1
+        return check_count < 10  # Exists for first 9 checks, gone on 10th
+
+    resource_monitor._check_resource_exists = mock_check
+    sleep_calls = []
+
+    async def capture_sleep(seconds):
+        sleep_calls.append(seconds)
+
+    with patch("asyncio.sleep", side_effect=capture_sleep):
+        await resource_monitor._monitor_resource_actual_deletion(event)
+
+    # Should have slept 9 times (while resource still existed) before sending DELETED
+    assert len(sleep_calls) >= 9
+    # Should have sent DELETED only once, when resource was finally gone
+    resource_monitor.control_plane_client.send_resource_update.assert_called_once()
+    sent_event = resource_monitor.control_plane_client.send_resource_update.call_args[0][0]
+    assert sent_event.type == WatchEventType.DELETED
+
+
+@pytest.mark.asyncio
+async def test_monitor_resource_actual_deletion_continues_on_exception(resource_monitor):
+    """_monitor_resource_actual_deletion continues monitoring after transient errors."""
+    resource_monitor.control_plane_client = AsyncMock()
+    event = _make_deleted_event("Pod", "test-pod")
+
+    # Raise on first two calls, then return False (resource gone)
+    resource_monitor._check_resource_exists = AsyncMock(
+        side_effect=[Exception("API blip"), Exception("retry"), False]
+    )
+    with patch("asyncio.sleep", AsyncMock()):
+        await resource_monitor._monitor_resource_actual_deletion(event)
+
+    # Should eventually send DELETED
+    resource_monitor.control_plane_client.send_resource_update.assert_called_once()
+    sent_event = resource_monitor.control_plane_client.send_resource_update.call_args[0][0]
+    assert sent_event.type == WatchEventType.DELETED
