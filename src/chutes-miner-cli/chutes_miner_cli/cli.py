@@ -239,31 +239,54 @@ def display_local_inventory(inventory):
         console.print("\n" + "=" * 80 + "\n")
 
 
-def display_remote_inventory(inventory):
+def display_remote_inventory(servers):
     """
-    Render remote/validator inventory.
+    Render remote/validator inventory as server-grouped tables.
     """
     console = Console()
-    table = Table(title="GPU Information")
-    table.add_column("Name", style="cyan")
-    table.add_column("Chute", style="cyan")
-    table.add_column("Memory (GB)", justify="right", style="green")
-    table.add_column("Clock (MHz)", justify="right", style="red")
-    table.add_column("Created At", style="blue")
-    table.add_column("GPU Verification", style="white")
-    table.add_column("Instance verification", style="white")
-    for gpu in inventory:
-        table.add_row(
-            gpu["name"],
-            f"{gpu['chute_id']} {gpu['chute']}",
-            format_memory(gpu["memory"]),
-            f"{gpu['clock_rate'] / 1000:.0f}",
-            format_date(gpu["created_at"]),
-            format_verification(gpu["verification_error"], gpu["verified_at"]),
-            format_verification(gpu["inst_verification_error"], gpu["inst_verified_at"]),
+    for server in servers:
+        gpus = server.get("gpus") or []
+        title = f"Server: {server['name']}"
+        if not gpus:
+            title += " [yellow](dangling - no GPUs)[/yellow]"
+        server_table = Table(title=title, box=box.ROUNDED)
+        server_table.add_column("Property", style="cyan")
+        server_table.add_column("Value")
+        server_table.add_row("Server ID", server.get("server_id", "-"))
+        server_table.add_row("IP", server.get("ip", "-"))
+        server_table.add_row("TEE", "Yes" if server.get("is_tee") else "No")
+        server_table.add_row(
+            "Created", format_date(server["created_at"]) if server.get("created_at") else "-"
         )
-    console.print(table)
-    console.print("\n" + "=" * 80 + "\n")
+        server_table.add_row(
+            "Updated", format_date(server["updated_at"]) if server.get("updated_at") else "-"
+        )
+        server_table.add_row("GPUs", str(len(gpus)))
+        console.print(server_table)
+        console.print()
+
+        if gpus:
+            gpu_table = Table(title="GPU Details", box=box.ROUNDED)
+            gpu_table.add_column("UUID", style="cyan")
+            gpu_table.add_column("Identifier")
+            gpu_table.add_column("Device Index", justify="right")
+            gpu_table.add_column("Chute", style="cyan")
+            gpu_table.add_column("GPU Verification", style="white")
+            gpu_table.add_column("Instance Verification", style="white")
+            for gpu in gpus:
+                chute_str = f"{gpu.get('chute_id') or '-'} {gpu.get('chute') or '-'}"
+                gpu_table.add_row(
+                    gpu.get("uuid", "-"),
+                    gpu.get("gpu_identifier", "-"),
+                    str(gpu.get("device_index", "-")),
+                    chute_str,
+                    format_verification(gpu.get("verification_error"), gpu.get("verified_at")),
+                    format_verification(
+                        gpu.get("inst_verification_error"), gpu.get("inst_verified_at")
+                    ),
+                )
+            console.print(gpu_table)
+        console.print("\n" + "=" * 80 + "\n")
 
 
 def local_inventory(
@@ -322,23 +345,22 @@ def remote_inventory(
         nonlocal hotkey, validator_api, raw_json
         async with aiohttp.ClientSession(raise_for_status=True) as session:
             headers, _ = sign_request(hotkey, purpose="miner", remote=True)
-            inventory = []
+            async with session.get(
+                f"{validator_api.rstrip('/')}/miner/servers/", headers=headers
+            ) as resp:
+                data = await resp.json()
+            servers = data.get("servers") or []
             gpu_map = {}
-            async with session.get(f"{validator_api}/miner/nodes/", headers=headers) as resp:
-                async for content_enc in resp.content:
-                    content = content_enc.decode()
-                    if content.startswith("data: "):
-                        inventory.append(json.loads(content[6:]))
-                        gpu_map[inventory[-1]["uuid"]] = inventory[-1]
-                        gpu_map[inventory[-1]["uuid"]].update(
-                            {
-                                "chute": None,
-                                "chute_id": None,
-                                "inst_verification_error": None,
-                                "inst_verified_at": None,
-                            }
-                        )
-            async with session.get(f"{validator_api}/miner/inventory", headers=headers) as resp:
+            for server in servers:
+                for gpu in server.get("gpus") or []:
+                    gpu_map[gpu["uuid"]] = gpu
+                    gpu.setdefault("chute", None)
+                    gpu.setdefault("chute_id", None)
+                    gpu.setdefault("inst_verification_error", None)
+                    gpu.setdefault("inst_verified_at", None)
+            async with session.get(
+                f"{validator_api.rstrip('/')}/miner/inventory", headers=headers
+            ) as resp:
                 for item in await resp.json():
                     if item["gpu_id"] in gpu_map:
                         gpu_map[item["gpu_id"]].update(
@@ -349,11 +371,10 @@ def remote_inventory(
                                 "inst_verified_at": item["last_verified_at"],
                             }
                         )
-            inventory = sorted(inventory, key=lambda o: o["created_at"])
             if raw_json:
-                print(json.dumps(inventory, indent=2))
+                print(json.dumps({"servers": servers}, indent=2))
             else:
-                display_remote_inventory(inventory)
+                display_remote_inventory(servers)
 
     asyncio.run(_remote_inventory())
 
@@ -548,20 +569,22 @@ def scorch_remote(
         async with aiohttp.ClientSession(raise_for_status=True) as session:
             headers, _ = sign_request(hotkey, purpose="miner", remote=True)
             async with session.get(
-                f"{validator_api.rstrip('/')}/miner/nodes/",
+                f"{validator_api.rstrip('/')}/miner/servers/",
                 headers=headers,
             ) as resp:
-                async for line in resp.content:
-                    if not line or not line.startswith(b"data:"):
-                        continue
-                    gpu = json.loads(line.decode()[6:])
-                    print(f"Deleting {gpu['name']} with uuid {gpu['uuid']}")
-                    headers, _ = sign_request(hotkey, purpose="nodes", remote=True)
-                    async with session.delete(
-                        f"{validator_api.rstrip('/')}/nodes/{gpu['uuid']}",
-                        headers=headers,
-                    ) as resp:
-                        print(f"  successfully deleted {gpu['name']} with uuid {gpu['uuid']}")
+                data = await resp.json()
+            servers = data.get("servers") or []
+            delete_headers, _ = sign_request(hotkey, purpose="tee", remote=True)
+            for server in servers:
+                name_or_id = server.get("name") or server.get("server_id")
+                if not name_or_id:
+                    continue
+                print(f"Deleting server {name_or_id}")
+                async with session.delete(
+                    f"{validator_api.rstrip('/')}/servers/{name_or_id}",
+                    headers=delete_headers,
+                ) as _:
+                    print(f"  successfully deleted {name_or_id}")
 
     asyncio.run(_scorch_remote())
 
