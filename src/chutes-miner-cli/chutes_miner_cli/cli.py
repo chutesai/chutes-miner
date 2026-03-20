@@ -255,8 +255,12 @@ def display_remote_inventory(servers):
         server_table.add_row("Server ID", server.get("server_id", "-"))
         server_table.add_row("IP", server.get("ip", "-"))
         server_table.add_row("TEE", "Yes" if server.get("is_tee") else "No")
-        server_table.add_row("Created", format_date(server["created_at"]) if server.get("created_at") else "-")
-        server_table.add_row("Updated", format_date(server["updated_at"]) if server.get("updated_at") else "-")
+        server_table.add_row(
+            "Created", format_date(server["created_at"]) if server.get("created_at") else "-"
+        )
+        server_table.add_row(
+            "Updated", format_date(server["updated_at"]) if server.get("updated_at") else "-"
+        )
         server_table.add_row("GPUs", str(len(gpus)))
         console.print(server_table)
         console.print()
@@ -277,7 +281,9 @@ def display_remote_inventory(servers):
                     str(gpu.get("device_index", "-")),
                     chute_str,
                     format_verification(gpu.get("verification_error"), gpu.get("verified_at")),
-                    format_verification(gpu.get("inst_verification_error"), gpu.get("inst_verified_at")),
+                    format_verification(
+                        gpu.get("inst_verification_error"), gpu.get("inst_verified_at")
+                    ),
                 )
             console.print(gpu_table)
         console.print("\n" + "=" * 80 + "\n")
