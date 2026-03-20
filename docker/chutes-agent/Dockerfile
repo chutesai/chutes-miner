@@ -71,7 +71,6 @@ WORKDIR /app
 COPY --chown=chutes:chutes ${PROJECT_DIR}/ ./${PROJECT}/
 RUN . .venv/bin/activate && poetry install -P ${PROJECT}
 COPY --chown=chutes:chutes tests/${PROJECT}/ ./tests/${PROJECT}
-COPY --chown=chutes:chutes tests/fixtures/ ./tests/fixtures/
 COPY --chown=chutes:chutes tests/*.py ./tests
 RUN chown ${APP_USER}:${APP_GROUP} .
 
