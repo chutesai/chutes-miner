@@ -21,23 +21,14 @@ spec:
       nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      containers:
-        - name: registry
-          image: "{{ .Values.registry.image }}"
-          imagePullPolicy: {{ .Values.registry.imagePullPolicy }}
-          ports:
-            - name: http
-              containerPort: 80
-              protocol: TCP
-          resources:
-            {{- toYaml .Values.registry.resources | nindent 12 }}
-          volumeMounts:
-            - name: registry-nginx-config
-              mountPath: /etc/nginx/nginx.conf
-              subPath: nginx.conf
+      # restartPolicy: Always on an init container makes it a native sidecar
+      # (KEP-753). It starts before regular containers, but keeps running for
+      # the pod's lifetime instead of exiting after init.
+      initContainers:
         - name: auth
           image: "{{ .Values.auth.image }}"
           imagePullPolicy: {{ .Values.auth.imagePullPolicy }}
+          restartPolicy: Always
           env:
             - name: MINER_SS58
               valueFrom:
@@ -55,8 +46,28 @@ spec:
             - name: auth
               containerPort: {{ .Values.auth.port }}
               protocol: TCP
+          startupProbe:
+            tcpSocket:
+              port: {{ .Values.auth.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 2
+            failureThreshold: 60
           resources:
             {{- toYaml .Values.auth.resources | nindent 12 }}
+      containers:
+        - name: registry
+          image: "{{ .Values.registry.image }}"
+          imagePullPolicy: {{ .Values.registry.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.registry.resources | nindent 12 }}
+          volumeMounts:
+            - name: registry-nginx-config
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
       volumes:
         - name: registry-nginx-config
           configMap:

@@ -59,9 +59,17 @@ jobs:
           # Top-level modules under src/
           MODULES=$(find "$SRC_DIR" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort)
 
-          # Changed paths in this PR (files changed vs main)
+          # Changed paths in this PR - only require version bump when package source changes
+          # Package source lives in src/<module>/<package>/ where package = module with - → _
           CHANGED_FILES=$(git diff --name-only origin/main...HEAD -- "$SRC_DIR/" || true)
-          CHANGED_MODULES=$(echo "$CHANGED_FILES" | awk -F/ -v n=2 'NF>=n {print $n}' | sort -u)
+          CHANGED_MODULES=""
+          for MODULE in $MODULES; do
+            PACKAGE="${MODULE//-/_}"
+            if echo "$CHANGED_FILES" | grep -q "^$SRC_DIR/$MODULE/$PACKAGE/"; then
+              CHANGED_MODULES="${CHANGED_MODULES}${MODULE}"$'\n'
+            fi
+          done
+          CHANGED_MODULES=$(echo "$CHANGED_MODULES" | sort -u)
 
           if [ -z "$CHANGED_MODULES" ]; then
             echo "No modules under src/ were changed. Nothing to verify."

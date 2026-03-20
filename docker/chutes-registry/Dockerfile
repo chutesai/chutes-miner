@@ -43,7 +43,7 @@ WORKDIR /app
 
 COPY --from=base /app .
 
-ENTRYPOINT ["python", "-m", "uvicorn", "--host", "0.0.0.0", "--port", "8000", "--reload", "chutes_registry.main:app"]
+ENTRYPOINT ["python", "-m", "uvicorn", "--host", "0.0.0.0", "--port", "8000", "chutes_registry.main:app"]
 
 FROM base AS development
 
