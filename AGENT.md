@@ -43,7 +43,20 @@ Do not introduce alternate frameworks (e.g., Prisma, NextAuth, Firebase). Stay w
 - **Follow existing naming** — check neighboring files and packages for conventions
 - **Meaningful method names** — Avoid `run_...` or `do_...` prefixes. Methods clearly execute; use verbs that describe the action (e.g. `verify_server`, `bootstrap_server`, not `run_bootstrap` or `do_verify`).
 - **Error handling**: Use custom exceptions from `chutes_common.exceptions` or package-specific `exceptions.py`; avoid bare `except`
+- **Single return per method** — Use one return at the end of each method with a clear path. Compute values first, then build the return. Avoid multiple early returns that scatter logic and make debugging harder.
+- **Typed models over dicts** — Do not use arbitrary dictionaries to represent data. Use classes (dataclasses, Pydantic models) that define the structure. Dicts make changes hard to track and hide data contracts.
+- **Classmethods for construction from other types** — Define conversion from one data type to another as classmethods on the target type. Keeps conversion logic in one place, clarifies input/output contracts, and documents the expected input format.
 
+## Unit Testing
+
+- **Never mock the module under test** — Do not patch functions, classes, or methods inside the module you are testing without explicit approval. Mock external dependencies (subprocess, HTTP, filesystem) at the boundary where they are used.
+- **Reusable fixtures with valid defaults** — Use fixtures that provide realistic, valid default behavior for external dependencies. Fixtures should be reusable across tests in the same domain.
+- **Fixtures live in `tests/<package>/fixtures/`** — Split fixtures from test modules. Add domain-specific modules (e.g. `tests/chutes-miner/fixtures/k8s_fixtures.py`, `tests/chutes-agent/fixtures/agent_fixtures.py`) and import from `conftest.py` or test modules as needed.
+- **`autouse=True` for process/host-affecting mocks** — Mock subprocess execution, network calls, and anything that could alter the host or have side effects. Use `autouse=True` on these fixtures so tests never accidentally hit real system calls.
+- **No real sleeps or timeouts in unit tests** — Use `await asyncio.sleep(0)` to yield to the event loop when needed; never `sleep(0.1)` or similar. Mock timeouts, or use events/futures for synchronization.
+- **Patch shared system deps at the source** — For dependencies like `asyncio.create_subprocess_exec`, patch at the module level (`asyncio.create_subprocess_exec`) so one fixture covers all consumers. Avoid per-module use-site patches that must be updated whenever new code uses the same dependency.
+- **Test isolation** — Each test must be independent; avoid shared mutable state between tests.
+- **One behavior per test** — Each test should verify a single behavior or outcome; split complex scenarios into multiple tests.
 
 ## Architecture Overview
 
