@@ -62,7 +62,7 @@ Do not introduce alternate frameworks (e.g., Prisma, NextAuth, Firebase). Stay w
 
 | Package | Purpose |
 |---------|---------|
-| **chutes-miner** | Miner API: server/inventory, websocket to validator, registry auth, Gepetto (chute management). Core mining logic. |
+| **chutes-miner** | Miner API: server/inventory, websocket to validator, registry auth, Gepetto (chute management). Shared registration/verification in `chutes_miner.common`. Core mining logic. |
 | **chutes-miner-cli** | CLI for miner ops: `add-node`, `sync-kubeconfig`, TEE helpers. |
 | **chutes-agent** | Agent on GPU nodes: monitors chutes, exposes kubeconfig/config. Runs on each GPU server. |
 | **chutes-monitor** | Monitors chutes in member clusters. |

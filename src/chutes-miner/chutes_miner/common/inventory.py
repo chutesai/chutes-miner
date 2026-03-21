@@ -76,25 +76,27 @@ async def check_validator_inventory(
             break
 
     if not matching:
-        return InventoryCheckResult.NOT_FOUND
+        result = InventoryCheckResult.NOT_FOUND
+    else:
+        existing_ip = matching.get("ip_address") or matching.get("host")
+        existing_agent_port = matching.get("agent_port", 32000)
+        existing_attestation_port = matching.get("attestation_port") or matching.get(
+            "verification_port", 30443
+        )
 
-    existing_ip = matching.get("ip_address") or matching.get("host")
-    existing_agent_port = matching.get("agent_port", 32000)
-    existing_attestation_port = matching.get("attestation_port") or matching.get(
-        "verification_port", 30443
-    )
+        if (
+            existing_ip == ip_address
+            and existing_agent_port == agent_port
+            and existing_attestation_port == attestation_port
+        ):
+            result = InventoryCheckResult.MATCH
+        else:
+            logger.warning(
+                f"Server {server_name} exists in validator inventory but config differs: "
+                f"expected ip={ip_address} agent_port={agent_port} attestation_port={attestation_port}, "
+                f"got ip={existing_ip} agent_port={existing_agent_port} "
+                f"attestation_port={existing_attestation_port}"
+            )
+            result = InventoryCheckResult.CONFLICT
 
-    if (
-        existing_ip == ip_address
-        and existing_agent_port == agent_port
-        and existing_attestation_port == attestation_port
-    ):
-        return InventoryCheckResult.MATCH
-
-    logger.warning(
-        f"Server {server_name} exists in validator inventory but config differs: "
-        f"expected ip={ip_address} agent_port={agent_port} attestation_port={attestation_port}, "
-        f"got ip={existing_ip} agent_port={existing_agent_port} "
-        f"attestation_port={existing_attestation_port}"
-    )
-    return InventoryCheckResult.CONFLICT
+    return result
