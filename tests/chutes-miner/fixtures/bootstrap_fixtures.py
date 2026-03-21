@@ -216,6 +216,8 @@ def mock_k8s_operator(mock_graval_service, mock_pod):
     _mock_operator.watch_pods.side_effect = [
         [WatchEvent(type=WatchEventType.MODIFIED, object=mock_pod)]
     ]
+    # Port discovery: TEE verification uses get_service_node_port for attestation port
+    _mock_operator.get_service_node_port.return_value = 30443
     return _mock_operator
 
 @pytest.fixture

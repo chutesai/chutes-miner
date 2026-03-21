@@ -11,7 +11,7 @@
 - **Key files**:
   - `src/chutes-miner/chutes_miner/gepetto.py` -- current scheduler/reconciler (~2200 lines)
   - `src/chutes-miner/chutes_miner/api/server/router.py` -- server registration (add-node)
-  - `src/chutes-miner/chutes_miner/common/verification.py` -- GraVal/TEE verification, hardcoded port 30443
+  - `src/chutes-miner/chutes_miner/common/verification.py` -- GraVal/TEE verification, attestation port from `attestation-service-external`
   - `src/chutes-miner/chutes_miner/api/k8s/operator.py` -- SingleCluster/MultiCluster K8s operators
   - `src/chutes-miner/chutes_miner/api/socket_client.py` -- WebSocket connection to validator, publishes to Redis
   - `src/chutes-miner/chutes_miner/api/redis_pubsub.py` -- Redis pubsub listener, dispatches events to handlers
@@ -29,7 +29,7 @@
 5. **Dual-path port configuration**:
   - Non-TEE: Ports configured via Helm values / Ansible vars. Miners provide custom ports in inventory, run playbooks, and services are created with the correct NodePorts.
   - TEE: Charts are pre-baked into the VM image and ports aren't known at build time. Ports must be configurable at first boot -- either by modifying static manifests, editing existing K8s manifests, or upgrading charts with custom values during first-boot provisioning.
-6. **Port discovery via K8s service labels**: Rather than passing ports through config/env vars, the K8s operator queries services in each cluster by a well-known label to discover actual NodePort values. Works across all topologies -- the operator resolves ports for whichever cluster it's interacting with (self or remote). The cluster is the source of truth for its own ports.
+6. **Port discovery via well-known service names**: Rather than passing ports through config/env vars, the K8s operator looks up services by name (e.g. `agent`, `attestation-service-external`) to discover NodePort values. Agent in `chutes` namespace; attestation in `attestation-system`. Works across all topologies -- the operator resolves ports for whichever cluster it's interacting with.
 
 ---
 
@@ -45,7 +45,7 @@
 - **Common module**: Shared verification and bootstrap flow in `chutes_miner/common/`. Miner API adds track_server (DB) and monitoring via `api/server/util.py`; registration API uses validator inventory as state. Both consume the shared logic.
 - **Lightweight registration API**: A small API endpoint that accepts hotkey, server name, and GPU config from the VM guest (sek8s). Returns success/conflict/error so the guest can handle fail-fast shutdown (k3s cannot shut down the VM from inside the cluster). Guest-side logic lives in sek8s.
 - **chutes-api changes** (external repo): Add optional `cluster_name` query parameter to miner-facing endpoints. Scopes responses to resources for that cluster under the hotkey. Omitting preserves existing behavior. Minimal and backward-compatible.
-- **Port discovery via K8s service labels**: K8s operator queries services by label to discover NodePort values per cluster. Works across all topologies.
+- **Port discovery via well-known service names**: K8s operator reads services by name (`agent`, `attestation-service-external`) to get NodePort values per cluster. Works across all topologies.
 - **NodeArgs / server advertisement**: Add `agent_port` and `attestation_port` fields with backward-compatible defaults (32000, 30443). No port range in the schema -- the scheduler knows its range internally; job ports come from the workload itself during verification with the validator.
 - **No schema migrations**: No Postgres in standalone. Port fields on the server record are a chutes-api concern.
 
@@ -61,7 +61,7 @@ The final implementation needs to support the following scenarios:
 
 Additional features that need to be supported:
 
-1. Configurable ports for agent (currently 32000) and attestation proxy (currently 30443) to support multiple servers behind NAT. Port discovery is done via K8s service labels so the operator resolves ports per-cluster regardless of topology.
+1. Configurable ports for agent (currently 32000) and attestation proxy (currently 30443) to support multiple servers behind NAT. Port discovery uses well-known service names (`agent`, `attestation-service-external`) so the operator resolves ports per-cluster regardless of topology.
 2. NAT port range isolation: each standalone VM behind NAT is assigned a predefined ephemeral port range (subset of 32000+ NodePort range). The standalone scheduler only allocates NodePorts within its assigned range so NAT routing works correctly.
 
 ---
@@ -84,10 +84,24 @@ Additional features that need to be supported:
 1. **Common module** -- Shared registration logic in `chutes_miner/common/`: verification (GraVal/TEE), bootstrap flow (`verify_server`), inventory check. Caller handles tracking: miner API does `track_server` + monitoring before `verify_server`; registration API uses validator inventory. `verify_server` is verification-only; `bootstrap_server` is the miner-API wrapper that does track + monitor + verify. Server tracking lives in `api/server/util.py`.
 2. **Lightweight registration API** -- A small API endpoint that accepts hotkey, server name, and GPU config from the VM guest. Returns success/conflict/error so the guest (managed in sek8s) can handle fail-fast shutdown. Guest-side logic lives in sek8s, not this repo.
 3. **Gepetto-lite** -- `src/chutes-miner/chutes_miner/gepetto_lite.py` (or `standalone/gepetto_lite.py`). Full scheduling feature parity: reconciliation, autoscaling, preemption, activator, pubsub. Cluster-scoped API queries via `cluster_name`. Port-range-aware NodePort allocation for NAT environments.
-4. **K8s operator changes** -- `src/chutes-miner/chutes_miner/api/k8s/operator.py`: MultiClusterK8sOperator detects local cluster and uses in-cluster kubeconfig (Scenario 3). Port discovery via K8s service labels across all operator types.
+4. **K8s operator changes** -- `src/chutes-miner/chutes_miner/api/k8s/operator.py`: MultiClusterK8sOperator detects local cluster and uses in-cluster kubeconfig (Scenario 3). Port discovery via well-known service names (`get_service_node_port`) across all operator types.
 5. **Helm chart** -- `charts/chutes-executor/`: Redis, gepetto-lite, registry. No Postgres, no agent (only needed for central control coordination), no attestation proxy (static manifest in VM). Service NodePorts set via Helm values (non-TEE) or via helm upgrade / manifest patching at first boot (TEE where ports aren't known at build time). ConfigMap provides the job NodePort range to gepetto-lite.
 6. **NodeArgs / server advertisement contract** -- Add `agent_port` and `attestation_port` fields with backward-compatible defaults (32000, 30443). No port range in the schema -- scheduler knows its range internally; job ports come from the workload during verification.
-7. **Verification module updates** -- `src/chutes-miner/chutes_miner/common/verification.py`: replace hardcoded port 30443 with value resolved from K8s service label discovery.
+7. **Verification module updates** -- `src/chutes-miner/chutes_miner/common/verification.py`: replace hardcoded port 30443 with value from `attestation-service-external` in `attestation-system` namespace.
+
+---
+
+## Implementation Phases
+
+| Phase | Scope | Status |
+|-------|-------|--------|
+| 1 | Registration module extraction: shared logic in `chutes_miner.common`, miner API consumes it. | Done |
+| 2 | Verification: port discovery via K8s labels, replace hardcoded 30443. | Done |
+| 3 | K8s operator: MultiClusterK8sOperator local-cluster detection, in-cluster kubeconfig. | Pending |
+| 4 | Chart renames: chutes-miner → chutes-control, chutes-miner-gpu → chutes-gpu. | Pending |
+| 5 | Gepetto-lite: standalone scheduler with cluster-scoped API, port range. | Pending |
+| 6 | chutes-executor chart: Redis, gepetto-lite, registry. No Postgres. | Pending |
+| 7 | **Lightweight registration API**: API endpoint for VM guest (sek8s). **Includes** in-memory Server/GPU path for `verify_server` (no DB persistence) so the registration API can run verification and advertise to the validator without Postgres. Self-contained implementation. | Pending |
 
 ---
 
@@ -98,7 +112,7 @@ Additional features that need to be supported:
 - Gepetto-lite allocates NodePorts outside the configured range, causing NAT routing failures for VMs behind NAT
 - The registration API is not idempotent -- repeated calls with the same config produce errors or duplicate entries
 - The K8s operator fails to resolve the correct kubeconfig when the control node is also a GPU node (Scenario 3), causing deployment failures
-- Port discovery fails silently -- if a service label is missing, the system should error explicitly rather than fall back to a wrong port
+- Port discovery fails silently -- if a service is missing, the system should error explicitly rather than fall back to a wrong port
 - The chutes-api `cluster_name` parameter, when omitted, changes existing behavior for current miners
 - Gepetto-lite loses validator events during restart/reconnect (same reliability expectations as Gepetto)
 - The standalone chart requires Postgres to function
@@ -113,6 +127,6 @@ Additional features that need to be supported:
 - **Scenario 3 (control as GPU)**: Opt-in. Requires running chutes-agent on the control node and labeling it appropriately. Existing control-only deployments are unaffected.
 - **TEE VM integration**: Requires coordinated changes in sek8s for first-boot port configuration and guest-side registration/fail-fast logic. The chutes-miner side provides the registration API; sek8s consumes it.
 - **Registration module refactor**: Extracting registration into a shared module changes internal code organization but no external behavior. Should be verified against existing add-node flows.
-- **Port discovery rollout**: K8s service labels for port discovery need to be added to existing charts (`chutes-gpu` services) for the operator to resolve ports. This can be added as a non-breaking label addition.
+- **Port discovery rollout**: Uses well-known service names (`agent` in `chutes`, `attestation-service-external` in `attestation-system`). When a service has multiple ports, match by ServicePort.name (e.g. `https` for attestation). No chart changes needed for agent; attestation manifest in VM (sek8s/other repo) must use service name and port name `https`.
 - **No feature flags needed**: Standalone vs multi-cluster is determined by which chart is deployed, not runtime flags.
 

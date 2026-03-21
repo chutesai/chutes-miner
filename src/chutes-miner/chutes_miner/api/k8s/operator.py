@@ -48,6 +48,7 @@ from chutes_miner.api.k8s.constants import (
     CHUTE_CODE_CM_PREFIX,
     CHUTE_DEPLOY_PREFIX,
     CHUTE_SVC_PREFIX,
+    DEFAULT_ATTESTATION_PORT,
     GRAVAL_JOB_PREFIX,
     GRAVAL_SVC_PREFIX,
 )
@@ -984,6 +985,45 @@ class K8sOperator(abc.ABC):
     def _delete_job(self, name, namespace=settings.namespace):
         raise NotImplementedError()
 
+    @abc.abstractmethod
+    def _get_core_client_for_context(
+        self, cluster_or_node_name: Optional[str]
+    ) -> CoreV1Api:
+        """Return CoreV1Api client for the given cluster/node context."""
+        raise NotImplementedError()
+
+    def get_service_node_port(
+        self,
+        service_name: str,
+        cluster_or_node_name: Optional[str] = None,
+        *,
+        port_name: Optional[str] = None,
+        default: int = DEFAULT_ATTESTATION_PORT,
+        namespace: Optional[str] = None,
+    ) -> int:
+        """
+        Return NodePort for a well-known service by name.
+        When port_name is set, match by ServicePort.name (e.g. "https").
+        When omitted, return the first port with a NodePort.
+        Falls back to default if service not found or no matching port.
+        """
+        ns = namespace or settings.namespace
+        node_port = default
+        try:
+            client = self._get_core_client_for_context(cluster_or_node_name)
+            svc = client.read_namespaced_service(name=service_name, namespace=ns)
+            for port in svc.spec.ports or []:
+                if not port.node_port:
+                    continue
+                if port_name is None or getattr(port, "name", None) == port_name:
+                    node_port = port.node_port
+                    break
+        except ApiException as exc:
+            logger.debug(
+                f"Port discovery for service {service_name}/{ns} failed: {exc}; using default {default}"
+            )
+        return node_port
+
     async def create_code_config_map(self, chute: Chute, force=False) -> None:
         """Create a ConfigMap to store the chute code."""
         try:
@@ -1716,6 +1756,11 @@ class SingleClusterK8sOperator(K8sOperator):
             grace_period_seconds=settings.chute_shutdown_time_seconds,
         )
 
+    def _get_core_client_for_context(
+        self, cluster_or_node_name: Optional[str]
+    ) -> CoreV1Api:
+        return k8s_core_client()
+
     def delete_config_map(self, name, namespace=settings.namespace, timeout_seconds: int = 60):
         k8s_core_client().delete_namespaced_config_map(
             name=name, namespace=namespace, _request_timeout=timeout_seconds
@@ -2175,6 +2220,16 @@ class MultiClusterK8sOperator(K8sOperator):
                 )
             else:
                 raise
+
+    def _get_core_client_for_context(
+        self, cluster_or_node_name: Optional[str]
+    ) -> CoreV1Api:
+        if not cluster_or_node_name:
+            raise ValueError(
+                "cluster_or_node_name is required in multi-cluster; "
+                "cannot arbitrarily choose a cluster"
+            )
+        return self._manager.get_core_client(cluster_or_node_name)
 
     def _deploy_service(
         self, service, server_name, namespace=settings.namespace, timeout_seconds: int = 60

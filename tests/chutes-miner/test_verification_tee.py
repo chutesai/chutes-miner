@@ -72,6 +72,18 @@ def mock_validator_lookup():
         yield
 
 
+@pytest.fixture(autouse=True)
+def mock_port_discovery():
+    """Mock K8sOperator.get_service_node_port to avoid real K8s in unit tests."""
+    with patch(
+        "chutes_miner.common.verification.K8sOperator"
+    ) as mock_k8s_op:
+        mock_op_instance = Mock()
+        mock_op_instance.get_service_node_port.return_value = 30443
+        mock_k8s_op.return_value = mock_op_instance
+        yield
+
+
 async def gather_gpu_info_tee(
     *,
     server_id: str,

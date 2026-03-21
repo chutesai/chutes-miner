@@ -32,7 +32,14 @@ from chutes_miner.api.exceptions import (
     TEEBootstrapFailure,
     VerificationFailure,
 )
-from chutes_miner.api.k8s.constants import GRAVAL_JOB_PREFIX, GRAVAL_SVC_PREFIX
+from chutes_miner.api.k8s.constants import (
+    ATTESTATION_NAMESPACE,
+    ATTESTATION_PORT_NAME,
+    ATTESTATION_SERVICE_NAME,
+    DEFAULT_ATTESTATION_PORT,
+    GRAVAL_JOB_PREFIX,
+    GRAVAL_SVC_PREFIX,
+)
 from chutes_miner.api.k8s.operator import K8sOperator
 from chutes_miner.api.util import sse_message
 from loguru import logger
@@ -658,6 +665,17 @@ class GravalVerificationStrategy(VerificationStrategy):
 
 
 class TEEVerificationStrategy(VerificationStrategy):
+    @property
+    def _attestation_port(self) -> int:
+        """Attestation port from attestation-service-external NodePort, or default."""
+        return K8sOperator().get_service_node_port(
+            ATTESTATION_SERVICE_NAME,
+            self.node.metadata.name,
+            port_name=ATTESTATION_PORT_NAME,
+            default=DEFAULT_ATTESTATION_PORT,
+            namespace=ATTESTATION_NAMESPACE,
+        )
+
     @asynccontextmanager
     async def _attestation_session(self):
         """
@@ -688,7 +706,9 @@ class TEEVerificationStrategy(VerificationStrategy):
     async def _verify_attestation_service(self):
         try:
             async with self._attestation_session() as http_session:
-                async with http_session.get(f"https://{self.node_ip}:30443/server/health"):
+                async with http_session.get(
+                    f"https://{self.node_ip}:{self._attestation_port}/server/health"
+                ):
                     logger.success(f"Verified attestation service for {self.server.name}")
                     await self.emit_message(
                         f"Verified attestation service is available for {self.server.name}[{self.node_ip}]"
@@ -713,7 +733,7 @@ class TEEVerificationStrategy(VerificationStrategy):
 
         except Exception as exc:
             raise TEEBootstrapFailure(
-                f"Failed to fetch devices from attestation service: {self.node_ip}:30443/server/devices: {exc}"
+                f"Failed to fetch devices from attestation service: {self.node_ip}:{self._attestation_port}/server/devices: {exc}"
             )
 
         return devices
@@ -733,7 +753,8 @@ class TEEVerificationStrategy(VerificationStrategy):
         async with self._attestation_session() as http_session:
             headers, _ = sign_request(purpose="attest")
             async with http_session.get(
-                f"https://{self.node_ip}:30443/server/devices", headers=headers
+                f"https://{self.node_ip}:{self._attestation_port}/server/devices",
+                headers=headers,
             ) as resp:
                 devices = await resp.json()
                 logger.success(f"Retrieved {len(devices)} GPUs from {self.server.name}.")
@@ -799,7 +820,7 @@ class TEEVerificationStrategy(VerificationStrategy):
                     gpus[idx].model_short_ref,
                     device_index=idx,
                     verification_host=self.node_ip,
-                    verification_port=30443,
+                    verification_port=self._attestation_port,
                 )
                 for idx in range(len(gpus))
             ]
