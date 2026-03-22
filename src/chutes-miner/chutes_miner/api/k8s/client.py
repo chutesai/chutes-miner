@@ -1,9 +1,32 @@
+import os
 from functools import lru_cache
 from typing import Optional
+from chutes_miner.api.config import k8s_app_client, k8s_batch_client, k8s_core_client
 from chutes_miner.api.k8s.config import KubeConfig, MultiClusterKubeConfig
 from chutes_miner.api.k8s.exceptions import KubeContextNotFound, KubeconfigNotFound
 from kubernetes import client, config
 from loguru import logger
+
+CONTROL_PLANE_LABEL = "node-role.kubernetes.io/control-plane"
+
+
+@lru_cache(maxsize=1)
+def _get_local_cluster_context() -> Optional[str]:
+    """
+    Return the context name for the cluster we're running in (Scenario 3: control-as-GPU).
+    Inferred from the control-plane node name when running in-cluster.
+    Cached for process lifetime; node name does not change at runtime.
+    """
+    result = None
+    if os.getenv("KUBERNETES_SERVICE_HOST"):
+        try:
+            core = k8s_core_client()
+            nodes = core.list_node(label_selector=CONTROL_PLANE_LABEL)
+            if nodes.items:
+                result = nodes.items[0].metadata.name
+        except Exception:
+            pass
+    return result
 
 
 class KubernetesMultiClusterClientManager:
@@ -15,7 +38,14 @@ class KubernetesMultiClusterClientManager:
         self.multi_config = MultiClusterKubeConfig()
         self.default_timeout = default_timeout
 
+    def _use_incluster_for_context(self, context_name: str) -> bool:
+        """True when context refers to our cluster (Scenario 3: control-as-GPU)."""
+        local = _get_local_cluster_context()
+        return local is not None and context_name == local
+
     def get_api_client(self, context_name, timeout: Optional[int] = None) -> client.ApiClient:
+        if self._use_incluster_for_context(context_name):
+            return k8s_core_client().api_client
         _client = None
         try:
             _client = self._get_client_for_context(context_name, timeout=timeout)
@@ -25,6 +55,8 @@ class KubernetesMultiClusterClientManager:
         return _client
 
     def get_app_client(self, context_name, timeout: Optional[int] = None) -> client.AppsV1Api:
+        if self._use_incluster_for_context(context_name):
+            return k8s_app_client()
         _client = None
         try:
             api_client = self._get_client_for_context(context_name, timeout=timeout)
@@ -40,6 +72,8 @@ class KubernetesMultiClusterClientManager:
         kubeconfig: Optional[KubeConfig] = None,
         timeout: Optional[int] = None,
     ) -> client.CoreV1Api:
+        if self._use_incluster_for_context(context_name):
+            return k8s_core_client()
         _client = None
         try:
             api_client = self._get_client_for_context(context_name, kubeconfig, timeout=timeout)
@@ -52,6 +86,8 @@ class KubernetesMultiClusterClientManager:
     def get_batch_client(
         self, context_name: str, timeout: Optional[int] = None
     ) -> client.BatchV1Api:
+        if self._use_incluster_for_context(context_name):
+            return k8s_batch_client()
         _client = None
         try:
             api_client = self._get_client_for_context(context_name, timeout=timeout)

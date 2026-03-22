@@ -986,9 +986,7 @@ class K8sOperator(abc.ABC):
         raise NotImplementedError()
 
     @abc.abstractmethod
-    def _get_core_client_for_context(
-        self, cluster_or_node_name: Optional[str]
-    ) -> CoreV1Api:
+    def _get_core_client_for_context(self, cluster_or_node_name: Optional[str]) -> CoreV1Api:
         """Return CoreV1Api client for the given cluster/node context."""
         raise NotImplementedError()
 
@@ -1756,9 +1754,7 @@ class SingleClusterK8sOperator(K8sOperator):
             grace_period_seconds=settings.chute_shutdown_time_seconds,
         )
 
-    def _get_core_client_for_context(
-        self, cluster_or_node_name: Optional[str]
-    ) -> CoreV1Api:
+    def _get_core_client_for_context(self, cluster_or_node_name: Optional[str]) -> CoreV1Api:
         return k8s_core_client()
 
     def delete_config_map(self, name, namespace=settings.namespace, timeout_seconds: int = 60):
@@ -2221,9 +2217,7 @@ class MultiClusterK8sOperator(K8sOperator):
             else:
                 raise
 
-    def _get_core_client_for_context(
-        self, cluster_or_node_name: Optional[str]
-    ) -> CoreV1Api:
+    def _get_core_client_for_context(self, cluster_or_node_name: Optional[str]) -> CoreV1Api:
         if not cluster_or_node_name:
             raise ValueError(
                 "cluster_or_node_name is required in multi-cluster; "

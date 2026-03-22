@@ -97,7 +97,7 @@ Additional features that need to be supported:
 |-------|-------|--------|
 | 1 | Registration module extraction: shared logic in `chutes_miner.common`, miner API consumes it. | Done |
 | 2 | Verification: port discovery via K8s labels, replace hardcoded 30443. | Done |
-| 3 | K8s operator: MultiClusterK8sOperator local-cluster detection, in-cluster kubeconfig. | Pending |
+| 3 | K8s operator: MultiClusterK8sOperator local-cluster detection, in-cluster kubeconfig. | Done |
 | 4 | Chart renames: chutes-miner → chutes-control, chutes-miner-gpu → chutes-gpu. | Pending |
 | 5 | Gepetto-lite: standalone scheduler with cluster-scoped API, port range. | Pending |
 | 6 | chutes-executor chart: Redis, gepetto-lite, registry. No Postgres. | Pending |
@@ -124,7 +124,7 @@ Additional features that need to be supported:
 - **Chart renames**: `charts/chutes-miner` -> `charts/chutes-control`, `charts/chutes-miner-gpu` -> `charts/chutes-gpu`. New chart `charts/chutes-executor/` ships alongside. Renames clarify topology roles (control plane, GPU worker, standalone executor).
 - **chutes-api dependency**: The optional `cluster_name` query parameter must be deployed on the API side before standalone VMs can function. Existing miners are unaffected (parameter is optional).
 - **NodeArgs defaults**: `agent_port=32000` and `attestation_port=30443` defaults ensure existing server advertisements are backward-compatible. No migration needed for current servers.
-- **Scenario 3 (control as GPU)**: Opt-in. Requires running chutes-agent on the control node and labeling it appropriately. Existing control-only deployments are unaffected.
+- **Scenario 3 (control as GPU)**: Opt-in. Requires running chutes-agent on the control node and labeling it appropriately. Local cluster is auto-detected via control-plane node label (`node-role.kubernetes.io/control-plane`). Existing control-only deployments are unaffected.
 - **TEE VM integration**: Requires coordinated changes in sek8s for first-boot port configuration and guest-side registration/fail-fast logic. The chutes-miner side provides the registration API; sek8s consumes it.
 - **Registration module refactor**: Extracting registration into a shared module changes internal code organization but no external behavior. Should be verified against existing add-node flows.
 - **Port discovery rollout**: Uses well-known service names (`agent` in `chutes`, `attestation-service-external` in `attestation-system`). When a service has multiple ports, match by ServicePort.name (e.g. `https` for attestation). No chart changes needed for agent; attestation manifest in VM (sek8s/other repo) must use service name and port name `https`.
