@@ -25,25 +25,33 @@ DOCKER_PACKAGE_NAMES := $(notdir $(DOCKER_PACKAGES))
 # Combine and get unique package names
 ALL_PACKAGE_NAMES := $(sort $(SRC_PACKAGE_NAMES) $(DOCKER_PACKAGE_NAMES))
 
+# Chart names (for sign-charts targeting)
+ALL_CHART_NAMES := $(notdir $(shell find charts -maxdepth 1 -type d ! -path charts 2>/dev/null | sort))
+
 # Target specific project or all projects
 ifeq ($(words $(MAKECMDGOALS)),2)
 	TARGET := $(word 2,$(MAKECMDGOALS))
 endif
 
 ifdef TARGET
-	# Check if target exists in either src or docker
 	ifneq ($(filter $(TARGET),$(ALL_PACKAGE_NAMES)),)
-		TARGET_NAMES := ${TARGET}
-	else
-		$(error Project ${TARGET} not found in ${SRC_DIR} or ${DOCKER_DIR})
+		TARGET_NAMES := $(TARGET)
+	endif
+	ifneq ($(filter $(TARGET),$(ALL_CHART_NAMES)),)
+		CHART_TARGET_NAMES := $(TARGET)
+	endif
+	# Target must be either a package or a chart
+	ifeq ($(filter $(TARGET),$(ALL_PACKAGE_NAMES) $(ALL_CHART_NAMES)),)
+		$(error $(TARGET) not found in ${SRC_DIR}, ${DOCKER_DIR}, or charts/)
 	endif
 else
 	TARGET_NAMES := $(ALL_PACKAGE_NAMES)
 endif
 
-# Prevent Make from trying to run package names as commands
-.PHONY: $(ALL_PACKAGE_NAMES)
-$(ALL_PACKAGE_NAMES):
+# Prevent Make from trying to run package/chart names as commands (dedupe: some names exist in both)
+ALL_TARGET_NAMES := $(sort $(ALL_PACKAGE_NAMES) $(ALL_CHART_NAMES))
+.PHONY: $(ALL_TARGET_NAMES)
+$(ALL_TARGET_NAMES):
 	@:
 
 .DEFAULT_GOAL := help
@@ -56,6 +64,7 @@ include makefiles/lint.mk
 include makefiles/local.mk
 include makefiles/test.mk
 include makefiles/images.mk
+include makefiles/charts.mk
 
 .PHONY: list-packages
 list-packages: ##@other List all packages in the monorepo

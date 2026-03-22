@@ -71,9 +71,9 @@ tag:
 		echo ; \
 	done
 
-.PHONY: sign
-sign: ##@images Sign docker images from the build step for Parachutes repo (set COSIGN_PASSWORD once to avoid per-sign prompts)
-sign:
+.PHONY: sign-images
+sign-images: ##@images Sign docker images from the build step for Parachutes repo (set COSIGN_PASSWORD once to avoid per-sign prompts)
+sign-images:
 	@if [ -z "$$COSIGN_PRIVATE_KEY" ]; then \
 		echo "Error: COSIGN_PRIVATE_KEY environment variable is not set"; \
 		echo "Please set COSIGN_PRIVATE_KEY to the path of the Cosign private key (e.g., ~/.cosign/cosign.key)"; \

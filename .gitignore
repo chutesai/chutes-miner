@@ -14,6 +14,7 @@ test*.py
 # Distribution / packaging
 .Python
 build/
+.helm-repo-worktree/
 develop-eggs/
 dist/
 downloads/
