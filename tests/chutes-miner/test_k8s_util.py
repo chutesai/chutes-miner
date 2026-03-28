@@ -88,3 +88,37 @@ def test_build_chute_job_skips_code_volume_for_newer_rc_version(version):
 
     assert all(volume.name != "code" for volume in volumes)
     assert all(mount.name != "code" for mount in mounts)
+
+
+def test_build_chute_job_skips_code_volume_for_tee_chute():
+    chute, server, service = _make_inputs("0.3.0", tee=True)
+    job = build_chute_job(
+        deployment_id="deploy-1",
+        chute=chute,
+        server=server,
+        service=service,
+        gpu_uuids=["UUID-1"],
+        probe_port=8000,
+    )
+    volumes = job.spec.template.spec.volumes
+    mounts = job.spec.template.spec.containers[0].volume_mounts
+
+    assert all(volume.name != "code" for volume in volumes)
+    assert all(mount.name != "code" for mount in mounts)
+
+
+def test_build_chute_job_attaches_code_volume_for_legacy_non_tee():
+    chute, server, service = _make_inputs("0.3.0", tee=False)
+    job = build_chute_job(
+        deployment_id="deploy-1",
+        chute=chute,
+        server=server,
+        service=service,
+        gpu_uuids=["UUID-1"],
+        probe_port=8000,
+    )
+    volumes = job.spec.template.spec.volumes
+    mounts = job.spec.template.spec.containers[0].volume_mounts
+
+    assert any(volume.name == "code" for volume in volumes)
+    assert any(mount.name == "code" for mount in mounts)
