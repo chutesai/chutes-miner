@@ -6,12 +6,15 @@ kind: ClusterRole
 metadata:
   name: miner
 rules:
-  - apiGroups: ["*"]
-    resources: ["*"]
-    verbs: ["get", "list", "watch"]
   - apiGroups: [""]
     resources: ["nodes"]
-    verbs: ["patch"]
+    verbs: ["get", "list", "watch", "patch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch"]
 
 ---
 # ClusterRoleBinding for read-only access
