@@ -7,7 +7,7 @@ metadata:
   name: miner
 rules:
   - apiGroups: [""]
-    resources: ["nodes"]
+    resources: ["nodes", "nodes/status"]
     verbs: ["get", "list", "watch", "patch"]
   - apiGroups: [""]
     resources: ["pods"]
@@ -42,6 +42,9 @@ rules:
   - apiGroups: [""]
     resources: ["pods", "services", "configmaps"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/log", "pods/status"]
+    verbs: ["get"]
   - apiGroups: ["apps"]
     resources: ["deployments"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
@@ -56,6 +59,37 @@ kind: RoleBinding
 metadata:
   name: miner
   namespace: chutes
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: miner
+subjects:
+  - kind: User
+    name: miner
+    apiGroup: rbac.authorization.k8s.io
+
+---
+# Role for read-only + log access in gpu-operator namespace
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: miner
+  namespace: gpu-operator
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log", "pods/status"]
+    verbs: ["get"]
+
+---
+# RoleBinding for gpu-operator namespace
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: miner
+  namespace: gpu-operator
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
