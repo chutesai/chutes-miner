@@ -323,7 +323,7 @@ async def test_wait_for_deletion_no_pods(mock_k8s_core_client):
 
 
 @pytest.mark.asyncio
-async def test_wait_for_deletion_with_pods(mock_k8s_core_client, mock_watch):
+async def test_wait_for_deletion_with_pods(mock_k8s_core_client, mock_k8s_api_client, mock_watch):
     """Test wait_for_deletion when pods exist and then get deleted."""
     # Setup mock to return pods initially, then empty
     pod_list_with_pods = MagicMock()
@@ -355,7 +355,7 @@ async def test_wait_for_deletion_with_pods(mock_k8s_core_client, mock_watch):
 
 
 @pytest.mark.asyncio
-async def test_wait_for_deletion_with_timeout(mock_k8s_core_client, mock_watch):
+async def test_wait_for_deletion_with_timeout(mock_k8s_core_client, mock_k8s_api_client, mock_watch):
     """Test wait_for_deletion when pods exist and then get deleted."""
     # Setup mock to return pods initially, then empty
     pod_list_with_pods = MagicMock()
@@ -430,6 +430,7 @@ async def test_create_code_config_map_success(mock_k8s_core_client):
     chute.version = "1.0.0"
     chute.filename = "app.py"
     chute.code = "print('Hello World')"
+    chute.tee = False
 
     # Call the function
     await k8s.create_code_config_map(chute)
@@ -454,6 +455,7 @@ async def test_create_code_config_map_conflict(mock_k8s_core_client):
     chute.version = "1.0.0"
     chute.filename = "app.py"
     chute.code = "print('Hello World')"
+    chute.tee = False
 
     # Call the function - should not raise exception
     await k8s.create_code_config_map(chute)
@@ -475,6 +477,7 @@ async def test_create_code_config_map_other_error(mock_k8s_core_client):
     chute.version = "1.0.0"
     chute.filename = "app.py"
     chute.code = "print('Hello World')"
+    chute.tee = False
 
     # Call the function and expect exception
     with pytest.raises(ApiException):

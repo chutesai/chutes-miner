@@ -103,7 +103,8 @@ def mock_node(mock_gpus):
     node.metadata.name = "test-node-name"
     node.metadata.labels = {
         "nvidia.com/gpu.count": str(len(mock_gpus)),
-        "gpu-short-ref": "rtx4090"
+        "gpu-short-ref": "rtx4090",
+        "chutes/external-ip": "192.168.0.1",
     }
     return node
 
@@ -148,8 +149,8 @@ def mock_kubeconfig():
 def mock_gpus():
     """Create mock GPU list"""
     return [
-        MockGPU("gpu_1", {"name": "RTX 4090"}),
-        MockGPU("gpu_2", {"name": "RTX 4090"}),
+        MockGPU("gpu_1", {"name": "RTX 4090", "memory": 24576, "clock_rate": 2.52}),
+        MockGPU("gpu_2", {"name": "RTX 4090", "memory": 24576, "clock_rate": 2.52}),
     ]
 
 
@@ -161,12 +162,13 @@ def mock_gpu():
 def mock_server():
     """Create mock Server object"""
     _mock_server = Mock(spec=Server)
-    _mock_server.server_id="test-node-uid-123",
-    _mock_server.validator="test_validator",
-    _mock_server.cpu_per_gpu=8,
-    _mock_server.memory_per_gpu=32
+    _mock_server.server_id = "test-node-uid-123"
+    _mock_server.validator = "test_validator"
+    _mock_server.cpu_per_gpu = 8
+    _mock_server.memory_per_gpu = 32
     _mock_server.ip_address = "192.168.0.1"
-    _mock_server.verification_prot = "32689"
+    _mock_server.verification_port = 32689
+    _mock_server.configure_mock(name="test-node-name")
 
     return _mock_server
 

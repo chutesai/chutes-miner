@@ -15,6 +15,12 @@ from datetime import datetime, timezone
 import json
 from dateutil.tz import tzutc
 
+@pytest.fixture(autouse=True)
+def mock_is_tee_cluster():
+    with patch("chutes_miner.api.k8s.operator._is_tee_cluster", return_value=False):
+        yield
+
+
 @pytest.fixture()
 def mock_k8s_core_client():
     # Create a list of paths where k8s_core_client is imported
@@ -102,8 +108,20 @@ def mock_k8s_batch_client():
 
 @pytest.fixture()
 def mock_k8s_api_client():
+    import_paths = ["chutes_miner.api.k8s.operator.k8s_api_client"]
+
     client = MagicMock()
+
+    patches = []
+    for path in import_paths:
+        patcher = patch(path, return_value=client)
+        patcher.start()
+        patches.append(patcher)
+
     yield client
+
+    for patcher in patches:
+        patcher.stop()
 
 # @pytest.fixture(autouse=True)
 # def mock_k8s_api_client():
