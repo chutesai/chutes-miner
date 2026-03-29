@@ -45,6 +45,10 @@ rules:
   - apiGroups: [""]
     resources: ["pods/log", "pods/status"]
     verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["miner-credentials"]
+    verbs: ["get"]
   - apiGroups: ["apps"]
     resources: ["deployments"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
@@ -90,6 +94,41 @@ kind: RoleBinding
 metadata:
   name: miner
   namespace: gpu-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: miner
+subjects:
+  - kind: User
+    name: miner
+    apiGroup: rbac.authorization.k8s.io
+
+---
+# Role for read-only + log access and miner-credentials secret in attestation-system namespace
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: miner
+  namespace: attestation-system
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log", "pods/status"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["miner-credentials"]
+    verbs: ["get"]
+
+---
+# RoleBinding for attestation-system namespace
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: miner
+  namespace: attestation-system
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
