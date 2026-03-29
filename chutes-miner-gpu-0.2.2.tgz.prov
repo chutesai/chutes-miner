@@ -1,0 +1,35 @@
+-----BEGIN PGP SIGNED MESSAGE-----
+Hash: SHA512
+
+apiVersion: v2
+appVersion: 0.1.0
+description: Helm chart for chutes.ai GPU nodes
+kubeVersion: '>=1.19.0-0'
+maintainers:
+- - email: jon@chutes.ai
+  name: Jon Durbin
+- - email: kyle@chutes.ai
+  name: Kyle Widmann
+name: chutes-miner-gpu
+type: application
+version: 0.2.2
+
+...
+files:
+  chutes-miner-gpu-0.2.2.tgz: sha256:20f8d143a445ea8fda73a539faa8b229a72f0445d90ec18f62a4f5b7958bac48
+-----BEGIN PGP SIGNATURE-----
+
+wsFcBAEBCgAQBQJpyTShCRBuiQl4UKnNyAAAW64QADJ4Svd9J2AZRfmX5CdIH7ti
+F6EJQcP4JQHQpmazyZ5ArpFDO7KcOlDGFtyzHH02RULOWXZRtEbVuWnJvU+Voj2S
+1geP7DmMG4DtQw5gLLdlxcKYID5OoTGxthJkoQqD4llfn8c9V0oST0pL2J1ObUwp
+G5hjGjTnwIJ2HPrgqO6Exz/55NMGWZ9flVkRChgDMwC8TlU+UH+gLdtJO436RzTk
+PjIZmnDrYaHLTzqygDzv/B9d+4Zz1Ow+UynouTpvNC2r6I1TdPeO2FzWfUOTO+G/
+FCufPLeYNdpuAPQ3EQwY4HtVQd6RedRzO7yjB4bYiC3NIMhFjKiFgfM0jDPONY/A
+YCACrIaN3P8MrnritY3eRmVZvaJw78PPZCbyk/lzflHAZZj8V6bbrpyKRNE7InHD
+xu05jL46WxVCOpj3VhHJAufRgJeufTw3XBVg5/MNYq9sLCxxvdqwAG69OT3fQbTC
+pBAmLP2P4XUd3pJPMWihuhDL1/OC3e3VNlrqQxePw99ZldMYSQPl7xGG+9aT5rlY
+LBdgn2bIqiP0mODU/3chXezZYeWLVlCwr7FIoGNe34JkKjx36g9187Og1A1FJJ6v
+fPBHZB095PwY5XaGGi2SZDs1J1sAbD1WUV5OTCYZqPFhq/yGY99BTOwHMswO4gZ9
+RejmeD4A5ZT4fsUrrPZM
+=6IDh
+-----END PGP SIGNATURE-----
