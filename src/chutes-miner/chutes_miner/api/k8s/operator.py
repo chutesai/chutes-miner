@@ -71,6 +71,30 @@ import yaml
 _disk_info_cache: dict[str, tuple[dict[str, float], datetime]] = {}
 _disk_info_locks: dict[str, asyncio.Lock] = {}
 
+# Cache TEE status per cluster/server name to avoid repeated DB lookups
+# during bursts of rolling updates. TEE status is set once at server
+# registration and never changes, so a long TTL is safe.
+_tee_cluster_cache: dict[str, tuple[bool, datetime]] = {}
+_TEE_CACHE_TTL = timedelta(minutes=10)
+
+
+def _is_tee_cluster(cluster_name: str) -> bool:
+    now = datetime.now(timezone.utc)
+    cached = _tee_cluster_cache.get(cluster_name)
+    if cached is not None:
+        is_tee, expiry = cached
+        if now < expiry:
+            return is_tee
+
+    with get_sync_session() as session:
+        is_tee = session.execute(
+            select(Server.is_tee).where(Server.name == cluster_name)
+        ).scalar_one_or_none()
+        result = is_tee is True
+
+    _tee_cluster_cache[cluster_name] = (result, now + _TEE_CACHE_TTL)
+    return result
+
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
@@ -330,6 +354,8 @@ class ConfigMapWorker:
         timeout_seconds: int = 60,
         force: bool = False,
     ) -> Tuple[bool, Optional[str]]:
+        if _is_tee_cluster(cluster):
+            return True, None
         cm_name = config_map.metadata.name
         client: Optional[CoreV1Api] = None
         try:
@@ -396,6 +422,8 @@ class ConfigMapWorker:
         namespace: str,
         timeout_seconds: int = 60,
     ) -> None:
+        if _is_tee_cluster(cluster):
+            return
         client = self._manager.get_core_client(cluster)
         try:
             client.delete_namespaced_config_map(
@@ -413,6 +441,8 @@ class ConfigMapWorker:
                 raise
 
     def _sync_cluster_configmaps(self, cluster_name: str) -> None:
+        if _is_tee_cluster(cluster_name):
+            return
         try:
             with get_sync_session() as session:
                 client = self._manager.get_core_client(cluster_name)
@@ -986,6 +1016,8 @@ class K8sOperator(abc.ABC):
 
     async def create_code_config_map(self, chute: Chute, force=False) -> None:
         """Create a ConfigMap to store the chute code."""
+        if chute.tee:
+            return
         try:
             config_map = self._build_code_config_map(chute)
             await self._deploy_config_map(config_map, force=force)
@@ -2241,6 +2273,8 @@ class MultiClusterK8sOperator(K8sOperator):
     def _delete_config_map_from_cluster(
         self, cluster, name, namespace=settings.namespace, timeout_seconds: int = 60
     ):
+        if _is_tee_cluster(cluster):
+            return
         client = self._manager.get_core_client(cluster)
         # Need to handle 404 per cluster so we don't break out early
         try:
@@ -2301,6 +2335,8 @@ class MultiClusterK8sOperator(K8sOperator):
         timeout_seconds: int = 60,
         force=False,
     ):
+        if _is_tee_cluster(cluster):
+            return
         try:
             self._verify_node_health(cluster)
             client = self._manager.get_core_client(cluster)

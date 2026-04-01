@@ -626,6 +626,7 @@ async def test_create_code_config_map_success(
     chute.version = "1.0.0"
     chute.filename = "app.py"
     chute.code = "print('Hello World')"
+    chute.tee = False
 
     clusters = ["test-1", "test-2", "test-3"]
     mock_redis_client.get_all_cluster_names.return_value = clusters
@@ -657,6 +658,7 @@ async def test_create_code_config_map_conflict(
     chute.version = "1.0.0"
     chute.filename = "app.py"
     chute.code = "print('Hello World')"
+    chute.tee = False
 
     clusters = ["test-1", "test-2", "test-3"]
     mock_redis_client.get_all_cluster_names.return_value = clusters
@@ -689,6 +691,7 @@ async def test_create_code_config_map_other_error(
     chute.version = "1.0.0"
     chute.filename = "app.py"
     chute.code = "print('Hello World')"
+    chute.tee = False
 
     clusters = ["test-1", "test-2", "test-3"]
     mock_redis_client.get_all_cluster_names.return_value = clusters
@@ -1061,6 +1064,7 @@ def test_delete_job_still_deletes_when_versions_diverge(
         name="job-123",
         namespace="chutes",
         propagation_policy="Foreground",
+        grace_period_seconds=180,
         _request_timeout=(5, 45),
     )
     mock_redis_client.mark_cluster_unhealthy.assert_not_called()
@@ -1071,7 +1075,7 @@ async def test_delete_preflight_uses_db_server_context_when_cache_missing(
     mock_redis_client, mock_db_session
 ):
     mock_result = MagicMock()
-    mock_result.one_or_none.return_value = ("server-1", "cluster-a")
+    mock_result.scalar_one_or_none.return_value = "cluster-a"
     mock_db_session.execute.return_value = mock_result
 
     healthy_status = MagicMock()
@@ -1091,7 +1095,7 @@ async def test_delete_preflight_uses_db_server_context_when_cache_missing(
 @pytest.mark.asyncio
 async def test_delete_preflight_blocks_when_cluster_unhealthy(mock_redis_client, mock_db_session):
     mock_result = MagicMock()
-    mock_result.one_or_none.return_value = ("server-2", "cluster-b")
+    mock_result.scalar_one_or_none.return_value = "cluster-b"
     mock_db_session.execute.return_value = mock_result
 
     unhealthy_status = MagicMock()
@@ -1112,7 +1116,7 @@ async def test_delete_preflight_blocks_when_cluster_unhealthy(mock_redis_client,
 @pytest.mark.asyncio
 async def test_delete_preflight_blocks_on_context_mismatch(mock_redis_client, mock_db_session):
     mock_result = MagicMock()
-    mock_result.one_or_none.return_value = ("server-3", "cluster-c")
+    mock_result.scalar_one_or_none.return_value = "cluster-c"
     mock_db_session.execute.return_value = mock_result
 
     mock_redis_client.get_resource_with_context.return_value = ("cluster-d", MagicMock())
@@ -1131,7 +1135,7 @@ async def test_delete_preflight_blocks_on_stale_resource(
     mock_redis_client, mock_db_session, mock_k8s_batch_client
 ):
     mock_result = MagicMock()
-    mock_result.one_or_none.return_value = ("server-4", "cluster-e")
+    mock_result.scalar_one_or_none.return_value = "cluster-e"
     mock_db_session.execute.return_value = mock_result
 
     healthy_status = MagicMock()
@@ -1164,7 +1168,7 @@ async def test_delete_preflight_allows_when_versions_match(
     mock_redis_client, mock_db_session, mock_k8s_batch_client
 ):
     mock_result = MagicMock()
-    mock_result.one_or_none.return_value = ("server-5", "cluster-f")
+    mock_result.scalar_one_or_none.return_value = "cluster-f"
     mock_db_session.execute.return_value = mock_result
 
     healthy_status = MagicMock()

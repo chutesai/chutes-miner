@@ -35,6 +35,8 @@ from chutes_miner.api.util import semcomp
 
 
 def _requires_code_volume(chute: Chute) -> bool:
+    if chute.tee:
+        return False
     version_str = chute.chutes_version or chute.version or "0.0.0"
     return semcomp(version_str, "0.3.61") < 0
 
