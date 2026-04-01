@@ -95,7 +95,7 @@ Redis is primarily used for it's pubsub functionality within the miner.  Events 
 
 #### ✅ GraVal bootstrap
 
-Chutes uses a custom c/CUDA library for validating graphics cards: https://github.com/rayonlabs/graval
+Chutes uses a custom c/CUDA library for validating graphics cards: https://github.com/chutesai/graval
 
 The TL;DR is that it uses matrix multiplications seeded by device info to verify the authenticity of a GPU, including VRAM capacity tests (95% of total VRAM must be available for matrix multiplications).
 All traffic sent to instances on chutes network are encrypted with keys that can only be decrypted by the GPU advertised.
@@ -114,11 +114,11 @@ Each docker image appears to kubelet as `[validator hotkey ss58].localregistry.c
 
 This subdomain points to 127.0.0.1 so it always loads from the registry service proxy on each GPU server via NodePort routing and local first k8s service traffic policy.
 
-The registry proxy itself is an nginx server that performs an auth subrequest to the miner API.  See the nginx configmap: https://github.com/rayonlabs/chutes-miner/blob/main/charts/templates/registry-cm.yaml
+The registry proxy itself is an nginx server that performs an auth subrequest to the miner API.  See the nginx configmap: https://github.com/chutesai/chutes-miner/blob/main/charts/templates/registry-cm.yaml
 
-The miner API code that injects the signatures is here: https://github.com/rayonlabs/chutes-miner/blob/main/api/registry/router.py
+The miner API code that injects the signatures is here: https://github.com/chutesai/chutes-miner/blob/main/api/registry/router.py
 
-Nginx then proxies the request upstream back to the validator in question (based on the hotkey as part of the subdomain), which validates the signatures and replaces those headers with basic auth that can be used with our self-hosted registry: https://github.com/rayonlabs/chutes-api/blob/main/api/registry/router.py
+Nginx then proxies the request upstream back to the validator in question (based on the hotkey as part of the subdomain), which validates the signatures and replaces those headers with basic auth that can be used with our self-hosted registry: https://github.com/chutesai/chutes-api/blob/main/api/registry/router.py
 
 *__this is installed and configured automatically when deploying via helm charts__*
 
@@ -168,7 +168,7 @@ Before starting, you must either disable all layers of firewalls (if you like to
 
 You'll need one non-GPU server (4 cores, 32gb ram minimum) responsible for running k3s, postgres, redis, gepetto, and API components (not chutes), and __*ALL*__ of the GPU servers 😄 (just kidding of course, you can use as many or as few as you wish)
 
-[The list of supported GPUs can be found here](https://github.com/rayonlabs/chutes-api/blob/main/api/gpu.py)
+[The list of supported GPUs can be found here](https://github.com/chutesai/chutes-api/blob/main/api/gpu.py)
 
 
 ### 2. Configure prerequisites
@@ -421,7 +421,7 @@ chutes-miner add-node \
 - `--name` here corresponds to the short name in your ansible inventory.yaml file, it is not the entire FQDN.
 - `--validator` is the hotkey ss58 address of the validator that this server will be allocated to
 - `--hourly-cost` is how much you are paying hourly per GPU on this server; part of the optimization strategy in gepetto is to minimize cost when selecting servers to deploy chutes on
-- `--gpu-short-ref` is a short identifier string for the type of GPU on the server, e.g. `a6000`, `l40s`, `h100_sxm`, etc.  The list of supported GPUs can be found [here](https://github.com/rayonlabs/chutes-api/blob/main/api/gpu.py)
+- `--gpu-short-ref` is a short identifier string for the type of GPU on the server, e.g. `a6000`, `l40s`, `h100_sxm`, etc.  The list of supported GPUs can be found [here](https://github.com/chutesai/chutes-api/blob/main/api/gpu.py)
 - `--hotkey` is the path to the hotkey file you registered with, used to sign requests to be able to manage inventory on your system via the miner API
 - `--agent-api` is the URL for the agent running on the GPU node.  This is just the public IP of the node on port 32000.
 - `--miner-api` is the base URL to your miner API service, which will be http://[non-GPU node IP]:[minerAPI port, default 32000], i.e. find the public/external IP address of your CPU-only node, and whatever port you configured for the API service (which is 32000 if you didn't change the default).
