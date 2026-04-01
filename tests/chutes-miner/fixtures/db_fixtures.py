@@ -44,10 +44,10 @@ def mock_db_session():
 def mock_refresh(obj: Any):
     if isinstance(obj, GPU):
         gpu = obj
-        # Populate server on refresh
         gpu.server = MagicMock()
         gpu.server.ip_address = "192.168.1.100"
         gpu.server.verification_port = 8080
+        gpu.server.configure_mock(name="test-node-name")
 
 # TODO: Update uses of mock_db_session from above to use this instead
 @pytest.fixture
