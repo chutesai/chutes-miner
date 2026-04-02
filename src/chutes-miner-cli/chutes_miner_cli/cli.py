@@ -1,6 +1,8 @@
 import json
 import asyncio
 import os
+import re
+import sys
 import copy
 from typing import Optional
 import aiohttp
@@ -11,6 +13,7 @@ from rich import box
 import datetime
 from chutes_miner_cli.constants import (
     HOTKEY_ENVVAR,
+    LAUNCH_JWT_ENVVAR,
     MINER_API_ENVVAR,
     VALIDATOR_API_ENVVAR,
 )
@@ -23,6 +26,42 @@ from loguru import logger
 import yaml
 
 app = typer.Typer(no_args_is_help=True)
+
+_INSTANCE_LOGS_CURSOR_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$")
+
+
+def _process_log_line(line: str) -> Optional[str]:
+    """Print log / status for one SSE line. Return cursor if this JSON event included one."""
+    if not line.strip():
+        return None
+    if not line.startswith("data: "):
+        return None
+    payload = line[6:].strip()
+    if not payload or payload == ".":
+        return None
+    try:
+        obj = json.loads(payload)
+    except json.JSONDecodeError:
+        sys.stdout.buffer.write((payload + "\n").encode("utf-8"))
+        sys.stdout.buffer.flush()
+        return None
+    if not isinstance(obj, dict):
+        return None
+    log_val = obj.get("log")
+    if isinstance(log_val, str) and log_val:
+        sys.stdout.buffer.write((log_val + "\n").encode("utf-8"))
+        sys.stdout.buffer.flush()
+    c = obj.get("cursor")
+    return c if isinstance(c, str) else None
+
+
+def _emit_log_cursor(cursor: Optional[str]) -> None:
+    if cursor:
+        typer.secho(
+            f"\nTo resume logs, use: --cursor {cursor}",
+            fg=typer.colors.CYAN,
+            err=True,
+        )
 
 
 class KubeconfigMergeError(Exception):
@@ -800,6 +839,88 @@ def sync_node_kubeconfig(
         raise typer.Exit(code=1) from exc
 
 
+def instance_logs(
+    jwt: str = typer.Option(
+        ...,
+        "--jwt",
+        "-j",
+        help="Launch config JWT from the chute launch flow (or set CHUTES_LAUNCH_JWT)",
+        envvar=LAUNCH_JWT_ENVVAR,
+    ),
+    validator_api: str = typer.Option(
+        "https://api.chutes.ai",
+        help="Validator API base URL",
+        envvar=VALIDATOR_API_ENVVAR,
+    ),
+    cursor: Optional[str] = typer.Option(
+        None,
+        "--cursor",
+        "-c",
+        help=(
+            "Resume after this ISO timestamp (from a prior stream's resume hint), "
+            "e.g. 2026-04-01T17:53:05"
+        ),
+    ),
+):
+    """
+    Stream startup logs for a public chute instance before activation.
+
+    Prints each event's `log` field to stdout (plain-text `data:` lines are printed as-is).
+    The latest `cursor` from JSON events is kept for resume hints on stream errors or Ctrl+C.
+    """
+
+    if cursor is not None and not _INSTANCE_LOGS_CURSOR_RE.match(cursor):
+        typer.secho(
+            "cursor must be an ISO timestamp like 2026-04-01T17:53:05",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(1)
+
+    token = jwt.strip()
+
+    url = f"{validator_api.rstrip('/')}/miner/instance_logs"
+    params = {"cursor": cursor} if cursor else None
+    timeout = aiohttp.ClientTimeout(total=None, connect=30.0, sock_read=None)
+
+    last_cursor: Optional[str] = None
+
+    async def _stream() -> None:
+        nonlocal last_cursor
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(
+                url,
+                headers={"Authorization": token},
+                params=params,
+            ) as resp:
+                if resp.status != 200:
+                    body = await resp.text()
+                    typer.secho(f"HTTP {resp.status}: {body}", fg=typer.colors.RED)
+                    raise typer.Exit(1)
+                line_buf = ""
+                try:
+                    async for chunk in resp.content.iter_chunked(65536):
+                        line_buf += chunk.decode("utf-8", errors="replace")
+                        while "\n" in line_buf:
+                            line, line_buf = line_buf.split("\n", 1)
+                            c = _process_log_line(line)
+                            if c is not None:
+                                last_cursor = c
+                    if line_buf:
+                        c = _process_log_line(line_buf)
+                        if c is not None:
+                            last_cursor = c
+                except (TimeoutError, aiohttp.ClientError) as exc:
+                    _emit_log_cursor(last_cursor)
+                    typer.secho(f"Stream error: {exc}", fg=typer.colors.RED, err=True)
+                    raise typer.Exit(1) from None
+
+    try:
+        asyncio.run(_stream())
+    except KeyboardInterrupt:
+        _emit_log_cursor(last_cursor)
+        raise typer.Exit(130) from None
+
+
 app.command(name="add-node", help="Add a new kubernetes node to your cluster")(add_node)
 app.command(name="delete-node", help="Delete a kubernetes node from your cluster")(delete_node)
 app.command(
@@ -824,6 +945,10 @@ app.command(
 )(sync_node_kubeconfig)
 app.command(name="lock", help="Lock a server's deployments")(lock_server)
 app.command(name="unlock", help="Unlock a server's deployments")(unlock_server)
+app.command(
+    name="instance-logs",
+    help="Stream pre-activation instance logs via launch JWT (validator API)",
+)(instance_logs)
 
 # TEE VM system-manager commands (cache + status + images)
 tee_cache.register(tee_app)
