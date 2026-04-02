@@ -877,8 +877,6 @@ def instance_logs(
         raise typer.Exit(1)
 
     token = jwt.strip()
-    if token.lower().startswith("bearer "):
-        token = token[7:].lstrip()
 
     url = f"{validator_api.rstrip('/')}/miner/instance_logs"
     params = {"cursor": cursor} if cursor else None
