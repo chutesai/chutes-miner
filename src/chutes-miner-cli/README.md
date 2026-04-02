@@ -1,15 +1,17 @@
 ## Chutes Miner CLI
 
-This CLI ships with helpers for managing kubeconfigs when operating miner clusters. This document is the single source of truth for those workflows—other READMEs simply link here to avoid drift.
+This CLI ships with helpers for managing kubeconfigs when operating miner clusters, plus streaming pre-activation chute logs via the validator API. This document is the single source of truth for those workflows—other READMEs simply link here to avoid drift.
 
 ### Quick reference
 
-| Question | Answer |
-| --- | --- |
-| Where do the commands run? | On the machine where you execute `chutes-miner`. Nothing is copied anywhere else automatically. |
-| Default output path | `~/.kube/chutes.config` unless you pass `--path`. |
-| How do I point `kubectl` at it? | `export KUBECONFIG=~/.kube/chutes.config` or `kubectl --kubeconfig ~/.kube/chutes.config ...`. |
-| Can I push it to another host? | Yes, but you must copy it yourself (example below). |
+
+| Question                        | Answer                                                                                          |
+| ------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Where do the commands run?      | On the machine where you execute `chutes-miner`. Nothing is copied anywhere else automatically. |
+| Default output path             | `~/.kube/chutes.config` unless you pass `--path`.                                               |
+| How do I point `kubectl` at it? | `export KUBECONFIG=~/.kube/chutes.config` or `kubectl --kubeconfig ~/.kube/chutes.config ...`.  |
+| Can I push it to another host?  | Yes, but you must copy it yourself (example below).                                             |
+
 
 ---
 
@@ -88,6 +90,28 @@ sync_control_kubeconfig ~/.kube/chutes.config admin my-control-node ~/.kube/chut
 
 Feel free to swap `scp` for `rsync`, add SSH options, or integrate with your automation tooling.
 
+## `instance-logs`
+
+Streams startup logs for a **public** chute instance (via the validator `GET /miner/instance_logs` endpoint) using the launch JWT. Pass `--jwt` or set `CHUTES_LAUNCH_JWT`.
+
+On a miner cluster, the chute pod’s `CHUTES_LAUNCH_JWT` env var holds that token. This helper takes the **pod name** as the first argument (namespace `chutes`):
+
+```bash
+get_chute_jwt() {
+	kubectl get po "$1" -n chutes -o json \
+		| jq -r '.spec.containers[0].env[] | select(.name == "CHUTES_LAUNCH_JWT") | .value'
+}
+```
+
+Requires `kubectl` (with a context that can see the pod) and `[jq](https://jqlang.github.io/jq/)`.
+
+Example:
+
+```bash
+export CHUTES_LAUNCH_JWT="$(get_chute_jwt chute-2234db67-b453-4198-8ece-74f1f8ea3d03-58pph)"
+chutes-miner instance-logs
+```
+
 ## Verification checklist
 
 - `chutes-miner sync-kubeconfig ...` or `sync-node-kubeconfig ...` exits successfully.
@@ -95,4 +119,5 @@ Feel free to swap `scp` for `rsync`, add SSH options, or integrate with your aut
 - `KUBECONFIG` (or `--kubeconfig`) points to the path you just wrote.
 - `kubectl config get-contexts` lists the expected contexts (control plane + all tracked nodes, plus any manual additions).
 - Optional: run `sync_control_kubeconfig` to push the file to servers that need it.
+- Optional: `chutes-miner instance-logs` with a JWT from `get_chute_jwt` (see above) streams logs until the validator closes the stream or you interrupt; use the stderr resume hint and `--cursor` to continue after errors or Ctrl+C.
 
