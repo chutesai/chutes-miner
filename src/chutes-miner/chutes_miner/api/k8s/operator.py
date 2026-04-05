@@ -2392,7 +2392,7 @@ class MultiClusterK8sOperator(K8sOperator):
     ):
         created_job = self._deploy_job(job, server_name, namespace, timeout_seconds=timeout_seconds)
         deployment_id = job.metadata.labels["chutes/deployment-id"]
-        self._wait_for_deployment(f"chutes/deployment-id={deployment_id}", timeout_seconds=15)
+        self._wait_for_deployment(f"chutes/deployment-id={deployment_id}", timeout_seconds=settings.deploy_cache_wait_timeout)
         return created_job
 
     def _deploy_job(
