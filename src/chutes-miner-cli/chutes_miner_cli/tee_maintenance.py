@@ -7,7 +7,7 @@ hotkey-based auth with X-Chutes-Hotkey / Signature / Nonce headers.
 
 import asyncio
 import json
-from typing import Any, Optional
+from typing import Any
 
 import aiohttp
 import typer
@@ -37,9 +37,7 @@ def display_maintenance_policy(data: dict[str, Any]) -> None:
         console.print(tbl)
 
         current = data.get("current_slots", 0)
-        console.print(
-            f"\nMaintenance slots: [bold]{current}[/bold] / {max_concurrent} in use"
-        )
+        console.print(f"\nMaintenance slots: [bold]{current}[/bold] / {max_concurrent} in use")
     else:
         console.print("[yellow]No active upgrade window.[/yellow]")
 
@@ -102,7 +100,7 @@ def display_preflight_denial(data: dict[str, Any]) -> None:
 
 def display_maintenance_confirmed(data: dict[str, Any]) -> None:
     """Render a ConfirmMaintenanceResult."""
-    console.print(f"[green bold]Maintenance confirmed.[/green bold]")
+    console.print("[green bold]Maintenance confirmed.[/green bold]")
     console.print(f"Server ID: {data.get('server_id', '-')}")
 
     purged = data.get("purged_instance_ids") or []
@@ -172,9 +170,7 @@ def register(app: typer.Typer) -> None:
         name: str = typer.Option(
             ..., "--name", "-n", help="Server name or ID to put into maintenance"
         ),
-        yes: bool = typer.Option(
-            False, "--yes", "-y", help="Skip interactive confirmation"
-        ),
+        yes: bool = typer.Option(False, "--yes", "-y", help="Skip interactive confirmation"),
         raw_json: bool = typer.Option(
             False, "--raw-json", help="Output raw JSON for programmatic use"
         ),
@@ -206,16 +202,12 @@ def register(app: typer.Typer) -> None:
 
             if not preflight.get("eligible"):
                 display_preflight_denial(preflight)
-                typer.echo(
-                    "\nServer is not eligible for maintenance.", err=True
-                )
+                typer.echo("\nServer is not eligible for maintenance.", err=True)
                 raise typer.Exit(1)
 
             current = preflight.get("current_slots", 0)
             limit = preflight.get("limit", 1)
-            console.print(
-                f"Maintenance slots: [bold]{current}[/bold] / {limit} in use"
-            )
+            console.print(f"Maintenance slots: [bold]{current}[/bold] / {limit} in use")
             console.print(
                 f"\n[yellow bold]Warning:[/yellow bold] This will purge all running "
                 f"instances on server [cyan]'{name}'[/cyan] and enter maintenance mode."
