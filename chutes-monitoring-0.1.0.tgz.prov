@@ -1,0 +1,42 @@
+-----BEGIN PGP SIGNED MESSAGE-----
+Hash: SHA512
+
+apiVersion: v2
+appVersion: 1.16.0
+dependencies:
+- - condition: grafana.deploy
+  name: grafana
+  repository: https://grafana.github.io/helm-charts
+  version: 8.11.3
+- - name: prometheus
+  repository: https://prometheus-community.github.io/helm-charts
+  version: 27.19.0
+description: Chutes monitoring helm charts
+maintainers:
+- - email: jon@chutes.ai
+  name: Jon Durbin
+- - email: kyle@chutes.ai
+  name: Kyle Widmann
+name: chutes-monitoring
+type: application
+version: 0.1.0
+
+...
+files:
+  chutes-monitoring-0.1.0.tgz: sha256:15878e62494ba047aca3adbb9caa15a9fa4414830c4249b4bc3ecb69725b633a
+-----BEGIN PGP SIGNATURE-----
+
+wsFcBAEBCgAQBQJp06GWCRBuiQl4UKnNyAAAlZ8QAFf8AofsQ7pvLLs30BaJxHOG
+rU6gFX4jFzSRd+dHNx87f9zTamJAnGmxorcaDQi8oQGzW/y9jgXvX5WKFBlU2RlF
+GhdGPSGrfLktinj3GGgS+Q5OWQXtAv7LqIht/Nx17EWwDuBXgCT6OMwZ065eBRv4
+mJ8EoNQPWLqqn8p4XPh02HFFgVP13rroFPV7dKz2u+fZaKfj4FeQg7IMIB3MGoZy
+c6z/M3q/LGgs6ljlCJ2f6b3ESSBhskyjJHtC8XZFCIyoaNnkZ675V69Ni45KgCVC
+IKx2duphUlqJ9xpjK0nTAXCj9SYyfzQyjpuXiw8vexR0cYoMPk7I7Qi0+BJYxt3q
+PTX9gV5dPxtPGMRhcuxOryRPHxlif5aM8bCa2horyblU0mDu+N7EHA5pKvDVRKZU
+zSTWM5wK6S1uSDUW7PE1j+IPNPlODeEfNN9psTHopyIze++QoaOiKRNziw6XD1sa
+h1zy+hyrvJLUOfqWdmj1xrNuSdTsc9QFHdxZnM1y69IvKdMvg08cgusSRXSY1N3h
+54nDqyWJO0nZpQectPrMuTitWA/9EHTccQdOAZS48j0wN+mFC30K0MpU6v5L3T06
+vLrKgQkJosDw2yXdjISt0pldkhPAc3nnSbsz4opYXZD26owTXLjKnA866SlZX9UQ
+ZlVSOOiIkYby7HuIuvyO
+=ofgi
+-----END PGP SIGNATURE-----
