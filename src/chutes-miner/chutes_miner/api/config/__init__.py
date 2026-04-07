@@ -85,6 +85,7 @@ class Settings(CommonSettings):
     cache_overrides: dict = json.loads(os.getenv("CACHE_OVERRIDES", "{}")) or {}
 
     chute_shutdown_time_seconds: int = int(os.getenv("CHUTE_SHUTDOWN_TIME_SECONDS", "180"))
+    deploy_cache_wait_timeout: int = int(os.getenv("DEPLOY_CACHE_WAIT_TIMEOUT", "60"))
 
     migrations_dir: str = os.getenv("MIGRATIONS_DIR", "chutes-miner/chutes_miner/api/migrations")
 
