@@ -41,23 +41,29 @@ def display_maintenance_policy(data: dict[str, Any]) -> None:
     else:
         console.print("[yellow]No active upgrade window.[/yellow]")
 
-    pending = data.get("pending_servers") or []
-    if pending:
-        tbl = Table(title="Pending Servers", box=box.ROUNDED)
+    servers = data.get("servers") or []
+    if servers:
+        tbl = Table(title="Servers", box=box.ROUNDED)
         tbl.add_column("Server ID", style="cyan")
         tbl.add_column("Name")
-        tbl.add_column("Current Version")
-        tbl.add_column("Target Version")
-        for s in pending:
+        tbl.add_column("Version")
+        tbl.add_column("Needs Upgrade")
+        tbl.add_column("In Maintenance")
+        for s in servers:
+            needs = s.get("needs_upgrade", False)
+            maint = s.get("in_maintenance", False)
+            needs_str = "[yellow]Yes[/yellow]" if needs else "No"
+            maint_str = "[yellow]Yes[/yellow]" if maint else "No"
             tbl.add_row(
                 s.get("server_id", "-"),
                 s.get("name") or "-",
                 s.get("version") or "-",
-                s.get("target_version", "-"),
+                needs_str,
+                maint_str,
             )
         console.print(tbl)
     else:
-        console.print("No servers pending maintenance.")
+        console.print("No servers found.")
 
 
 def display_preflight_denial(data: dict[str, Any]) -> None:
