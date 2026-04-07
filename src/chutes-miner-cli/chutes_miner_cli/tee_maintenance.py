@@ -15,7 +15,7 @@ from rich.console import Console
 from rich.table import Table
 from rich import box
 
-from chutes_miner_cli.constants import HOTKEY_ENVVAR, VALIDATOR_API_ENVVAR
+from chutes_miner_cli.constants import HOTKEY_ENVVAR, MINER_API_ENVVAR, VALIDATOR_API_ENVVAR
 from chutes_miner_cli.util import sign_request
 
 console = Console()
@@ -177,6 +177,11 @@ def register(app: typer.Typer) -> None:
         hotkey: str = typer.Option(
             ..., help="Path to the hotkey file for your miner", envvar=HOTKEY_ENVVAR
         ),
+        miner_api: str = typer.Option(
+            "http://127.0.0.1:32000",
+            help="Miner API base URL",
+            envvar=MINER_API_ENVVAR,
+        ),
         validator_api: str = typer.Option(
             "https://api.chutes.ai",
             help="Validator API base URL",
@@ -209,13 +214,29 @@ def register(app: typer.Typer) -> None:
             limit = preflight.get("limit", 1)
             console.print(f"Maintenance slots: [bold]{current}[/bold] / {limit} in use")
             console.print(
-                f"\n[yellow bold]Warning:[/yellow bold] This will purge all running "
-                f"instances on server [cyan]'{name}'[/cyan] and enter maintenance mode."
+                f"\n[yellow bold]Warning:[/yellow bold] This will lock the server, purge all "
+                f"running instances on server [cyan]'{name}'[/cyan], and enter maintenance mode."
             )
 
             if not yes:
                 typer.confirm("Proceed?", abort=True)
 
+            # Lock the server via the miner API so gepetto stops scheduling new workloads.
+            lock_headers, _ = sign_request(hotkey, purpose="management")
+            async with aiohttp.ClientSession(raise_for_status=False) as session:
+                lock_url = f"{miner_api.rstrip('/')}/servers/{name}/lock"
+                async with session.get(lock_url, headers=lock_headers, timeout=30) as resp:
+                    if resp.status >= 400:
+                        body = await resp.text()
+                        typer.echo(f"Failed to lock server: {resp.status}: {body}", err=True)
+                        raise typer.Exit(1)
+                    lock_data = await resp.json()
+                    console.print(
+                        f"Server [cyan]{lock_data.get('name', name)}[/cyan] locked "
+                        f"(locked={lock_data.get('locked')})"
+                    )
+
+            # Enter maintenance on the validator (purges running instances).
             headers, _ = sign_request(hotkey, purpose="tee", remote=True)
             async with aiohttp.ClientSession(raise_for_status=False) as session:
                 confirm_url = f"{base}/servers/{name}/maintenance"
@@ -230,5 +251,11 @@ def register(app: typer.Typer) -> None:
                 print(json.dumps(result, indent=2))
             else:
                 display_maintenance_confirmed(result)
+
+            console.print(
+                f"\n[yellow bold]Reminder:[/yellow bold] The server is locked. "
+                f"After the upgrade reboot, unlock it with:\n"
+                f"  [cyan]chutes-miner unlock --name {name}[/cyan]"
+            )
 
         asyncio.run(_run())
