@@ -56,6 +56,8 @@ gepetto:
   imagePullPolicy: Always
   # Enable validator migrations (run on Gepetto startup). Default true in charts.
   validatorMigrationsEnabled: true
+  # Seconds to wait for a new deployment to appear in the pod cache after job creation.
+  deployCacheWaitTimeout: 60
   resources:
     requests:
       cpu: "500m"

@@ -20,6 +20,7 @@ from chutes_miner_cli.constants import (
 from chutes_miner_cli.tee import tee_app
 from chutes_miner_cli import tee_cache
 from chutes_miner_cli import tee_images
+from chutes_miner_cli import tee_maintenance
 from chutes_miner_cli import tee_status
 from chutes_miner_cli.util import sign_request
 from loguru import logger
@@ -294,6 +295,11 @@ def display_remote_inventory(servers):
         server_table.add_row("Server ID", server.get("server_id", "-"))
         server_table.add_row("IP", server.get("ip", "-"))
         server_table.add_row("TEE", "Yes" if server.get("is_tee") else "No")
+        if server.get("is_tee"):
+            server_table.add_row("Version", server.get("version") or "-")
+            maint = server.get("maintenance_pending", False)
+            maint_str = "[yellow]Yes[/yellow]" if maint else "No"
+            server_table.add_row("Maintenance Pending", maint_str)
         server_table.add_row(
             "Created", format_date(server["created_at"]) if server.get("created_at") else "-"
         )
@@ -950,9 +956,10 @@ app.command(
     help="Stream pre-activation instance logs via launch JWT (validator API)",
 )(instance_logs)
 
-# TEE VM system-manager commands (cache + status + images)
+# TEE VM system-manager commands (cache + status + images + maintenance)
 tee_cache.register(tee_app)
 tee_images.register(tee_app)
+tee_maintenance.register(tee_app)
 tee_status.register(tee_app)
 app.add_typer(tee_app, name="tee")
 
