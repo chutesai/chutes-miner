@@ -132,6 +132,9 @@ rules:
   - apiGroups: [""]
     resources: ["pods/log", "pods/status"]
     verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["pods/portforward"]
+    verbs: ["create"]
 
 ---
 # RoleBinding for monitoring namespace
