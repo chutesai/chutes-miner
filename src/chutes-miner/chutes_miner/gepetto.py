@@ -35,10 +35,16 @@ import chutes_miner.api.k8s as k8s
 
 
 def normalize_node_selector(node_selector) -> list:
-    """Normalize node_selector: flat dict -> [dict], list -> list."""
+    """Normalize node_selector to a flat list of selector dicts."""
     if isinstance(node_selector, dict):
+        if node_selector.get("options"):
+            return list(node_selector["options"])
+        if node_selector.get("dynamic"):
+            return []
         return [node_selector]
-    return list(node_selector)
+    if isinstance(node_selector, list):
+        return list(node_selector)
+    return []
 
 
 def _stable_selector_hash(node_selector) -> str:
@@ -864,6 +870,8 @@ class Gepetto:
         compute_multiplier = event_data["compute_multiplier"]
         validator_hotkey = event_data["validator"]
         disk_gb = event_data["disk_gb"]
+        # API may broadcast a node_selector override (e.g. for dynamic chutes).
+        node_selector_override = event_data.get("node_selector")
 
         logger.info(
             f"Received job_created event for {chute_id=} {job_id=} with {gpu_count=} and {compute_multiplier=} and {disk_gb=}"
@@ -880,7 +888,9 @@ class Gepetto:
         if not chute:
             logger.warning(f"Failed to load chute: {chute_id}")
             return
-        result = await self.optimal_scale_up_server(chute, disk_gb=disk_gb)
+        result = await self.optimal_scale_up_server(
+            chute, disk_gb=disk_gb, node_selector_override=node_selector_override
+        )
         if result:
             server, matched_gpu_count = result
             await self.run_job(
@@ -892,7 +902,9 @@ class Gepetto:
         logger.info(
             f"Attempting a pre-empting deploy of {job_id=} {chute_id=} with {chute.node_selector=} and {gpu_count=}"
         )
-        await self.preempting_deploy(chute, job_id=job_id, disk_gb=disk_gb)
+        await self.preempting_deploy(
+            chute, job_id=job_id, disk_gb=disk_gb, node_selector_override=node_selector_override
+        )
 
     async def job_deleted(self, event_data: Dict[str, Any]):
         """
@@ -1396,7 +1408,7 @@ class Gepetto:
 
     @staticmethod
     async def optimal_scale_up_server(
-        chute: Chute, disk_gb: int = 10
+        chute: Chute, disk_gb: int = 10, node_selector_override: dict = None
     ) -> Optional[Tuple[Server, int]]:
         """
         Find the optimal server for scaling up a chute deployment.
@@ -1410,7 +1422,8 @@ class Gepetto:
         best_result = None
         best_cost = float("inf")
 
-        for selector in normalize_node_selector(chute.node_selector):
+        effective_ns = node_selector_override or chute.node_selector
+        for selector in normalize_node_selector(effective_ns):
             selector_gpus = list(selector.get("supported_gpus", []))
             selector_gpu_count = selector["gpu_count"]
             if not selector_gpus:
@@ -1497,7 +1510,7 @@ class Gepetto:
                 return float(instance.get("compute_multiplier", 0.0))
         return 0.0
 
-    async def preempting_deploy(self, chute: Chute, job_id: str = None, disk_gb: int = 10):
+    async def preempting_deploy(self, chute: Chute, job_id: str = None, disk_gb: int = 10, node_selector_override: dict = None):
         """
         Force deploy a chute by preempting other deployments.
 
@@ -1544,7 +1557,8 @@ class Gepetto:
         matched_gpu_count = None
 
         # Try each selector independently (OR'd)
-        for selector in normalize_node_selector(chute.node_selector):
+        effective_ns = node_selector_override or chute.node_selector
+        for selector in normalize_node_selector(effective_ns):
             selector_gpus = list(selector.get("supported_gpus", []))
             selector_gpu_count = selector["gpu_count"]
             if not selector_gpus:
