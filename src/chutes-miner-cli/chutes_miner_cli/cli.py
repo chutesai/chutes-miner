@@ -92,7 +92,8 @@ def ensure_parent_directory(path: str):
 def extract_context_bundle(source_config: dict, context_name: str) -> dict:
     contexts = source_config.get("contexts") or []
     target_context = next(
-        (copy.deepcopy(ctx) for ctx in contexts if ctx.get("name") == context_name), None
+        (copy.deepcopy(ctx) for ctx in contexts if ctx.get("name") == context_name),
+        None,
     )
     if not target_context:
         raise KubeconfigMergeError(
@@ -106,7 +107,8 @@ def extract_context_bundle(source_config: dict, context_name: str) -> dict:
     users = source_config.get("users") or []
 
     target_cluster = next(
-        (copy.deepcopy(clu) for clu in clusters if clu.get("name") == cluster_name), None
+        (copy.deepcopy(clu) for clu in clusters if clu.get("name") == cluster_name),
+        None,
     )
     if not target_cluster:
         raise KubeconfigMergeError(
@@ -142,7 +144,11 @@ def merge_context_bundle(
         for item in bundle.get(section, []):
             name = item.get("name")
             idx = next(
-                (i for i, existing in enumerate(existing_items) if existing.get("name") == name),
+                (
+                    i
+                    for i, existing in enumerate(existing_items)
+                    if existing.get("name") == name
+                ),
                 None,
             )
             if idx is not None:
@@ -264,13 +270,19 @@ def display_local_inventory(inventory):
         gpu_table.add_column("Processors")
         gpu_table.add_column("Status")
         for gpu in server["gpus"]:
-            status_text = "[green]Verified[/green]" if gpu["verified"] else "[red]Unverified[/red]"
+            status_text = (
+                "[green]Verified[/green]"
+                if gpu["verified"]
+                else "[red]Unverified[/red]"
+            )
             gpu_table.add_row(
                 gpu["device_info"]["name"],
                 format_memory(gpu["device_info"]["memory"]),
                 str(int(gpu["device_info"]["clock_rate"] / 1000)),
                 str(
-                    gpu["device_info"]["processors"] if "processors" in gpu["device_info"] else "-"
+                    gpu["device_info"]["processors"]
+                    if "processors" in gpu["device_info"]
+                    else "-"
                 ),
                 status_text,
             )
@@ -301,10 +313,12 @@ def display_remote_inventory(servers):
             maint_str = "[yellow]Yes[/yellow]" if maint else "No"
             server_table.add_row("Maintenance Pending", maint_str)
         server_table.add_row(
-            "Created", format_date(server["created_at"]) if server.get("created_at") else "-"
+            "Created",
+            format_date(server["created_at"]) if server.get("created_at") else "-",
         )
         server_table.add_row(
-            "Updated", format_date(server["updated_at"]) if server.get("updated_at") else "-"
+            "Updated",
+            format_date(server["updated_at"]) if server.get("updated_at") else "-",
         )
         server_table.add_row("GPUs", str(len(gpus)))
         console.print(server_table)
@@ -325,7 +339,9 @@ def display_remote_inventory(servers):
                     gpu.get("gpu_identifier", "-"),
                     str(gpu.get("device_index", "-")),
                     chute_str,
-                    format_verification(gpu.get("verification_error"), gpu.get("verified_at")),
+                    format_verification(
+                        gpu.get("verification_error"), gpu.get("verified_at")
+                    ),
                     format_verification(
                         gpu.get("inst_verification_error"), gpu.get("inst_verified_at")
                     ),
@@ -427,7 +443,9 @@ def remote_inventory(
 def add_node(
     name: str = typer.Option(..., help="Name of the server/node"),
     validator: str = typer.Option(..., help="Validator ss58 this node is allocated to"),
-    hourly_cost: float = typer.Option(..., help="Hourly cost, used in optimizing autoscaling"),
+    hourly_cost: float = typer.Option(
+        ..., help="Hourly cost, used in optimizing autoscaling"
+    ),
     gpu_short_ref: str = typer.Option(..., help="GPU short reference"),
     hotkey: str = typer.Option(
         ...,
@@ -468,7 +486,9 @@ def add_node(
                 async for content in resp.content:
                     if content.strip():
                         payload = json.loads(content.decode()[6:])
-                        print(f"\033[34m{payload['timestamp']}\033[0m {payload['message']}")
+                        print(
+                            f"\033[34m{payload['timestamp']}\033[0m {payload['message']}"
+                        )
 
     asyncio.run(_add_node())
 
@@ -569,11 +589,17 @@ def purge_deployment(
     if (deployment_id is None and node_id is None) or (
         deployment_id is not None and node_id is not None
     ):
-        typer.echo("Error: Either deployment_id or node_id must be provided, but not both.")
+        typer.echo(
+            "Error: Either deployment_id or node_id must be provided, but not both."
+        )
         raise typer.Exit(1)
 
     target_id = deployment_id or node_id
-    endpoint = f"deployments/{target_id}" if deployment_id else f"servers/{target_id}/deployments"
+    endpoint = (
+        f"deployments/{target_id}"
+        if deployment_id
+        else f"servers/{target_id}/deployments"
+    )
 
     async def _purge_deployment():
         nonlocal target_id, hotkey, miner_api, endpoint
@@ -591,6 +617,47 @@ def purge_deployment(
                 print(json.dumps(await resp.json(), indent=2))
 
     asyncio.run(_purge_deployment())
+
+
+def purge_server(
+    name: str = typer.Option(
+        ...,
+        "--name",
+        "-n",
+        help="Name or ID of the server to purge deployments from",
+    ),
+    hotkey: str = typer.Option(
+        ...,
+        help="Path to the hotkey file for your miner",
+        envvar=HOTKEY_ENVVAR,
+    ),
+    miner_api: str = typer.Option(
+        "http://127.0.0.1:32000",
+        help="Miner API base URL",
+        envvar=MINER_API_ENVVAR,
+    ),
+):
+    """
+    Purge all deployments from a specific server, allowing gepetto to re-scale.
+    Accepts either a server name or server ID. Does not purge jobs.
+    """
+
+    async def _purge_server():
+        nonlocal name, hotkey, miner_api
+
+        # Warn the user if the server has active jobs before proceeding.
+        if not await delete_preflight(name, hotkey, miner_api):
+            return
+
+        async with aiohttp.ClientSession(raise_for_status=True) as session:
+            headers, _ = sign_request(hotkey, purpose="management")
+            async with session.delete(
+                f"{miner_api.rstrip('/')}/servers/{name}/deployments",
+                headers=headers,
+            ) as resp:
+                print(json.dumps(await resp.json(), indent=2))
+
+    asyncio.run(_purge_server())
 
 
 def scorch_remote(
@@ -695,7 +762,9 @@ def lock_server(
 
     async def _lock_server():
         nonlocal name, hotkey, miner_api
-        await _lock_or_unlock_server(lock=True, name=name, hotkey=hotkey, miner_api=miner_api)
+        await _lock_or_unlock_server(
+            lock=True, name=name, hotkey=hotkey, miner_api=miner_api
+        )
 
     asyncio.run(_lock_server())
 
@@ -719,7 +788,9 @@ def unlock_server(
 
     async def _unlock_server():
         nonlocal name, hotkey, miner_api
-        await _lock_or_unlock_server(lock=False, name=name, hotkey=hotkey, miner_api=miner_api)
+        await _lock_or_unlock_server(
+            lock=False, name=name, hotkey=hotkey, miner_api=miner_api
+        )
 
     asyncio.run(_unlock_server())
 
@@ -802,7 +873,9 @@ def sync_node_kubeconfig(
         agent_payload = asyncio.run(_fetch_agent_kubeconfig())
         raw_kubeconfig = agent_payload.get("kubeconfig")
         if raw_kubeconfig is None:
-            raise KubeconfigMergeError("Agent response did not include a 'kubeconfig' key.")
+            raise KubeconfigMergeError(
+                "Agent response did not include a 'kubeconfig' key."
+            )
 
         if isinstance(raw_kubeconfig, str):
             source_config = yaml.safe_load(raw_kubeconfig)
@@ -928,12 +1001,20 @@ def instance_logs(
 
 
 app.command(name="add-node", help="Add a new kubernetes node to your cluster")(add_node)
-app.command(name="delete-node", help="Delete a kubernetes node from your cluster")(delete_node)
+app.command(name="delete-node", help="Delete a kubernetes node from your cluster")(
+    delete_node
+)
 app.command(
     name="purge-deployments",
     help="Purge all deployments, allowing autoscale from scratch",
 )(purge_deployments)
-app.command(name="purge-deployment", help="Purge the target deployment")(purge_deployment)
+app.command(name="purge-deployment", help="Purge the target deployment")(
+    purge_deployment
+)
+app.command(
+    name="purge-server",
+    help="Purge all deployments from a specific server, by name or ID",
+)(purge_server)
 app.command(name="local-inventory", help="Show local inventory")(local_inventory)
 app.command(name="remote-inventory", help="Show remote inventory")(remote_inventory)
 app.command(name="scorch-remote", help="Purge all GPUs/instances/etc. from validator")(
@@ -942,9 +1023,9 @@ app.command(name="scorch-remote", help="Purge all GPUs/instances/etc. from valid
 app.command(name="delete-remote", help="Remove a single GPU from validator inventory")(
     delete_remote
 )
-app.command(name="sync-kubeconfig", help="Syncs the miner kubeconfig to your kubeconfig")(
-    sync_kubeconfig
-)
+app.command(
+    name="sync-kubeconfig", help="Syncs the miner kubeconfig to your kubeconfig"
+)(sync_kubeconfig)
 app.command(
     name="sync-node-kubeconfig",
     help="Fetch a kubeconfig context directly from a node and merge it locally",

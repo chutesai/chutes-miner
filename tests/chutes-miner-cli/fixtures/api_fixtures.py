@@ -41,6 +41,7 @@ MOCK_AGENT_KUBECONFIG = yaml.safe_dump(
     sort_keys=False,
 )
 
+
 @pytest.fixture
 def mock_purge_deployments_response():
     """Mock response from the API."""
@@ -78,6 +79,28 @@ def mock_purge_deployment_response():
                 "server_name": SERVER_NAME,
                 "gpu_count": GPU_COUNT,
             },
+        }
+    )
+    return mock_resp
+
+
+@pytest.fixture
+def mock_purge_server_response():
+    """Mock response from DELETE /servers/{id_or_name}/deployments."""
+    mock_resp = AsyncMock()
+    mock_resp.status = 200
+    mock_resp.json = AsyncMock(
+        return_value={
+            "status": "initiated",
+            "deployments_purged": [
+                {
+                    "chute_id": CHUTE_ID,
+                    "chute_name": CHUTE_NAME,
+                    "server_id": SERVER_ID,
+                    "server_name": SERVER_NAME,
+                    "gpu_count": GPU_COUNT,
+                }
+            ],
         }
     )
     return mock_resp

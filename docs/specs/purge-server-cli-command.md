@@ -107,7 +107,7 @@ and all non-job deployments on that specific server are purged. Specifically:
    `mock_purge_server_response` fixture (same response shape as
    `mock_purge_deployments_response`: `{"status": "initiated",
    "deployments_purged": [...]}`).
-4. **`src/chutes-miner-cli/VERSION`** — Bump patch version `0.4.0` → `0.4.1`.
+4. **`src/chutes-miner-cli/VERSION`** — Bump minor version `0.4.0` → `0.5.0`.
 5. **`src/chutes-miner-cli/pyproject.toml`** — Bump version to match.
 
 ---
@@ -128,7 +128,7 @@ and all non-job deployments on that specific server are purged. Specifically:
 
 - CLI-only change, no infrastructure / Ansible / feature-flag changes.
 - Fully backward compatible: no existing commands are modified.
-- Version bump: `0.4.0` → `0.4.1` in `VERSION` and `pyproject.toml`.
+- Version bump: `0.4.0` → `0.5.0` in `VERSION` and `pyproject.toml`.
 - Consider deprecating `purge-deployment --node-id` in a future release with a
   stderr warning pointing users to `purge-server`.
 
@@ -142,7 +142,7 @@ and all non-job deployments on that specific server are purged. Specifically:
 | 2 | Register the command near the existing purge commands: `app.command(name="purge-server", help="Purge all deployments from a specific server")(purge_server)` | `src/chutes-miner-cli/chutes_miner_cli/cli.py` |
 | 3 | Add `mock_purge_server_response` fixture | `tests/chutes-miner-cli/fixtures/api_fixtures.py` |
 | 4 | Create test file with four tests: (a) happy path by name, (b) happy path by server ID, (c) preflight returns False → no DELETE, (d) CLI integration via CliRunner | `tests/chutes-miner-cli/test_purge_server.py` |
-| 5 | Bump version `0.4.0` → `0.4.1` | `src/chutes-miner-cli/VERSION`, `src/chutes-miner-cli/pyproject.toml` |
+| 5 | Bump version `0.4.0` → `0.5.0` | `src/chutes-miner-cli/VERSION`, `src/chutes-miner-cli/pyproject.toml` |
 | 6 | Run `make lint-local chutes-miner-cli` and `make test-local chutes-miner-cli` | — |
 
 ---
