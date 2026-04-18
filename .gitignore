@@ -10,6 +10,7 @@ test*.py
 !tests/**/*
 .localenv
 *.bak
+.continue/
 
 # Distribution / packaging
 .Python
