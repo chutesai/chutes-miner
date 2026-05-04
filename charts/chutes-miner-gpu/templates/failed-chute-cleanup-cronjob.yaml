@@ -12,6 +12,7 @@ spec:
       template:
         spec:
           serviceAccountName: chutes
+          automountServiceAccountToken: false
           securityContext:
             runAsNonRoot: true
             runAsUser: 1000
@@ -20,6 +21,24 @@ spec:
           nodeSelector:
             node.kubernetes.io/microk8s-controlplane: microk8s-controlplane
           {{- end }}
+          volumes:
+          - name: kube-api-access
+            projected:
+              sources:
+              - serviceAccountToken:
+                  expirationSeconds: 3607
+                  path: token
+              - configMap:
+                  name: kube-root-ca.crt
+                  items:
+                  - key: ca.crt
+                    path: ca.crt
+              - downwardAPI:
+                  items:
+                  - fieldRef:
+                      apiVersion: v1
+                      fieldPath: metadata.namespace
+                    path: namespace
           containers:
           - name: cleanup
             image: {{ .Values.failedChuteCleanup.image }}
@@ -31,4 +50,8 @@ spec:
               limits:
                 cpu: "500m"
                 memory: "512Mi"
+            volumeMounts:
+            - name: kube-api-access
+              mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+              readOnly: true
           restartPolicy: OnFailure
