@@ -92,7 +92,8 @@ def ensure_parent_directory(path: str):
 def extract_context_bundle(source_config: dict, context_name: str) -> dict:
     contexts = source_config.get("contexts") or []
     target_context = next(
-        (copy.deepcopy(ctx) for ctx in contexts if ctx.get("name") == context_name), None
+        (copy.deepcopy(ctx) for ctx in contexts if ctx.get("name") == context_name),
+        None,
     )
     if not target_context:
         raise KubeconfigMergeError(
@@ -106,7 +107,8 @@ def extract_context_bundle(source_config: dict, context_name: str) -> dict:
     users = source_config.get("users") or []
 
     target_cluster = next(
-        (copy.deepcopy(clu) for clu in clusters if clu.get("name") == cluster_name), None
+        (copy.deepcopy(clu) for clu in clusters if clu.get("name") == cluster_name),
+        None,
     )
     if not target_cluster:
         raise KubeconfigMergeError(
@@ -301,10 +303,12 @@ def display_remote_inventory(servers):
             maint_str = "[yellow]Yes[/yellow]" if maint else "No"
             server_table.add_row("Maintenance Pending", maint_str)
         server_table.add_row(
-            "Created", format_date(server["created_at"]) if server.get("created_at") else "-"
+            "Created",
+            format_date(server["created_at"]) if server.get("created_at") else "-",
         )
         server_table.add_row(
-            "Updated", format_date(server["updated_at"]) if server.get("updated_at") else "-"
+            "Updated",
+            format_date(server["updated_at"]) if server.get("updated_at") else "-",
         )
         server_table.add_row("GPUs", str(len(gpus)))
         console.print(server_table)
@@ -591,6 +595,47 @@ def purge_deployment(
                 print(json.dumps(await resp.json(), indent=2))
 
     asyncio.run(_purge_deployment())
+
+
+def purge_server(
+    name: str = typer.Option(
+        ...,
+        "--name",
+        "-n",
+        help="Name or ID of the server to purge deployments from",
+    ),
+    hotkey: str = typer.Option(
+        ...,
+        help="Path to the hotkey file for your miner",
+        envvar=HOTKEY_ENVVAR,
+    ),
+    miner_api: str = typer.Option(
+        "http://127.0.0.1:32000",
+        help="Miner API base URL",
+        envvar=MINER_API_ENVVAR,
+    ),
+):
+    """
+    Purge all deployments from a specific server, allowing gepetto to re-scale.
+    Accepts either a server name or server ID. Does not purge jobs.
+    """
+
+    async def _purge_server():
+        nonlocal name, hotkey, miner_api
+
+        # Warn the user if the server has active jobs before proceeding.
+        if not await delete_preflight(name, hotkey, miner_api):
+            return
+
+        async with aiohttp.ClientSession(raise_for_status=True) as session:
+            headers, _ = sign_request(hotkey, purpose="management")
+            async with session.delete(
+                f"{miner_api.rstrip('/')}/servers/{name}/deployments",
+                headers=headers,
+            ) as resp:
+                print(json.dumps(await resp.json(), indent=2))
+
+    asyncio.run(_purge_server())
 
 
 def scorch_remote(
@@ -934,6 +979,10 @@ app.command(
     help="Purge all deployments, allowing autoscale from scratch",
 )(purge_deployments)
 app.command(name="purge-deployment", help="Purge the target deployment")(purge_deployment)
+app.command(
+    name="purge-server",
+    help="Purge all deployments from a specific server, by name or ID",
+)(purge_server)
 app.command(name="local-inventory", help="Show local inventory")(local_inventory)
 app.command(name="remote-inventory", help="Show remote inventory")(remote_inventory)
 app.command(name="scorch-remote", help="Purge all GPUs/instances/etc. from validator")(
