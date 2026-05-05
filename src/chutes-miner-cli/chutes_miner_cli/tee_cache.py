@@ -146,9 +146,11 @@ def display_cache_cleanup(data: dict[str, Any]) -> None:
     """Pretty-print cleanup result."""
     status = data.get("status", "-")
     freed = data.get("freed_bytes", 0)
+    purged = data.get("purged_bytes", 0)
     removed = data.get("removed_chutes") or []
     console.print(f"[bold]Status:[/bold] {status}")
-    console.print(f"[bold]Freed:[/bold] {_format_bytes(freed)}")
+    console.print(f"[bold]Freed (removed chutes):[/bold] {_format_bytes(freed)}")
+    console.print(f"[bold]Freed (stale HF revisions):[/bold] {_format_bytes(purged)}")
     if removed:
         console.print("[bold]Removed chutes:[/bold]")
         for chute_id in removed:
@@ -356,5 +358,83 @@ def register(app: typer.Typer) -> None:
                 print(json.dumps(data, indent=2))
             else:
                 display_cache_cleanup(data)
+
+        asyncio.run(_run())
+
+    @app.command("cache-cancel", help="Cancel an in-progress chute download")
+    def cache_cancel(
+        ip: Optional[str] = typer.Option(
+            None, "--ip", help="TEE server IP (use instead of --name to skip API lookup)"
+        ),
+        name: Optional[str] = typer.Option(
+            None, "--name", "-n", help="TEE node (server) name (resolve IP via miner API)"
+        ),
+        chute_id: str = typer.Option(..., "--chute-id", help="Chute ID whose download to cancel"),
+        cleanup: bool = typer.Option(
+            False, "--cleanup", help="Delete partial files from disk after cancelling"
+        ),
+        hotkey: str = typer.Option(
+            ..., help="Path to the hotkey file for your miner", envvar=HOTKEY_ENVVAR
+        ),
+        miner_api: str = typer.Option(
+            "http://127.0.0.1:32000", help="Miner API base URL", envvar=MINER_API_ENVVAR
+        ),
+    ):
+        async def _run():
+            server_ip = await get_tee_server_ip(
+                ip=ip, name=name, hotkey=hotkey, miner_api=miner_api
+            )
+            base_url = build_tee_base_url(server_ip)
+            status, data = await send_tee_request(
+                base_url,
+                f"/cache/{chute_id}/cancel",
+                "POST",
+                hotkey,
+                params={"cleanup": str(cleanup).lower()},
+            )
+            if status >= 400:
+                typer.echo(f"Error {status}: {data}", err=True)
+                raise typer.Exit(1)
+            if isinstance(data, dict):
+                print(json.dumps(data, indent=2))
+            else:
+                print(data)
+
+        asyncio.run(_run())
+
+    @app.command("cache-purge", help="Purge stale HuggingFace revisions from all cached chutes")
+    def cache_purge(
+        ip: Optional[str] = typer.Option(
+            None, "--ip", help="TEE server IP (use instead of --name to skip API lookup)"
+        ),
+        name: Optional[str] = typer.Option(
+            None, "--name", "-n", help="TEE node (server) name (resolve IP via miner API)"
+        ),
+        raw_json: bool = typer.Option(
+            False, "--raw-json", help="Output raw JSON for programmatic use"
+        ),
+        hotkey: str = typer.Option(
+            ..., help="Path to the hotkey file for your miner", envvar=HOTKEY_ENVVAR
+        ),
+        miner_api: str = typer.Option(
+            "http://127.0.0.1:32000", help="Miner API base URL", envvar=MINER_API_ENVVAR
+        ),
+    ):
+        async def _run():
+            server_ip = await get_tee_server_ip(
+                ip=ip, name=name, hotkey=hotkey, miner_api=miner_api
+            )
+            base_url = build_tee_base_url(server_ip)
+            status, data = await send_tee_request(base_url, "/cache/purge", "POST", hotkey)
+            if status >= 400:
+                typer.echo(f"Error {status}: {data}", err=True)
+                raise typer.Exit(1)
+            if raw_json or not isinstance(data, dict):
+                print(json.dumps(data, indent=2))
+            else:
+                purge_status = data.get("status", "-")
+                purged = data.get("purged_bytes", 0)
+                console.print(f"[bold]Status:[/bold] {purge_status}")
+                console.print(f"[bold]Freed (stale HF revisions):[/bold] {_format_bytes(purged)}")
 
         asyncio.run(_run())
