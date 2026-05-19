@@ -771,7 +771,8 @@ def unlock_server(
 
 def sync_kubeconfig(
     path: str = typer.Option(
-        "~/.kube/chutes.config", help="Path to your local kubeconfig to update"
+        "~/.kube/chutes.config",
+        help="Path to your local kubeconfig to update (overridden by $KUBECONFIG if set)",
     ),
     hotkey: str = typer.Option(
         ...,
@@ -787,6 +788,12 @@ def sync_kubeconfig(
     """
     Fetch the merged kubeconfig from the miner API and write it locally.
     """
+    kubeconfig_env = os.environ.get("KUBECONFIG", "")
+    if kubeconfig_env:
+        path = kubeconfig_env.split(":")[0]
+
+    expanded_path = os.path.expanduser(path)
+    typer.confirm(f"Write kubeconfig to: {expanded_path}\nContinue?", abort=True)
 
     async def _sync_kubeconfig():
         nonlocal hotkey
@@ -798,13 +805,8 @@ def sync_kubeconfig(
             ) as resp:
                 kubeconfig = await resp.json()
 
-        # Expand user path (handles ~)
-        expanded_path = os.path.expanduser(path)
-
-        # Create parent directories if they don't exist
         ensure_parent_directory(expanded_path)
 
-        # Write kubeconfig to file
         with open(expanded_path, "w") as f:
             yaml.dump(kubeconfig, f, default_flow_style=False)
 
@@ -819,7 +821,8 @@ def sync_node_kubeconfig(
         ..., help="Name of the context to import from the node's kubeconfig"
     ),
     path: str = typer.Option(
-        "~/.kube/chutes.config", help="Path to your local kubeconfig to update"
+        "~/.kube/chutes.config",
+        help="Path to your local kubeconfig to update (overridden by $KUBECONFIG if set)",
     ),
     hotkey: str = typer.Option(
         ...,
@@ -833,6 +836,12 @@ def sync_node_kubeconfig(
     ),
 ):
     """Fetch kubeconfig directly from a node and merge a single context locally."""
+    kubeconfig_env = os.environ.get("KUBECONFIG", "")
+    if kubeconfig_env:
+        path = kubeconfig_env.split(":")[0]
+
+    expanded_path = os.path.expanduser(path)
+    typer.confirm(f"Write kubeconfig to: {expanded_path}\nContinue?", abort=True)
 
     async def _fetch_agent_kubeconfig():
         headers, _ = sign_request(hotkey, purpose="registration", management=True)
@@ -857,7 +866,6 @@ def sync_node_kubeconfig(
         source_config = ensure_kubeconfig_structure(source_config)
         bundle = extract_context_bundle(source_config, context_name)
 
-        expanded_path = os.path.expanduser(path)
         ensure_parent_directory(expanded_path)
 
         if os.path.exists(expanded_path):
