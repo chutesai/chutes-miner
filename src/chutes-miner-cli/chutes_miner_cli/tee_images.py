@@ -1,5 +1,5 @@
 """
-TEE VM image commands: image-list, image-pull, image-pull-status, image-delete, image-prune.
+TEE VM image commands: image-list, image-delete, image-prune.
 """
 
 import asyncio
@@ -31,19 +31,6 @@ def _format_bytes(n: Optional[int]) -> str:
     if n < 1024**3:
         return f"{n / 1024**2:.1f} MB"
     return f"{n / 1024**3:.1f} GB"
-
-
-_PULL_STATUS_STYLES = {
-    "pending": "yellow",
-    "in_progress": "yellow",
-    "completed": "green",
-    "failed": "red",
-}
-
-
-def _styled_pull_status(status: str) -> str:
-    style = _PULL_STATUS_STYLES.get(status)
-    return f"[{style}]{status}[/{style}]" if style else status
 
 
 def _shorten_digest(s: str, max_len: int = 19) -> str:
@@ -117,29 +104,6 @@ def display_image_list(data: dict[str, Any]) -> None:
     console.print(table)
 
 
-def display_image_pull_status(data: dict[str, Any]) -> None:
-    """Pretty-print pull status table."""
-    pulls = data.get("pulls") or []
-    if not pulls:
-        console.print("No pull status entries.")
-        return
-    table = Table(title="Image pull status", box=box.ROUNDED)
-    table.add_column("Image Ref", style="cyan")
-    table.add_column("Status")
-    table.add_column("Error")
-    for p in pulls:
-        status = p.get("status", "-")
-        err = p.get("error") or "-"
-        if err != "-":
-            err = f"[red]{err}[/red]"
-        table.add_row(
-            p.get("image_ref", "-"),
-            _styled_pull_status(status),
-            err,
-        )
-    console.print(table)
-
-
 def display_image_prune(data: dict[str, Any]) -> None:
     """Pretty-print prune result."""
     status = data.get("status", "-")
@@ -184,83 +148,6 @@ def register(app: typer.Typer) -> None:
                 print(json.dumps(data, indent=2))
             else:
                 display_image_list(data)
-
-        asyncio.run(_run())
-
-    @app.command("image-pull", help="Start image pull (POST /images/pull)")
-    def image_pull(
-        ip: Optional[str] = typer.Option(
-            None, "--ip", help="TEE server IP (use instead of --name to skip API lookup)"
-        ),
-        name: Optional[str] = typer.Option(
-            None, "--name", "-n", help="TEE node (server) name (resolve IP via miner API)"
-        ),
-        image: str = typer.Option(
-            ..., "--image", help="Image: short form (sglang:tag) or full (registry/org/repo:tag)"
-        ),
-        hotkey: str = typer.Option(
-            ..., help="Path to the hotkey file for your miner", envvar=HOTKEY_ENVVAR
-        ),
-        miner_api: str = typer.Option(
-            "http://127.0.0.1:32000", help="Miner API base URL", envvar=MINER_API_ENVVAR
-        ),
-    ):
-        async def _run():
-            server_ip = await get_tee_server_ip(
-                ip=ip, name=name, hotkey=hotkey, miner_api=miner_api
-            )
-            base_url = build_tee_base_url(server_ip)
-            status, data = await send_tee_request(
-                base_url,
-                "/images/pull",
-                "POST",
-                hotkey,
-                payload={"image": image},
-            )
-            if status >= 400:
-                typer.echo(f"Error {status}: {data}", err=True)
-                raise typer.Exit(1)
-            print(json.dumps(data, indent=2))
-
-        asyncio.run(_run())
-
-    @app.command("image-pull-status", help="Get pull status (all or one image)")
-    def image_pull_status(
-        ip: Optional[str] = typer.Option(
-            None, "--ip", help="TEE server IP (use instead of --name to skip API lookup)"
-        ),
-        name: Optional[str] = typer.Option(
-            None, "--name", "-n", help="TEE node (server) name (resolve IP via miner API)"
-        ),
-        image: Optional[str] = typer.Option(
-            None, "--image", help="Optional image to filter (short or full form)"
-        ),
-        raw_json: bool = typer.Option(
-            False, "--raw-json", help="Output raw JSON for programmatic use"
-        ),
-        hotkey: str = typer.Option(
-            ..., help="Path to the hotkey file for your miner", envvar=HOTKEY_ENVVAR
-        ),
-        miner_api: str = typer.Option(
-            "http://127.0.0.1:32000", help="Miner API base URL", envvar=MINER_API_ENVVAR
-        ),
-    ):
-        async def _run():
-            server_ip = await get_tee_server_ip(
-                ip=ip, name=name, hotkey=hotkey, miner_api=miner_api
-            )
-            base_url = build_tee_base_url(server_ip)
-            params = {} if image is None else {"image": image}
-            status, data = await send_tee_request(
-                base_url, "/images/pull/status", "GET", hotkey, params=params
-            )
-            if status >= 400:
-                typer.echo(f"Error {status}: {data}", err=True)
-                raise typer.Exit(1)
-            if raw_json or not isinstance(data, dict):
-                print(json.dumps(data, indent=2))
-            else:
-                display_image_pull_status(data)
 
         asyncio.run(_run())
 
