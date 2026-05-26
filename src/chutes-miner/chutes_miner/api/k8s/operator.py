@@ -1056,6 +1056,7 @@ class K8sOperator(abc.ABC):
         disk_gb: int = 10,
         extra_labels: dict[str, str] = {},
         extra_service_ports: list[dict[str, Any]] = [],
+        vm_version: Optional[str] = None,  # TRANSITION CODE — remove with static-registry cutover
     ) -> Tuple[Deployment, V1Job]:
         """Deploy a chute!"""
         try:
@@ -1093,6 +1094,7 @@ class K8sOperator(abc.ABC):
                 job_id=job_id,
                 config_id=config_id,
                 disk_gb=disk_gb,
+                vm_version=vm_version,
             )
 
             # Deploy the chute
@@ -1471,6 +1473,7 @@ class K8sOperator(abc.ABC):
         job_id: Optional[str] = None,
         config_id: Optional[str] = None,
         disk_gb: int = 10,
+        vm_version: Optional[str] = None,  # TRANSITION CODE — remove with static-registry cutover
     ) -> V1Job:
         probe_port = self._get_probe_port(chute)
         job = build_chute_job(
@@ -1484,6 +1487,7 @@ class K8sOperator(abc.ABC):
             job_id=job_id,
             config_id=config_id,
             disk_gb=disk_gb,
+            vm_version=vm_version,
         )
 
         try:

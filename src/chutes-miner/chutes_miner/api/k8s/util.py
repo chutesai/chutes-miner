@@ -58,9 +58,19 @@ def build_chute_job(
     job_id: Optional[str] = None,
     config_id: Optional[str] = None,
     disk_gb: int = 10,
+    vm_version: Optional[str] = None,  # TRANSITION CODE — remove with static-registry cutover
 ) -> V1Job:
     cpu = str(server.cpu_per_gpu * chute.gpu_count)
     ram = str(server.memory_per_gpu * chute.gpu_count) + "Gi"
+    # TRANSITION CODE — remove once all TEE VMs have migrated to the static registry hostname.
+    # When removing: delete the vm_version parameter, this block, and registry_host; replace the
+    # image line below with a hardcoded "localregistry.chutes.ai" prefix.
+    use_static_registry = bool(
+        vm_version
+        and settings.static_registry_min_version
+        and semcomp(vm_version, settings.static_registry_min_version) >= 0
+    )
+    registry_host = "localregistry.chutes.ai" if use_static_registry else f"{server.validator.lower()}.localregistry.chutes.ai"
     deployment_labels = {
         "chutes/deployment-id": deployment_id,
         "chutes/chute": "true",
@@ -256,7 +266,7 @@ def build_chute_job(
                     containers=[
                         V1Container(
                             name="chute",
-                            image=f"{server.validator.lower()}.localregistry.chutes.ai:{settings.registry_proxy_port}/{chute.image}",
+                            image=f"{registry_host}:{settings.registry_proxy_port}/{chute.image}",
                             image_pull_policy="Always",
                             env=[
                                 V1EnvVar(

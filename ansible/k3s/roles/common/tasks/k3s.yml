@@ -46,7 +46,7 @@
 
     - name: Set registry hostname
       ansible.builtin.set_fact:
-        registry_hostname: "{{ validator | lower }}.localregistry.chutes.ai"
+        registry_hostname: "localregistry.chutes.ai"
 
     - name: Create registries.yaml for K3s
       ansible.builtin.template:

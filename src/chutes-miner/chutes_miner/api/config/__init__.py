@@ -77,6 +77,7 @@ class Settings(CommonSettings):
     graval_bootstrap_timeout: int = int(os.getenv("GRAVAL_BOOTSTRAP_TIMEOUT", "900"))
     debug: bool = os.getenv("DEBUG", "false").lower() == "true"
     registry_proxy_port: int = int(os.getenv("REGISTRY_PROXY_PORT", "30500"))
+    static_registry_min_version: str = os.getenv("STATIC_REGISTRY_MIN_VERSION", "")
     monitoring_namespace: str = os.getenv("MONITORING_NAMESPACE", "chutes")
     prometheus_url: str = f"http://prometheus-server.{os.getenv('MONITORING_NAMESPACE', 'chutes')}.svc.cluster.local:{os.getenv('PROMETHEUS_PORT', '80')}"
 

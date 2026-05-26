@@ -110,9 +110,9 @@ Each time a chute starts/gets deployed, it also needs to run GraVal to calculate
 
 In order to keep the chute docker images somewhat private (since not all images are public), we employ a registry proxy on each miner that injects authentication via bittensor key signature.
 
-Each docker image appears to kubelet as `[validator hotkey ss58].localregistry.chutes.ai:30500/[image username]/[image name]:[image tag]`
+Each docker image appears to kubelet as `localregistry.chutes.ai:30500/[image username]/[image name]:[image tag]`
 
-This subdomain points to 127.0.0.1 so it always loads from the registry service proxy on each GPU server via NodePort routing and local first k8s service traffic policy.
+This hostname points to 127.0.0.1 so it always loads from the registry service proxy on each GPU server via NodePort routing and local first k8s service traffic policy.
 
 The registry proxy itself is an nginx server that performs an auth subrequest to the miner API.  See the nginx configmap: https://github.com/chutesai/chutes-miner/blob/main/charts/templates/registry-cm.yaml
 

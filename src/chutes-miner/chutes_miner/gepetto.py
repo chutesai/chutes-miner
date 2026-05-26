@@ -30,6 +30,7 @@ from chutes_common.schemas.gpu import GPU
 from chutes_common.schemas.deployment import Deployment
 from chutes_common.exceptions import AgentError
 from chutes_miner.api.exceptions import DeploymentFailure
+from chutes_miner.api.util import semcomp
 from chutes_miner.validator_migrations import run_validator_migrations
 import chutes_miner.api.k8s as k8s
 
@@ -47,6 +48,16 @@ class Gepetto:
         self.remote_metrics = {validator.hotkey: {} for validator in settings.validators}
         # Global active instances across all miners (for preemption decisions)
         self.global_active_instances = {validator.hotkey: [] for validator in settings.validators}
+        # TRANSITION CODE — remove once all TEE VMs have migrated to static registry hostname.
+        # Tracks vm_version per server_id (sourced live from the validator each reconcile cycle).
+        # Used by build_chute_job to choose between localregistry.chutes.ai (new VMs) and
+        # <validator>.localregistry.chutes.ai (old VMs).  When every server consistently reports
+        # a version >= STATIC_REGISTRY_MIN_VERSION this dict, _refresh_server_versions(),
+        # the remote_server_versions lookups at each deploy_chute call site, the vm_version
+        # parameter chain through deploy_chute/_create_job_for_deployment/build_chute_job,
+        # and the use_static_registry / registry_host logic in build_chute_job can all be
+        # deleted and the image line simplified back to a static localregistry.chutes.ai prefix.
+        self.remote_server_versions: Dict[str, str] = {}
         self._scale_lock = asyncio.Lock()
         self._restart_lock = asyncio.Lock()
         self.setup_handlers()
@@ -134,6 +145,51 @@ class Gepetto:
                 f"Failed to refresh global active instances from {validator.hotkey}: {exc}"
             )
 
+    async def _refresh_server_versions(self, validator):
+        """
+        TRANSITION CODE — see self.remote_server_versions for removal instructions.
+
+        Refresh the in-memory vm version map from the validator's /miner/servers/ endpoint.
+        The version is the TEE measurement version reconciled from the TDX quote by the
+        validator — the miner has no independent way to know it, so it is never persisted
+        locally and is re-fetched every reconcile cycle.
+
+        Logs a warning for every server still running a pre-migration version so operators
+        can track cutover progress and know when this code is safe to remove.
+        """
+        if not settings.static_registry_min_version:
+            return
+        try:
+            async with aiohttp.ClientSession(raise_for_status=True) as session:
+                headers, _ = sign_request(purpose="miner")
+                async with session.get(
+                    f"{validator.api}/miner/servers/", headers=headers
+                ) as resp:
+                    data = await resp.json()
+            legacy_servers = []
+            for remote_server in data.get("servers") or []:
+                server_id = remote_server.get("server_id")
+                version = remote_server.get("version")
+                if server_id:
+                    self.remote_server_versions[server_id] = version
+                    if not version or semcomp(version, settings.static_registry_min_version) < 0:
+                        legacy_servers.append(remote_server.get("name") or server_id)
+            if legacy_servers:
+                logger.warning(
+                    f"TRANSITION: {len(legacy_servers)} server(s) still on legacy registry hostname "
+                    f"({', '.join(legacy_servers)}). Remove static-registry transition code once all "
+                    f"servers report version >= {settings.static_registry_min_version!r}."
+                )
+            else:
+                logger.info(
+                    "TRANSITION: All servers are on the new static registry hostname. "
+                    "Consider removing the static-registry transition code (see remote_server_versions in gepetto.py)."
+                )
+        except Exception as exc:
+            logger.error(
+                f"Failed to refresh server versions from {validator.hotkey}: {exc}"
+            )
+
     async def remote_refresh_all(self):
         """
         Refresh chutes from the validators.
@@ -155,6 +211,8 @@ class Gepetto:
                 )
             # Also refresh global active instances for preemption decisions
             await self._refresh_global_active_instances(validator)
+            # Sync vm_version from the validator so pod scheduling can choose the correct registry hostname
+            await self._refresh_server_versions(validator)
 
     @staticmethod
     async def load_chute(chute_id: str, version: str, validator: str):
@@ -701,6 +759,7 @@ class Gepetto:
                 extra_labels={"chutes/job": "true"},
                 disk_gb=disk_gb,
                 extra_service_ports=extra_ports,
+                vm_version=self.remote_server_versions.get(server.server_id),
             )
             logger.success(
                 f"Successfully deployed {job_id=} {chute.chute_id=} on {server.server_id=}: {deployment.deployment_id=}"
@@ -1263,6 +1322,7 @@ class Gepetto:
                         server_id,
                         token=launch_token["token"] if launch_token else None,
                         config_id=launch_token["config_id"] if launch_token else None,
+                        vm_version=self.remote_server_versions.get(server_id),
                     )
                     logger.success(
                         f"Successfully updated {chute_id=} to {version=} on {server_id=}: {deployment.deployment_id=}"
@@ -1636,6 +1696,7 @@ class Gepetto:
                 config_id=launch_token["config_id"] if launch_token else None,
                 disk_gb=disk_gb,
                 extra_service_ports=extra_ports,
+                vm_version=self.remote_server_versions.get(target_server.server_id),
             )
             logger.success(
                 f"Successfully deployed {chute.chute_id=} {job_id=} via preemption on {server.server_id=}: {deployment.deployment_id=}"
@@ -1713,6 +1774,7 @@ class Gepetto:
                                 server.server_id,
                                 token=launch_token["token"] if launch_token else None,
                                 config_id=launch_token["config_id"] if launch_token else None,
+                                vm_version=self.remote_server_versions.get(server.server_id),
                             )
                             logger.success(
                                 f"Successfully deployed {chute.chute_id=} on {server.server_id=}: {deployment.deployment_id=}"
