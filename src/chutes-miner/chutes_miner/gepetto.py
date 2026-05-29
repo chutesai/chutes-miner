@@ -162,9 +162,7 @@ class Gepetto:
         try:
             async with aiohttp.ClientSession(raise_for_status=True) as session:
                 headers, _ = sign_request(purpose="miner")
-                async with session.get(
-                    f"{validator.api}/miner/servers/", headers=headers
-                ) as resp:
+                async with session.get(f"{validator.api}/miner/servers/", headers=headers) as resp:
                     data = await resp.json()
             legacy_servers = []
             for remote_server in data.get("servers") or []:
@@ -186,9 +184,7 @@ class Gepetto:
                     "Consider removing the static-registry transition code (see remote_server_versions in gepetto.py)."
                 )
         except Exception as exc:
-            logger.error(
-                f"Failed to refresh server versions from {validator.hotkey}: {exc}"
-            )
+            logger.error(f"Failed to refresh server versions from {validator.hotkey}: {exc}")
 
     async def remote_refresh_all(self):
         """

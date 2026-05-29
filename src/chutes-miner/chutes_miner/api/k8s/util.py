@@ -70,7 +70,11 @@ def build_chute_job(
         and settings.static_registry_min_version
         and semcomp(vm_version, settings.static_registry_min_version) >= 0
     )
-    registry_host = "localregistry.chutes.ai" if use_static_registry else f"{server.validator.lower()}.localregistry.chutes.ai"
+    registry_host = (
+        "localregistry.chutes.ai"
+        if use_static_registry
+        else f"{server.validator.lower()}.localregistry.chutes.ai"
+    )
     deployment_labels = {
         "chutes/deployment-id": deployment_id,
         "chutes/chute": "true",

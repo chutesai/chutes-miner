@@ -87,7 +87,15 @@ async def deploy_chute(
     Deploy a chute!
     """
     return await K8sOperator().deploy_chute(
-        chute_id, server_id, token, job_id, config_id, disk_gb, extra_labels, extra_service_ports, vm_version
+        chute_id,
+        server_id,
+        token,
+        job_id,
+        config_id,
+        disk_gb,
+        extra_labels,
+        extra_service_ports,
+        vm_version,
     )
 
 
