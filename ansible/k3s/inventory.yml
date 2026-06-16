@@ -12,6 +12,28 @@ all:
           ansible_host: 10.0.0.2
         chutes-miner-gpu-1:
           ansible_host: 10.0.0.3
+    # TEE (confidential VM) servers.
+    #
+    # These run inside confidential VMs and are provisioned/managed by a separate
+    # Ansible repo (sek8s), so this playbook never configures them — the
+    # provisioning plays in site.yml explicitly exclude `tee_workers`. They are
+    # listed here ONLY so the monitoring chart federates their Prometheus.
+    #
+    # In practice you keep TEE hosts in their own inventory file and merge it in
+    # just for the monitoring deploy, e.g.:
+    #
+    #   ansible-playbook -i inventory.yml -i tee-inventory.yml \
+    #     playbooks/deploy-charts.yml --tags monitoring-charts
+    #
+    # Only `ansible_host` is required: it must be the TEE *host* public IP. The
+    # host bridge forwards the NodePort range (30000-32767) over the bridge to
+    # the VM, where Prometheus is exposed on NodePort 30090. Set `federation_port`
+    # per-host only if the VM uses a non-default Prometheus NodePort.
+    tee_workers:
+      hosts: {}
+        # chutes-miner-tee-0:
+        #   ansible_host: 10.0.0.4
+        #   # federation_port: 30090
   vars:
     ansible_user: ubuntu
     ansible_ssh_private_key_file: ~/.ssh/your_key.pem

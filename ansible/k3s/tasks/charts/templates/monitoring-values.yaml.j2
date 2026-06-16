@@ -84,7 +84,18 @@ prometheus:
     - '{job="kubernetes-nodes-cadvisor"}'
     - '{job="node-exporter"}'
     clusters:
-{% for host in groups['workers'] %}
-    - endpoint: {{ hostvars[host]['public_ip'] }}:30090
+{# Federate from every GPU worker plus any TEE servers. TEE hosts live in a
+   separate inventory (managed by a different repo) and are not provisioned by
+   this playbook, so they are kept in their own `tee_workers` group and only
+   merged in for the monitoring deploy. #}
+{% for host in (groups['workers'] | default([])) + (groups['tee_workers'] | default([])) %}
+{# Resolve the externally-reachable IP. Regular workers get `public_ip` set as a
+   fact during site.yml; TEE hosts are not in that play, so fall back to
+   external_ip / ansible_host straight from inventory. For a TEE server this is
+   the *host* IP, whose bridge DNATs the NodePort range (30000-32767, incl.
+   Prometheus 30090) through to the VM. #}
+{%   set fed_ip = hostvars[host]['public_ip'] | default(hostvars[host]['external_ip'] | default(hostvars[host]['ansible_host'])) %}
+{%   set fed_port = hostvars[host]['federation_port'] | default(30090) %}
+    - endpoint: {{ fed_ip }}:{{ fed_port }}
       name: {{ host }}
 {% endfor %}
