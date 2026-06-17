@@ -58,6 +58,7 @@ def build_chute_job(
     job_id: Optional[str] = None,
     config_id: Optional[str] = None,
     disk_gb: int = 10,
+    vm_version: Optional[str] = None,
 ) -> V1Job:
     cpu = str(server.cpu_per_gpu * chute.gpu_count)
     ram = str(server.memory_per_gpu * chute.gpu_count) + "Gi"
@@ -125,16 +126,28 @@ def build_chute_job(
     ]
 
     if chute.tee:
-        extra_env += [
-            V1EnvVar(
-                name="HF_HUB_DISABLE_XET",
-                value="1",
-            ),
-            V1EnvVar(
-                name="HF_HUB_ENABLE_HF_TRANSFER",
-                value="1",
-            ),
-        ]
+        if vm_version and semcomp(vm_version, "1.3.1") >= 0:
+            extra_env += [
+                V1EnvVar(
+                    name="HF_XET_FIXED_DOWNLOAD_CONCURRENCY",
+                    value="16",
+                ),
+                V1EnvVar(
+                    name="TOKIO_WORKER_THREADS",
+                    value="8",
+                ),
+            ]
+        else:
+            extra_env += [
+                V1EnvVar(
+                    name="HF_HUB_DISABLE_XET",
+                    value="1",
+                ),
+                V1EnvVar(
+                    name="HF_HUB_ENABLE_HF_TRANSFER",
+                    value="1",
+                ),
+            ]
 
     code_volumes = []
     code_volume_mounts = []

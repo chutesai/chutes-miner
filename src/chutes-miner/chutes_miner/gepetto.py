@@ -47,6 +47,10 @@ class Gepetto:
         self.remote_metrics = {validator.hotkey: {} for validator in settings.validators}
         # Global active instances across all miners (for preemption decisions)
         self.global_active_instances = {validator.hotkey: [] for validator in settings.validators}
+        # Tracks the TEE VM version per server_id, sourced live from the validator each reconcile
+        # cycle. Passed through to build_chute_job so pod scheduling can tune the runtime to the
+        # VM version (e.g. HF download env vars for VMs >= 1.3.1).
+        self.remote_server_versions: Dict[str, str] = {}
         self._scale_lock = asyncio.Lock()
         self._restart_lock = asyncio.Lock()
         self.setup_handlers()
@@ -134,6 +138,27 @@ class Gepetto:
                 f"Failed to refresh global active instances from {validator.hotkey}: {exc}"
             )
 
+    async def _refresh_server_versions(self, validator):
+        """
+        Refresh the in-memory vm version map from the validator's /miner/servers/ endpoint.
+
+        The version is the TEE measurement version reconciled from the TDX quote by the
+        validator — the miner has no independent way to know it, so it is never persisted
+        locally and is re-fetched every reconcile cycle. It feeds build_chute_job so pod
+        scheduling can tune the runtime to the VM version.
+        """
+        try:
+            async with aiohttp.ClientSession(raise_for_status=True) as session:
+                headers, _ = sign_request(purpose="miner")
+                async with session.get(f"{validator.api}/miner/servers/", headers=headers) as resp:
+                    data = await resp.json()
+            for remote_server in data.get("servers") or []:
+                server_id = remote_server.get("server_id")
+                if server_id:
+                    self.remote_server_versions[server_id] = remote_server.get("version")
+        except Exception as exc:
+            logger.error(f"Failed to refresh server versions from {validator.hotkey}: {exc}")
+
     async def remote_refresh_all(self):
         """
         Refresh chutes from the validators.
@@ -155,6 +180,8 @@ class Gepetto:
                 )
             # Also refresh global active instances for preemption decisions
             await self._refresh_global_active_instances(validator)
+            # Sync vm_version from the validator so pod scheduling can tune the runtime to the VM version
+            await self._refresh_server_versions(validator)
 
     @staticmethod
     async def load_chute(chute_id: str, version: str, validator: str):
@@ -701,6 +728,7 @@ class Gepetto:
                 extra_labels={"chutes/job": "true"},
                 disk_gb=disk_gb,
                 extra_service_ports=extra_ports,
+                vm_version=self.remote_server_versions.get(server.server_id),
             )
             logger.success(
                 f"Successfully deployed {job_id=} {chute.chute_id=} on {server.server_id=}: {deployment.deployment_id=}"
@@ -1263,6 +1291,7 @@ class Gepetto:
                         server_id,
                         token=launch_token["token"] if launch_token else None,
                         config_id=launch_token["config_id"] if launch_token else None,
+                        vm_version=self.remote_server_versions.get(server_id),
                     )
                     logger.success(
                         f"Successfully updated {chute_id=} to {version=} on {server_id=}: {deployment.deployment_id=}"
@@ -1636,6 +1665,7 @@ class Gepetto:
                 config_id=launch_token["config_id"] if launch_token else None,
                 disk_gb=disk_gb,
                 extra_service_ports=extra_ports,
+                vm_version=self.remote_server_versions.get(target_server.server_id),
             )
             logger.success(
                 f"Successfully deployed {chute.chute_id=} {job_id=} via preemption on {server.server_id=}: {deployment.deployment_id=}"
@@ -1713,6 +1743,7 @@ class Gepetto:
                                 server.server_id,
                                 token=launch_token["token"] if launch_token else None,
                                 config_id=launch_token["config_id"] if launch_token else None,
+                                vm_version=self.remote_server_versions.get(server.server_id),
                             )
                             logger.success(
                                 f"Successfully deployed {chute.chute_id=} on {server.server_id=}: {deployment.deployment_id=}"
