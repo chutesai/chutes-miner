@@ -58,6 +58,7 @@ def build_chute_job(
     job_id: Optional[str] = None,
     config_id: Optional[str] = None,
     disk_gb: int = 10,
+    vm_version: Optional[str] = None,
 ) -> V1Job:
     cpu = str(server.cpu_per_gpu * chute.gpu_count)
     ram = str(server.memory_per_gpu * chute.gpu_count) + "Gi"
