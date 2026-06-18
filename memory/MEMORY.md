@@ -1,1 +1,0 @@
-- [TEE Prometheus federation](tee-prometheus-federation.md) — how TEE confidential-VM metrics reach the control-plane Prometheus (NodePort 30090 + bridge DNAT)

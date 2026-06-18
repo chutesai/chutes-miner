@@ -11,6 +11,7 @@ test*.py
 .localenv
 *.bak
 .continue/
+memory
 
 # Distribution / packaging
 .Python
