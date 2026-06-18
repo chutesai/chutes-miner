@@ -3,6 +3,7 @@ Gepetto - coordinate all the things.
 """
 
 import re
+import random
 import aiohttp
 import asyncio
 import hashlib
@@ -32,6 +33,12 @@ from chutes_common.exceptions import AgentError
 from chutes_miner.api.exceptions import DeploymentFailure
 from chutes_miner.validator_migrations import run_validator_migrations
 import chutes_miner.api.k8s as k8s
+
+
+# When scaling up, randomly pick from up to this many of the tightest-fitting servers
+# (rather than always the single most-utilized one) to spread load and avoid repeatedly
+# scheduling onto a server that has an issue the disk check doesn't catch.
+SCALE_UP_CANDIDATE_POOL = 2
 
 
 class Gepetto:
@@ -1401,13 +1408,24 @@ class Gepetto:
                 Server.locked.is_(False),
                 Server.is_tee.is_(chute.tee),
             )
+            # Cheapest first, then best-fit (fewest free GPUs that still satisfy the
+            # chute) so we pack tightly and preserve emptier servers for larger models.
             .order_by(Server.hourly_cost.asc(), text("free_gpus ASC"))
         )
         async with get_session() as session:
             servers = (await session.execute(query)).unique().scalars().all()
+            # Servers come back tightest-fit first. Rather than always returning the
+            # single most-utilized server (which black-holes scheduling onto one box if
+            # it has an issue the disk check misses), gather the top few best-fit servers
+            # that pass the disk check and pick one at random to spread load.
+            candidates = []
             for server in servers:
                 if await k8s.check_node_has_disk_available(server.name, disk_gb):
-                    return server
+                    candidates.append(server)
+                    if len(candidates) >= SCALE_UP_CANDIDATE_POOL:
+                        break
+            if candidates:
+                return random.choice(candidates)
         return None
 
     def _get_global_instance_count(self, validator: str, chute_id: str) -> int:
@@ -1863,7 +1881,7 @@ class Gepetto:
             )
 
         # Get all pods with config_id labels for orphan detection
-        k8s_config_ids = set()
+        k8s_config_ids = None
         try:
             pods = K8sOperator().get_pods(label_selector="chutes/config-id")
             k8s_config_ids = {pod.metadata.labels["chutes/config-id"] for pod in pods.items}
@@ -1956,8 +1974,13 @@ class Gepetto:
                                 f"Updating deployment {deployment.deployment_id} active status to {deployment.active}"
                             )
 
-                # Early check for orphaned deployments with config_id
-                if deployment.config_id and deployment.config_id not in k8s_config_ids:
+                # Early check for orphaned deployments with config_id.
+                # Skip if k8s_config_ids is None (pod scan failed) to avoid mass deletion.
+                if (
+                    k8s_config_ids is not None
+                    and deployment.config_id
+                    and deployment.config_id not in k8s_config_ids
+                ):
                     logger.warning(
                         f"Deployment {deployment.deployment_id} has config_id={deployment.config_id} but no matching pod in k8s, cleaning up"
                     )
