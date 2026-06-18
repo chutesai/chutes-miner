@@ -1976,7 +1976,11 @@ class Gepetto:
 
                 # Early check for orphaned deployments with config_id.
                 # Skip if k8s_config_ids is None (pod scan failed) to avoid mass deletion.
-                if k8s_config_ids is not None and deployment.config_id and deployment.config_id not in k8s_config_ids:
+                if (
+                    k8s_config_ids is not None
+                    and deployment.config_id
+                    and deployment.config_id not in k8s_config_ids
+                ):
                     logger.warning(
                         f"Deployment {deployment.deployment_id} has config_id={deployment.config_id} but no matching pod in k8s, cleaning up"
                     )

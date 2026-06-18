@@ -1155,8 +1155,7 @@ class K8sOperator(abc.ABC):
         # Deployment.gpus relationships, which can be stale or incomplete
         # in async contexts with joined loading.
         available_gpus = {
-            gpu.gpu_id for gpu in server.gpus
-            if gpu.verified and gpu.deployment_id is None
+            gpu.gpu_id for gpu in server.gpus if gpu.verified and gpu.deployment_id is None
         }
         gpus_allocated = sum(1 for gpu in server.gpus if gpu.deployment_id is not None)
         if len(available_gpus) < chute.gpu_count:
@@ -1176,7 +1175,9 @@ class K8sOperator(abc.ABC):
     ):
         # Immediately track this deployment (before actually creating it) to avoid allocation contention.
         deployment_id = str(uuid.uuid4())
-        gpu_candidates = [gpu for gpu in server.gpus if gpu.gpu_id in available_gpus][: chute.gpu_count]
+        gpu_candidates = [gpu for gpu in server.gpus if gpu.gpu_id in available_gpus][
+            : chute.gpu_count
+        ]
         gpu_ids = [gpu.gpu_id for gpu in gpu_candidates]
         gpu_uuids = [f"GPU-{str(uuid.UUID(gid))}" for gid in gpu_ids]
         logger.info(
