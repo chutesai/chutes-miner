@@ -56,6 +56,7 @@ from chutes_miner.api.k8s.util import build_chute_job, build_chute_service
 from chutes_common.schemas.server import Server
 from chutes_common.schemas.chute import Chute
 from chutes_common.schemas.deployment import Deployment
+from chutes_common.schemas.gpu import GPU
 from chutes_miner.api.config import (
     k8s_api_client,
     k8s_core_client,
@@ -1056,6 +1057,7 @@ class K8sOperator(abc.ABC):
         disk_gb: int = 10,
         extra_labels: dict[str, str] = {},
         extra_service_ports: list[dict[str, Any]] = [],
+        vm_version: Optional[str] = None,
     ) -> Tuple[Deployment, V1Job]:
         """Deploy a chute!"""
         try:
@@ -1093,6 +1095,7 @@ class K8sOperator(abc.ABC):
                 job_id=job_id,
                 config_id=config_id,
                 disk_gb=disk_gb,
+                vm_version=vm_version,
             )
 
             # Deploy the chute
@@ -1148,13 +1151,14 @@ class K8sOperator(abc.ABC):
         return server
 
     def _verify_gpus(self, chute: Chute, server: Server):
-        # Make sure the node has capacity.
-        gpus_allocated = 0
-        available_gpus = {gpu.gpu_id for gpu in server.gpus if gpu.verified}
-        for deployment in server.deployments:
-            gpus_allocated += len(deployment.gpus)
-            available_gpus -= {gpu.gpu_id for gpu in deployment.gpus}
-        if len(available_gpus) - chute.gpu_count < 0:
+        # Use the GPU's deployment_id FK directly rather than walking
+        # Deployment.gpus relationships, which can be stale or incomplete
+        # in async contexts with joined loading.
+        available_gpus = {
+            gpu.gpu_id for gpu in server.gpus if gpu.verified and gpu.deployment_id is None
+        }
+        gpus_allocated = sum(1 for gpu in server.gpus if gpu.deployment_id is not None)
+        if len(available_gpus) < chute.gpu_count:
             raise DeploymentFailure(
                 f"Server {server.server_id} name={server.name} cannot allocate {chute.gpu_count} GPUs, already using {gpus_allocated} of {len(server.gpus)}"
             )
@@ -1171,8 +1175,11 @@ class K8sOperator(abc.ABC):
     ):
         # Immediately track this deployment (before actually creating it) to avoid allocation contention.
         deployment_id = str(uuid.uuid4())
-        gpus = list([gpu for gpu in server.gpus if gpu.gpu_id in available_gpus])[: chute.gpu_count]
-        gpu_uuids = [f"GPU-{str(uuid.UUID(gpu.gpu_id))}" for gpu in gpus]
+        gpu_candidates = [gpu for gpu in server.gpus if gpu.gpu_id in available_gpus][
+            : chute.gpu_count
+        ]
+        gpu_ids = [gpu.gpu_id for gpu in gpu_candidates]
+        gpu_uuids = [f"GPU-{str(uuid.UUID(gid))}" for gid in gpu_ids]
         logger.info(
             f"Assigning {len(gpu_uuids)} GPUs [{gpu_uuids}] to {chute.chute_id=} on {server.name=}"
         )
@@ -1190,7 +1197,25 @@ class K8sOperator(abc.ABC):
             preemptible=chute.preemptible,
         )
         session.add(deployment)
-        deployment.gpus = gpus
+        await session.flush()
+
+        # Atomically claim only GPUs that are still unassigned.
+        # The WHERE deployment_id IS NULL guard prevents stealing
+        # GPUs that were concurrently assigned to another deployment.
+        result = await session.execute(
+            update(GPU)
+            .where(
+                GPU.gpu_id.in_(gpu_ids),
+                GPU.deployment_id.is_(None),
+            )
+            .values(deployment_id=deployment_id)
+        )
+        claimed = result.rowcount
+        if claimed < chute.gpu_count:
+            raise DeploymentFailure(
+                f"Could only claim {claimed}/{chute.gpu_count} GPUs on {server.name} "
+                f"(contention with concurrent deployment)"
+            )
         await session.commit()
 
         return deployment_id, gpu_uuids
@@ -1471,6 +1496,7 @@ class K8sOperator(abc.ABC):
         job_id: Optional[str] = None,
         config_id: Optional[str] = None,
         disk_gb: int = 10,
+        vm_version: Optional[str] = None,
     ) -> V1Job:
         probe_port = self._get_probe_port(chute)
         job = build_chute_job(
@@ -1484,6 +1510,7 @@ class K8sOperator(abc.ABC):
             job_id=job_id,
             config_id=config_id,
             disk_gb=disk_gb,
+            vm_version=vm_version,
         )
 
         try:

@@ -33,6 +33,5 @@ class GPU(Base):
     deployment = relationship(
         "Deployment",
         back_populates="gpus",
-        cascade="all, delete-orphan",
-        single_parent=True,
+        foreign_keys=[deployment_id],
     )

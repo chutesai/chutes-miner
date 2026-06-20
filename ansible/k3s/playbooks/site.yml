@@ -1,6 +1,6 @@
 ---
 - name: Check for configured nodes
-  hosts: all
+  hosts: "all:!tee_workers"
   become: true
   tags: always
   tasks:
@@ -22,7 +22,7 @@
       run_once: true
 
 - name: Common Setup
-  hosts: all
+  hosts: "all:!tee_workers"
   become: true
   tags:
     - add-nodes
@@ -42,7 +42,7 @@
       when: "not skip_configuration | default(false)"
 
 - name: Setup K3S clusters
-  hosts: all
+  hosts: "all:!tee_workers"
   become: true
   tags:
     - add-nodes
@@ -126,7 +126,7 @@
       when: "not skip_configuration | default(false)"
 
 - name: Mark configuration as complete
-  hosts: all
+  hosts: "all:!tee_workers"
   tags: always
   become: true
   tasks:

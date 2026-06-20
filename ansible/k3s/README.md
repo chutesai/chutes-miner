@@ -127,6 +127,40 @@ ansible-playbook -i ~/chutes/inventory.yml playbooks/deploy-charts.yml --tags mi
 ansible-playbook -i ~/chutes/inventory.yml playbooks/deploy-charts.yml --tags monitoring-charts
 ```
 
+## Federate TEE (confidential VM) servers into monitoring
+
+TEE servers run k3s inside a confidential VM and are provisioned by a separate
+repo (`sek8s`), so they are **not** configured by this playbook. They only need
+to be federated into the control-plane Prometheus so their metrics show up in
+Grafana.
+
+Inside the VM, Prometheus is already exposed on NodePort `30090`, and the host
+bridge forwards the NodePort range (`30000-32767`) to the VM — so the TEE *host*
+public IP at port `30090` reaches the VM's Prometheus with no extra setup.
+
+Add the TEE hosts to a `tee_workers` group. Because you typically keep these in
+a separate inventory (managed by the other repo), the cleanest approach is a
+small dedicated inventory file:
+
+```yaml
+# tee-inventory.yml
+all:
+  children:
+    tee_workers:
+      hosts:
+        chutes-miner-tee-0:
+          ansible_host: <tee-host-public-ip>   # host that bridges to the VM
+          # federation_port: 30090             # override only if non-default
+```
+
+Then merge it in for the monitoring deploy only (the provisioning plays in
+`site.yml` exclude `tee_workers`, so TEE hosts are never touched here):
+
+```bash
+ansible-playbook -i ~/chutes/inventory.yml -i ~/chutes/tee-inventory.yml \
+  playbooks/deploy-charts.yml --tags monitoring-charts
+```
+
 ## Restart K8s Resources
 To restart deployments and daemonsets across all clusters:
 

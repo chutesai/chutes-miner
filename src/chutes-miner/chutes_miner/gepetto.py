@@ -3,6 +3,7 @@ Gepetto - coordinate all the things.
 """
 
 import re
+import random
 import aiohttp
 import asyncio
 import hashlib
@@ -34,6 +35,12 @@ from chutes_miner.validator_migrations import run_validator_migrations
 import chutes_miner.api.k8s as k8s
 
 
+# When scaling up, randomly pick from up to this many of the tightest-fitting servers
+# (rather than always the single most-utilized one) to spread load and avoid repeatedly
+# scheduling onto a server that has an issue the disk check doesn't catch.
+SCALE_UP_CANDIDATE_POOL = 2
+
+
 class Gepetto:
     def __init__(self):
         """
@@ -47,6 +54,10 @@ class Gepetto:
         self.remote_metrics = {validator.hotkey: {} for validator in settings.validators}
         # Global active instances across all miners (for preemption decisions)
         self.global_active_instances = {validator.hotkey: [] for validator in settings.validators}
+        # Tracks the TEE VM version per server_id, sourced live from the validator each reconcile
+        # cycle. Passed through to build_chute_job so pod scheduling can tune the runtime to the
+        # VM version (e.g. HF download env vars for VMs >= 1.3.1).
+        self.remote_server_versions: Dict[str, str] = {}
         self._scale_lock = asyncio.Lock()
         self._restart_lock = asyncio.Lock()
         self.setup_handlers()
@@ -134,6 +145,27 @@ class Gepetto:
                 f"Failed to refresh global active instances from {validator.hotkey}: {exc}"
             )
 
+    async def _refresh_server_versions(self, validator):
+        """
+        Refresh the in-memory vm version map from the validator's /miner/servers/ endpoint.
+
+        The version is the TEE measurement version reconciled from the TDX quote by the
+        validator — the miner has no independent way to know it, so it is never persisted
+        locally and is re-fetched every reconcile cycle. It feeds build_chute_job so pod
+        scheduling can tune the runtime to the VM version.
+        """
+        try:
+            async with aiohttp.ClientSession(raise_for_status=True) as session:
+                headers, _ = sign_request(purpose="miner")
+                async with session.get(f"{validator.api}/miner/servers/", headers=headers) as resp:
+                    data = await resp.json()
+            for remote_server in data.get("servers") or []:
+                server_id = remote_server.get("server_id")
+                if server_id:
+                    self.remote_server_versions[server_id] = remote_server.get("version")
+        except Exception as exc:
+            logger.error(f"Failed to refresh server versions from {validator.hotkey}: {exc}")
+
     async def remote_refresh_all(self):
         """
         Refresh chutes from the validators.
@@ -155,6 +187,8 @@ class Gepetto:
                 )
             # Also refresh global active instances for preemption decisions
             await self._refresh_global_active_instances(validator)
+            # Sync vm_version from the validator so pod scheduling can tune the runtime to the VM version
+            await self._refresh_server_versions(validator)
 
     @staticmethod
     async def load_chute(chute_id: str, version: str, validator: str):
@@ -701,6 +735,7 @@ class Gepetto:
                 extra_labels={"chutes/job": "true"},
                 disk_gb=disk_gb,
                 extra_service_ports=extra_ports,
+                vm_version=self.remote_server_versions.get(server.server_id),
             )
             logger.success(
                 f"Successfully deployed {job_id=} {chute.chute_id=} on {server.server_id=}: {deployment.deployment_id=}"
@@ -1263,6 +1298,7 @@ class Gepetto:
                         server_id,
                         token=launch_token["token"] if launch_token else None,
                         config_id=launch_token["config_id"] if launch_token else None,
+                        vm_version=self.remote_server_versions.get(server_id),
                     )
                     logger.success(
                         f"Successfully updated {chute_id=} to {version=} on {server_id=}: {deployment.deployment_id=}"
@@ -1372,13 +1408,24 @@ class Gepetto:
                 Server.locked.is_(False),
                 Server.is_tee.is_(chute.tee),
             )
+            # Cheapest first, then best-fit (fewest free GPUs that still satisfy the
+            # chute) so we pack tightly and preserve emptier servers for larger models.
             .order_by(Server.hourly_cost.asc(), text("free_gpus ASC"))
         )
         async with get_session() as session:
             servers = (await session.execute(query)).unique().scalars().all()
+            # Servers come back tightest-fit first. Rather than always returning the
+            # single most-utilized server (which black-holes scheduling onto one box if
+            # it has an issue the disk check misses), gather the top few best-fit servers
+            # that pass the disk check and pick one at random to spread load.
+            candidates = []
             for server in servers:
                 if await k8s.check_node_has_disk_available(server.name, disk_gb):
-                    return server
+                    candidates.append(server)
+                    if len(candidates) >= SCALE_UP_CANDIDATE_POOL:
+                        break
+            if candidates:
+                return random.choice(candidates)
         return None
 
     def _get_global_instance_count(self, validator: str, chute_id: str) -> int:
@@ -1636,6 +1683,7 @@ class Gepetto:
                 config_id=launch_token["config_id"] if launch_token else None,
                 disk_gb=disk_gb,
                 extra_service_ports=extra_ports,
+                vm_version=self.remote_server_versions.get(target_server.server_id),
             )
             logger.success(
                 f"Successfully deployed {chute.chute_id=} {job_id=} via preemption on {server.server_id=}: {deployment.deployment_id=}"
@@ -1713,6 +1761,7 @@ class Gepetto:
                                 server.server_id,
                                 token=launch_token["token"] if launch_token else None,
                                 config_id=launch_token["config_id"] if launch_token else None,
+                                vm_version=self.remote_server_versions.get(server.server_id),
                             )
                             logger.success(
                                 f"Successfully deployed {chute.chute_id=} on {server.server_id=}: {deployment.deployment_id=}"
@@ -1832,7 +1881,7 @@ class Gepetto:
             )
 
         # Get all pods with config_id labels for orphan detection
-        k8s_config_ids = set()
+        k8s_config_ids = None
         try:
             pods = K8sOperator().get_pods(label_selector="chutes/config-id")
             k8s_config_ids = {pod.metadata.labels["chutes/config-id"] for pod in pods.items}
@@ -1925,8 +1974,13 @@ class Gepetto:
                                 f"Updating deployment {deployment.deployment_id} active status to {deployment.active}"
                             )
 
-                # Early check for orphaned deployments with config_id
-                if deployment.config_id and deployment.config_id not in k8s_config_ids:
+                # Early check for orphaned deployments with config_id.
+                # Skip if k8s_config_ids is None (pod scan failed) to avoid mass deletion.
+                if (
+                    k8s_config_ids is not None
+                    and deployment.config_id
+                    and deployment.config_id not in k8s_config_ids
+                ):
                     logger.warning(
                         f"Deployment {deployment.deployment_id} has config_id={deployment.config_id} but no matching pod in k8s, cleaning up"
                     )
