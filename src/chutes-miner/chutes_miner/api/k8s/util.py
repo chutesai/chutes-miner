@@ -62,6 +62,20 @@ def build_chute_job(
 ) -> V1Job:
     cpu = str(server.cpu_per_gpu * chute.gpu_count)
     ram = str(server.memory_per_gpu * chute.gpu_count) + "Gi"
+
+    # mTLS-capable VMs (>= MTLS_REGISTRY_MIN_VERSION) bundle the updated registry chart and pull
+    # images directly from registry.chutes.ai over mTLS. Older VMs keep pulling through the in-VM
+    # <validator>.localregistry.chutes.ai proxy on the local NodePort.
+    use_direct_registry = bool(
+        vm_version
+        and settings.mtls_registry_min_version
+        and semcomp(vm_version, settings.mtls_registry_min_version) >= 0
+    )
+    registry_ref = (
+        "registry.chutes.ai"
+        if use_direct_registry
+        else f"{server.validator.lower()}.localregistry.chutes.ai:{settings.registry_proxy_port}"
+    )
     deployment_labels = {
         "chutes/deployment-id": deployment_id,
         "chutes/chute": "true",
@@ -269,7 +283,7 @@ def build_chute_job(
                     containers=[
                         V1Container(
                             name="chute",
-                            image=f"{server.validator.lower()}.localregistry.chutes.ai:{settings.registry_proxy_port}/{chute.image}",
+                            image=f"{registry_ref}/{chute.image}",
                             image_pull_policy="Always",
                             env=[
                                 V1EnvVar(

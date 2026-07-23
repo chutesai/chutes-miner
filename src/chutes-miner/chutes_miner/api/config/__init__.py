@@ -77,6 +77,10 @@ class Settings(CommonSettings):
     graval_bootstrap_timeout: int = int(os.getenv("GRAVAL_BOOTSTRAP_TIMEOUT", "900"))
     debug: bool = os.getenv("DEBUG", "false").lower() == "true"
     registry_proxy_port: int = int(os.getenv("REGISTRY_PROXY_PORT", "30500"))
+    # TEE VMs at or above this version ship the mTLS-capable registry chart and pull images
+    # directly from registry.chutes.ai instead of the in-VM <validator>.localregistry.chutes.ai
+    # proxy. Older VMs keep using the proxy. Empty string disables the direct path entirely.
+    mtls_registry_min_version: str = os.getenv("MTLS_REGISTRY_MIN_VERSION", "1.4.0")
     monitoring_namespace: str = os.getenv("MONITORING_NAMESPACE", "chutes")
     prometheus_url: str = f"http://prometheus-server.{os.getenv('MONITORING_NAMESPACE', 'chutes')}.svc.cluster.local:{os.getenv('PROMETHEUS_PORT', '80')}"
 

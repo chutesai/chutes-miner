@@ -43,7 +43,7 @@ def _make_inputs(version: str, tee: bool = False):
     return chute, server, service
 
 
-def _build_job(version: str):
+def _build_job(version: str, vm_version: str = None):
     chute, server, service = _make_inputs(version)
     return build_chute_job(
         deployment_id="deploy-1",
@@ -52,7 +52,35 @@ def _build_job(version: str):
         service=service,
         gpu_uuids=["UUID-1"],
         probe_port=8000,
+        vm_version=vm_version,
     )
+
+
+def _image(job):
+    return job.spec.template.spec.containers[0].image
+
+
+def test_build_chute_job_uses_proxy_when_vm_version_unknown():
+    # No VM version reported → fall back to the legacy in-VM proxy hostname.
+    image = _image(_build_job("0.6.0"))
+    assert image.startswith("validator.localregistry.chutes.ai:")
+    assert image.endswith("/parachutes/test:latest")
+
+
+@pytest.mark.parametrize("vm_version", ["1.3.9", "1.3.0.rc5", "0.9.0"])
+def test_build_chute_job_uses_proxy_for_pre_mtls_vm(vm_version):
+    # VMs below MTLS_REGISTRY_MIN_VERSION (default 1.4.0) keep using the proxy.
+    image = _image(_build_job("0.6.0", vm_version=vm_version))
+    assert image.startswith("validator.localregistry.chutes.ai:")
+    assert image.endswith("/parachutes/test:latest")
+
+
+# semcomp compares only the X.Y.Z prefix, so an rc build of 1.4.0 gates on 1.4.0 (direct).
+@pytest.mark.parametrize("vm_version", ["1.4.0", "1.4.0.rc1", "1.5.2"])
+def test_build_chute_job_uses_direct_registry_for_mtls_vm(vm_version):
+    # VMs at or above MTLS_REGISTRY_MIN_VERSION pull direct from registry.chutes.ai over mTLS.
+    image = _image(_build_job("0.6.0", vm_version=vm_version))
+    assert image == "registry.chutes.ai/parachutes/test:latest"
 
 
 def test_build_chute_job_attaches_code_volume_for_legacy_version():
