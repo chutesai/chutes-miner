@@ -46,6 +46,69 @@ async def test_start_monitoring(resource_monitor):
             mock_register.assert_called_once
 
 @pytest.mark.asyncio
+async def test_auto_start_no_persisted_url_stays_stopped(resource_monitor):
+    """With no persisted URL, auto_start is a no-op and starts no recovery loop."""
+    with patch.object(resource_monitor, '_load_control_plane_url', return_value=None):
+        with patch.object(resource_monitor, '_ensure_recovery_loop') as mock_loop:
+            await resource_monitor.auto_start()
+
+    mock_loop.assert_not_called()
+    assert resource_monitor._recovery_task is None
+
+
+@pytest.mark.asyncio
+async def test_auto_start_connection_failure_recovers_not_errors(resource_monitor):
+    """A failed auto-start must not raise, and must not use the ERROR state.
+
+    Regression: a stale/unreachable persisted control plane URL used to leave the
+    monitor in ERROR, which failed the liveness probe and crash-looped the pod.
+    It now goes to DEGRADED (probe stays healthy) and retries in the background.
+    """
+    url = "http://control-plane.example.com"
+    with patch.object(resource_monitor, '_load_control_plane_url', return_value=url):
+        with patch.object(resource_monitor, '_send_all_resources',
+                          side_effect=Exception("Cannot connect to host")):
+            with patch.object(resource_monitor, '_ensure_recovery_loop') as mock_loop:
+                # Must not raise -- the agent has to stay alive.
+                await resource_monitor.auto_start()
+
+    assert resource_monitor.state == MonitoringState.DEGRADED
+    assert "Not connected" in resource_monitor.status.error_message
+    mock_loop.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_start_connection_failure_recovers_and_raises(resource_monitor):
+    """An explicit start() that can't connect recovers in the background but still
+    surfaces the failure to the caller (DEGRADED, not ERROR)."""
+    from chutes_agent.exceptions import InvalidOperationError
+
+    with patch.object(resource_monitor, '_persist_control_plane_url'):
+        with patch.object(resource_monitor, '_register_cluster',
+                          side_effect=Exception("Cannot connect to host")):
+            with patch.object(resource_monitor, '_ensure_recovery_loop') as mock_loop:
+                with pytest.raises(InvalidOperationError):
+                    await resource_monitor.start("http://control-plane.example.com")
+
+    assert resource_monitor.state == MonitoringState.DEGRADED
+    mock_loop.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_recovery_loop_stops_when_state_leaves_degraded(resource_monitor):
+    """The recovery loop self-terminates once an intentional start/stop moves the
+    state out of DEGRADED -- no cancellation required."""
+    resource_monitor.state = MonitoringState.RUNNING
+    connect = patch.object(resource_monitor, '_try_connect')
+    with patch('asyncio.sleep', new=AsyncMock()):
+        with connect as mock_connect:
+            await resource_monitor._recovery_loop()
+
+    # It observed a non-DEGRADED state and returned without attempting.
+    mock_connect.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_stop_monitoring(resource_monitor):
     """Test stopping monitoring"""
     # Create a mock task

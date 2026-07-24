@@ -19,6 +19,12 @@ class MonitoringState(str, Enum):
     STOPPED = "stopped"
     STARTING = "starting"
     RUNNING = "running"
+    # Not the intended state, but recoverable: a control plane URL is known and
+    # the agent is retrying the connection in the background. Distinct from ERROR
+    # -- the pod stays healthy while it reconnects.
+    DEGRADED = "degraded"
+    # Terminal, unrecoverable failure. Reserved for cases where restarting the
+    # pod is the appropriate escalation (the liveness probe returns 503).
     ERROR = "error"
 
 

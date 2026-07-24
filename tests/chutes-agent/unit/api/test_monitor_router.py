@@ -59,6 +59,37 @@ def test_health_check_different_cluster(mock_settings, client):
     assert response.status_code == 200
     assert response.json() == {"status": "healthy", "cluster": "production-cluster-1"}
 
+@patch('chutes_agent.api.monitor.router.settings')
+def test_health_check_healthy_when_degraded(mock_settings, resource_monitor, client):
+    """Liveness stays healthy in DEGRADED.
+
+    A stale/unreachable persisted control plane URL is a recoverable condition:
+    the probe must not fail (which would crash-loop the pod), so the agent stays
+    up, retries in the background, and can receive a corrective /start.
+    """
+    mock_settings.cluster_name = "test-cluster"
+    resource_monitor._status = MonitoringStatus(
+        state=MonitoringState.DEGRADED, error_message="Not connected to control plane"
+    )
+
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "healthy", "cluster": "test-cluster"}
+
+
+@patch('chutes_agent.api.monitor.router.settings')
+def test_health_check_503_when_error(mock_settings, resource_monitor, client):
+    """Liveness fails (503) only in the terminal ERROR state, so Kubernetes
+    restarts the pod as the intended escalation for unrecoverable failures."""
+    mock_settings.cluster_name = "test-cluster"
+    resource_monitor._status = MonitoringStatus(state=MonitoringState.ERROR)
+
+    response = client.get("/health")
+
+    assert response.status_code == 503
+
+
 def test_health_check_endpoint_structure(app):
     """Test that health check endpoint is properly registered"""
     routes = [route.path for route in app.routes]
