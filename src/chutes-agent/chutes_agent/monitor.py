@@ -44,6 +44,15 @@ class ResourceMonitor:
         self._restart_lock = asyncio.Lock()
         self._restart_task: Optional[asyncio.Task] = None
 
+        # Serializes monitoring lifecycle transitions -- start(), stop(), and each
+        # background recovery attempt -- so they can never build up or tear down
+        # watcher tasks concurrently. Callers coordinate purely through this lock
+        # and the monitoring state; nothing has to cancel the recovery loop.
+        self._transition_lock = asyncio.Lock()
+        # Background loop that retries connecting to the control plane while in the
+        # DEGRADED state (e.g. a persisted URL that is temporarily unreachable).
+        self._recovery_task: Optional[asyncio.Task] = None
+
         # Persistence - using mounted host path for persistence across pod restarts
         self._control_plane_url_file = settings.control_plane_url_file
 
@@ -80,26 +89,28 @@ class ResourceMonitor:
             logger.warning(f"Failed to persist control plane URL: {e}")
 
     def _load_control_plane_url(self) -> Optional[str]:
-        """Load control plane URL from file"""
+        """Load a usable control plane URL from file, or None.
+
+        A missing, empty, or malformed file is treated the same as "no URL": we
+        return None and wait for the control plane to (re)initiate monitoring via
+        ``/start``. It is not raised as an ERROR, because that would 503 the
+        liveness probe and crash-loop the pod over a bad persisted file.
+        """
         try:
             if os.path.exists(self._control_plane_url_file):
                 with open(self._control_plane_url_file, "r") as f:
                     url = f.read().strip()
                 if not url:
-                    raise ValueError("Persisted control plane URL file is empty")
+                    logger.warning("Persisted control plane URL file is empty; ignoring")
+                    return None
 
                 parsed_url = urlparse(url)
                 if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
-                    raise ValueError("Persisted control plane URL is invalid")
+                    logger.warning(f"Persisted control plane URL is invalid, ignoring: {url!r}")
+                    return None
 
                 logger.debug(f"Loaded control plane URL from {self._control_plane_url_file}")
                 return url
-        except ValueError as e:
-            error_message = f"Invalid persisted control plane URL: {e}"
-            logger.error(error_message)
-            self.state = MonitoringState.ERROR
-            self.status.error_message = error_message
-            raise
         except Exception as e:
             logger.warning(f"Failed to load control plane URL: {e}")
         return None
@@ -113,60 +124,189 @@ class ResourceMonitor:
         except Exception as e:
             logger.warning(f"Failed to clear control plane URL: {e}")
 
+    async def _stop_and_clear_url(self):
+        """Stop monitoring tasks and forget the persisted control plane URL.
+
+        This is intentional local de-registration: we are giving up on the
+        current URL and must NOT auto-resume against it on the next start. Keep it
+        distinct from a plain task stop (shutdown/restart), which deliberately
+        preserves the persisted URL so ``auto_start`` can resume after a pod
+        restart. That is why clearing is tied to this explicit teardown rather
+        than to the STOPPED state itself.
+
+        Uses the private ``_stop_monitoring_tasks`` (not the public one) so it
+        never cancels a recovery loop that may be its own caller.
+        """
+        await self._stop_monitoring_tasks()
+        self._clear_control_plane_url()
+
     async def auto_start(self):
-        """Auto-start monitoring if control plane URL is persisted"""
+        """Auto-start monitoring if a control plane URL is persisted.
+
+        A failed auto-start must never crash the agent. A miner doing a fresh
+        launch can carry over a stale control plane URL (e.g. from the base image)
+        onto its storage volume; auto-starting against it fails, but the agent API
+        server must stay up so the control plane -- or an operator running
+        ``add-node``, which calls ``/start`` -- can (re)establish the connection.
+        On a connection failure we move to DEGRADED (not ERROR) and retry in the
+        background so a transient outage self-heals without operator intervention.
+        """
         url = self._load_control_plane_url()
-        if url:
-            logger.info("Found persisted control plane URL, auto-starting monitoring")
-            try:
-                self.control_plane_client = ControlPlaneClient(url)
-                await self._send_all_resources()
-                await self._start_monitoring_tasks()
-            except ServerNotFoundException:
-                logger.info("Server does not exist in remote inventory, stopping monitoring.")
-                await self.stop()
-            except Exception as e:
-                self.state = MonitoringState.ERROR
-                logger.error(f"Failed to auto-start monitoring:\n{str(e)}")
-        else:
+        if not url:
             logger.info(
                 "Did not find control plane URL.  Waiting for monitoring to be initiated by control plane."
             )
+            return
+
+        logger.info("Found persisted control plane URL, auto-starting monitoring")
+        async with self._transition_lock:
+            connected = await self._try_connect(url, register=False)
+        if not connected:
+            self._ensure_recovery_loop()
+
+    async def _try_connect(self, url: str, *, register: bool) -> bool:
+        """Attempt to (re)establish monitoring. Must be called holding the transition lock.
+
+        Returns True when there is nothing left to retry -- monitoring is running,
+        or we intentionally gave up -- and False on a recoverable connection
+        failure (state left as DEGRADED). Never raises for connection-style
+        failures; the agent must remain alive.
+
+        ``register`` selects how we announce ourselves to the control plane and
+        preserves the pre-existing split (it is not a behavior change): start()
+        passes True to register the cluster fresh (replacing it on conflict),
+        while auto_start / the recovery loop pass False to send the current
+        resource set (registering only if the cluster is unknown).
+
+        The lock is held by the *caller* rather than acquired here: it is
+        non-reentrant, and each caller combines this attempt with a step that has
+        to be atomic against other transitions -- the recovery loop's DEGRADED
+        check, start()'s URL persist -- so the critical section is wider than this
+        method. We assert the invariant instead of relying on convention.
+        """
+        assert self._transition_lock.locked(), (
+            "_try_connect must be called while holding _transition_lock"
+        )
+
+        # Return value: True means "settled" (running, or intentionally given up),
+        # False means "failed recoverably, keep retrying". Defaults to True and
+        # only flips on a recoverable connection failure below.
+        settled = True
+
+        # Idempotency guard for the start()/recovery-loop race: if monitoring is
+        # already running (e.g. the recovery loop connected first), skip -- don't
+        # spin up a second set of watcher tasks.
+        if self.state != MonitoringState.RUNNING:
+            try:
+                self.control_plane_client = ControlPlaneClient(url)
+                if register:
+                    await self._register_cluster()
+                else:
+                    await self._send_all_resources()
+                await self._start_monitoring_tasks()
+            except ServerNotFoundException:
+                logger.info("Server does not exist in remote inventory, stopping monitoring.")
+                await self._stop_and_clear_url()
+            except Exception as e:
+                self.state = MonitoringState.DEGRADED
+                self.status.error_message = f"Not connected to control plane: {str(e)}"
+                logger.error(f"Failed to connect to control plane, will keep retrying:\n{str(e)}")
+                settled = False
+
+        return settled
+
+    def _ensure_recovery_loop(self):
+        """Ensure the background recovery loop is running (idempotent)."""
+        if self._recovery_task and not self._recovery_task.done():
+            return
+        self._recovery_task = asyncio.create_task(self._recovery_loop())
+
+    async def _recovery_loop(self):
+        """Retry connecting to the control plane while in the DEGRADED state.
+
+        Coordination is entirely via the transition lock and the monitoring
+        state: the loop only acts while state is DEGRADED (its own baseline).
+        The moment an explicit start()/stop() -- or a successful attempt -- moves
+        state elsewhere, the loop stops on its own. Nothing needs to cancel it.
+        This replaces the previous "retry via crash loop": a bad connection no
+        longer kills the pod.
+        """
+        delay = 5
+        max_delay = 300  # 5 minutes max
+        while True:
+            await asyncio.sleep(delay)
+            async with self._transition_lock:
+                if self.state != MonitoringState.DEGRADED:
+                    logger.info(
+                        f"Recovery superseded by state '{self.state.value}'; stopping retries"
+                    )
+                    return
+                url = self._load_control_plane_url()
+                if not url:
+                    logger.info("No control plane URL to recover; stopping retries")
+                    # Forget the URL (clears a malformed/leftover file if present)
+                    # so we do not sit DEGRADED against something we can't use.
+                    await self._stop_and_clear_url()
+                    return
+                logger.info("Retrying connection to control plane")
+                if await self._try_connect(url, register=False):
+                    return
+            delay = min(delay * 2, max_delay)
 
     async def start(self, control_plane_url: str):
-        # Persist the control plane URL
-        try:
+        async with self._transition_lock:
             self._persist_control_plane_url(control_plane_url)
-
-            self.control_plane_client = ControlPlaneClient(control_plane_url)
-            await self._register_cluster()
-            await self._start_monitoring_tasks()
-        except Exception as e:
-            error_message = f"Unexpected error encountered while starting:\n{str(e)}"
-            logger.error(error_message)
-            self.state = MonitoringState.ERROR
-            self.status.error_message = error_message
-            raise
-
-    async def stop(self):
-        await self.stop_monitoring_tasks()
-
-        # Clear persisted URL when explicitly stopped
-        # Clean up client
-        if not self.control_plane_client:
+            connected = await self._try_connect(control_plane_url, register=True)
+        if not connected:
+            # Keep the agent alive and recover in the background, but tell the
+            # caller (control plane / operator) that we are not connected yet.
+            self._ensure_recovery_loop()
             raise InvalidOperationError(
-                "Agent has no active control plane client. "
-                "Agent may have lost state and cannot remove itself from cache."
+                self.status.error_message or "Failed to connect to control plane"
             )
 
-        await self.control_plane_client.remove_cluster()
-        await self.control_plane_client.close()
+    async def stop(self):
+        async with self._transition_lock:
+            # Moving out of DEGRADED/RUNNING here also tells the recovery loop
+            # (if any) to stop on its next check; stop_monitoring_tasks() cancels
+            # it outright for prompt cleanup.
+            await self.stop_monitoring_tasks()
 
-        self._clear_control_plane_url()
+            # Clear persisted URL when explicitly stopped
+            # Clean up client
+            if not self.control_plane_client:
+                raise InvalidOperationError(
+                    "Agent has no active control plane client. "
+                    "Agent may have lost state and cannot remove itself from cache."
+                )
 
-        await serializer.close()
+            await self.control_plane_client.remove_cluster()
+            await self.control_plane_client.close()
+
+            self._clear_control_plane_url()
+
+            await serializer.close()
 
     async def stop_monitoring_tasks(self):
+        # Cancel the background recovery loop, if any. This is NOT needed for
+        # correctness -- the loop self-terminates because it re-checks
+        # `state == DEGRADED` before acting, so it never resurrects monitoring
+        # after a stop. We cancel anyway for prompt teardown (otherwise it sleeps
+        # up to max_delay before noticing, and dangles at process shutdown) and to
+        # keep a clean slate: _ensure_recovery_loop()'s idempotency guard would
+        # treat a stale sleeping loop as "already running" and skip spawning, so a
+        # later degraded start could sit idle until the old backoff elapsed.
+        # It never calls this method itself (its give-up path uses the private
+        # _stop_monitoring_tasks via _stop_and_clear_url), so there is no
+        # self-cancellation to guard against.
+        if self._recovery_task and not self._recovery_task.done():
+            self._recovery_task.cancel()
+            try:
+                await self._recovery_task
+            except asyncio.CancelledError:
+                pass
+        self._recovery_task = None
+
         # Cancel any pending restart
         if self._restart_task and not self._restart_task.done():
             self._restart_task.cancel()
