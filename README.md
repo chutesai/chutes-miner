@@ -42,11 +42,11 @@ We've tried to automate the bulk of the process via ansible, helm/kubernetes, so
   - [3. Chart Configuration](#3-chart-configuration)
     - [Chutes Miner](#chutes-miner)
     - [Chutes Miner GPU](#chutes-miner-gpu)
-  - [4. Setup Your Infrastructure](#4-setup-your-infrastructure)
+  - [4. Provision the Control Plane](#4-provision-the-control-plane)
   - [5. Update Gepetto with Your Optimized Strategy](#5-update-gepetto-with-your-optimized-strategy)
   - [6. Post Install](#6-post-install)
   - [7. Register](#7-register)
-  - [8. Add Your GPU Nodes to Inventory](#8-add-your-gpu-nodes-to-inventory)
+  - [8. Deploy and Add Your TEE Worker Nodes](#8-deploy-and-add-your-tee-worker-nodes)
 - [Adding Servers](#%EF%B8%8F-adding-servers)
 - [Cluster Management Utilities](#%EF%B8%8F-cluster-management-utilities)
   - [ktx (Kube Context Switcher)](#ktx-kube-context-switcher)
@@ -110,7 +110,7 @@ When you run `chutes-miner add-node`, the miner API:
 2. Verifies the attestation service is reachable (`https://<node_ip>:30443/server/health`).
 3. Gathers GPU device info from the attestation service and advertises the server to the validator, which performs its own attestation verification.
 
-> The legacy GraVal bootstrap path (`src/graval-bootstrap`, the `graval` k8s jobs/services) is **deprecated and blocked** — `add-node` now raises an explicit error for any non-TEE node. The code has not yet been fully removed pending a thorough review.
+> The legacy GraVal bootstrap path is **deprecated and blocked** — `add-node` now raises an explicit error for any non-TEE node. The standalone `graval-bootstrap` package has been removed; the miner-API's unreachable `GravalVerificationStrategy` and its `graval` k8s job/service helpers remain only pending a final cleanup review.
 
 *__attestation is handled automatically during `add-node`; the TEE VM itself is deployed via sek8s__*
 
@@ -177,11 +177,13 @@ mount -a
 #### Important networking note!
 
 Before starting, you must either disable all layers of firewalls (if you like to live dangerously), or enable the following:
-- allow all traffic (all ports, all protos inc. UDP) between all nodes in your inventory
-- allow the kubernetes ephemeral port range on all of your GPU nodes, since the ports for chute deployments will be random, in that range, and need public accessibility - the default port range is 30000-32767
+- allow the kubernetes ephemeral port range on all of your GPU (TEE worker) hosts, since the ports for chute deployments will be random, in that range, and need public accessibility - the default port range is 30000-32767
+- allow access to the TEE worker attestation service (NodePort `30443`) and agent (port `32000`) from the control plane
 - allow access to the various nodePort values in your API from whatever machine you are managing/running chutes-miner add-node/etc., or just make it public (particularly import is the API node port, which defaults to 32000)
 
-You'll need one non-GPU server (4 cores, 32gb ram minimum) responsible for running k3s, postgres, redis, gepetto, and API components (not chutes), and __*ALL*__ of the GPU servers 😄 (just kidding of course, you can use as many or as few as you wish)
+> The GPU **worker** hosts are TDX confidential VMs provisioned by [sek8s](https://github.com/chutesai/sek8s/tree/main/host-tools), not by the ansible in this repo — see the sek8s host-tools for their exact firewall/port requirements. The rules above are the minimum needed for the control plane and validator to reach them.
+
+You'll need one non-GPU server (4 cores, 32gb ram minimum) responsible for running k3s, postgres, redis, gepetto, and API components (not chutes). GPU capacity is added separately as TEE worker nodes (as many or as few as you wish).
 
 [The list of supported GPUs can be found here](https://github.com/chutesai/chutes-api/blob/main/api/gpu.py)
 
@@ -209,6 +211,8 @@ touch ~/chutes/values.yaml
 
 Using your favorite text editor (vim of course), edit your local inventory.yml to suite your needs.
 
+This ansible inventory provisions the **control plane only** — do **not** list your GPU/TEE worker hosts here. TEE workers are deployed via [sek8s](https://github.com/chutesai/sek8s/tree/main/host-tools) and registered with `chutes-miner add-node` (step 8); the only worker-related entry that belongs in ansible is the `tee_workers` group used to federate their monitoring (see the [TEE federation section](ansible/k3s/README.md#federate-tee-confidential-vm-servers-into-monitoring)).
+
 For example:
 ```yaml
 
@@ -219,14 +223,26 @@ all:
       hosts:
         chutes-miner-cpu-0:
           ansible_host: 1.0.0.0
-    workers:
+    # TEE (confidential VM) worker servers.
+    #
+    # These are provisioned/managed by the separate sek8s repo, so this playbook
+    # never configures them — the provisioning plays in site.yml explicitly
+    # exclude `tee_workers`. They are listed here ONLY so the monitoring chart
+    # federates their Prometheus into the control-plane stack.
+    #
+    # In practice you typically keep TEE hosts in their own inventory file and
+    # merge it in just for the monitoring deploy, e.g.:
+    #   ansible-playbook -i inventory.yml -i tee-inventory.yml \
+    #     playbooks/deploy-charts.yml --tags monitoring-charts
+    #
+    # Only `ansible_host` is required: it must be the TEE *host* public IP (the
+    # host bridges the NodePort range to the VM, where Prometheus is on 30090).
+    # Set `federation_port` per-host only for a non-default Prometheus NodePort.
+    tee_workers:
       hosts:
-        chutes-miner-gpu-0:
+        chutes-miner-tee-0:
           ansible_host: 1.0.0.1
-        chutes-miner-gpu-1:
-          ansible_host: 1.0.0.2
-          ansible_user: different_user
-          ansible_ssh_private_key_file: ~/.ssh/other_key.pem
+          # federation_port: 30090
   vars:
     ansible_user: ubuntu
     ansible_ssh_private_key_file: ~/.ssh/key.pem
@@ -249,9 +265,10 @@ In most cases the default values will work fine.  Values are explained in detail
 ```yaml
 cache:
   overrides:
-# Add any per-node cache size (in GB) overrides here, e.g.:
-#    chutes-miner-gpu-0: 1000
-#    chutes-miner-gpu-1: 1500
+# Add any per-node cache size (in GB) overrides here, keyed by the TEE worker's
+# node name (the same --name you pass to `chutes-miner add-node`), e.g.:
+#    tee-h200-0: 1000
+#    tee-h200-1: 1500
 ```
 
 
@@ -286,9 +303,9 @@ The chutes components are split into separate sets of charts to support standalo
 
 The [chutes-miner](charts/chutes-miner/) charts contain the templates for the chutes miner API and associated components.
 
-The [chutes-miner-gpu](charts/chutes-miner-gpu/) charts contain the templates for the chutes miner components specifically used by GPU nodes.
+The [chutes-miner-gpu](charts/chutes-miner-gpu/) charts contain the templates for the components that run on the GPU worker cluster. On TEE workers these are deployed inside the confidential VM by [sek8s](https://github.com/chutesai/sek8s/tree/main/host-tools), not by the ansible in this repo (which only provisions the control plane).
 
-The [chutes-monitoring](charts/chutes-monitoring/) charts contain templates for the monitoring components, including metric federation from member clusters to the central karmada prometheus instance.  The monitoring charts and values are automatically generated and deployed by ansible.
+The [chutes-monitoring](charts/chutes-monitoring/) charts contain templates for the monitoring components, including metric federation from worker clusters into the control-plane prometheus instance.  The monitoring charts and values are automatically generated and deployed by ansible.
 
 Be sure to thoroughly examine the values for each set of charts and update according to your particular environment.  Apply any overrides to your custom values file (`~/chutes/values.yaml`) as described in [Section 2](#2-configure-prerequisites)
 

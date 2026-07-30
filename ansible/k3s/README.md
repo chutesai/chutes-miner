@@ -1,6 +1,13 @@
 # Node bootstrapping
 
-To ensure the highest probability of success, you should provision your servers with `Ubuntu 22.04`, preferably with NO nvidia driver installations if possible.
+> **This playbook provisions the control-plane node only.** GPU **worker** nodes are now
+> TEE (Intel TDX confidential VM) servers provisioned by the separate
+> [`sek8s`](https://github.com/chutesai/sek8s/tree/main/host-tools) repo — they are not bootstrapped
+> here. See the [main README step 8](../../README.md#8-deploy-and-add-your-tee-worker-nodes) for the
+> worker workflow. The one worker-related task this playbook performs is federating TEE workers into
+> monitoring (see [below](#federate-tee-confidential-vm-servers-into-monitoring)).
+
+To ensure the highest probability of success, you should provision your control-plane server with `Ubuntu 22.04`.
 
 ## 📋 Table of Contents
 
@@ -24,7 +31,11 @@ To ensure the highest probability of success, you should provision your servers 
 
 #### external_ip
 
-Every GPU node functions as a standalone cluster. The chutes API/validator sends traffic directly to each GPU node, and does not route through the main CPU node at all. For the system to work, this means each GPU node must have a publicly routeable IP address on each GPU node that is not behind a shared IP (since it uses kubernetes nodePort services). This IP is the public IPv4, and must not be something in the private IP range like 192.168.0.0/16, 10.0.0.0/8, etc.
+> This networking requirement applies to your GPU **worker** (TEE) hosts, which are provisioned by
+> [sek8s](https://github.com/chutesai/sek8s/tree/main/host-tools) — it is documented here for
+> reference. Configure it on the worker hosts per the sek8s docs, not via this playbook.
+
+Every GPU worker functions as a standalone cluster. The chutes API/validator sends traffic directly to each GPU worker, and does not route through the main CPU node at all. For the system to work, this means each GPU worker host must have a publicly routeable IP address that is not behind a shared IP (since it uses kubernetes nodePort services). This IP is the public IPv4, and must not be something in the private IP range like 192.168.0.0/16, 10.0.0.0/8, etc.
 
 This public IP *must* be dedicated, and be the same for both egress and ingress. This means, for a node to pass validation, when the validator connects to it, the IP address you advertise as a miner must match the IP address the validator sees when your node fetches a remote token, i.e. you can't use a shared IP with NAT/port-mapping if the underlying nodes route back out to the internet with some other IPs.
 
@@ -130,9 +141,12 @@ ansible-playbook -i ~/chutes/inventory.yml playbooks/deploy-charts.yml
 To update specific charts
 ```bash
 ansible-playbook -i ~/chutes/inventory.yml playbooks/deploy-charts.yml --tags miner-charts
-ansible-playbook -i ~/chutes/inventory.yml playbooks/deploy-charts.yml --tags miner-gpu-charts
 ansible-playbook -i ~/chutes/inventory.yml playbooks/deploy-charts.yml --tags monitoring-charts
 ```
+
+> The `miner-gpu-charts` tag targets the GPU worker cluster and is **legacy** — TEE workers get
+> their in-VM charts from [sek8s](https://github.com/chutesai/sek8s/tree/main/host-tools), so it is
+> not used when provisioning the control plane here.
 
 ## Federate TEE (confidential VM) servers into monitoring
 
