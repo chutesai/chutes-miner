@@ -95,8 +95,17 @@ class VerificationStrategy(ABC):
 
         if is_tee:
             return TEEVerificationStrategy(node, server_args, server)
-        else:
-            return GravalVerificationStrategy(node, server_args, server)
+
+        # GraVal-based verification is no longer supported: the chutes network is now
+        # TEE-exclusive. Worker nodes must be deployed as Intel TDX confidential VMs using
+        # the sek8s host-tools (https://github.com/chutesai/sek8s/tree/main/host-tools),
+        # which label the node with chutes/tee=true. Block the legacy GraVal path explicitly
+        # rather than silently attempting a verification the network will reject.
+        raise GraValBootstrapFailure(
+            f"Node {node.metadata.name} is missing the chutes/tee=true label; GraVal-based "
+            "verification is no longer supported. Deploy worker nodes as TEE VMs via the sek8s "
+            "host-tools: https://github.com/chutesai/sek8s/tree/main/host-tools"
+        )
 
     async def emit_message(self, message: str):
         await self.queue.put(sse_message(message))

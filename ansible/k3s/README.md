@@ -104,6 +104,13 @@ ansible-playbook -i ~/chutes/inventory.yml playbooks/site.yml
 
 ## To add a new node, after the fact
 
+> **Note:** GPU **worker** nodes are now TEE (Intel TDX confidential VM) servers provisioned by the
+> separate [`sek8s`](https://github.com/chutesai/sek8s/tree/main/host-tools) repo — they are **not**
+> added with this playbook. Use the steps below only for additional control-plane / legacy non-TEE
+> nodes. To onboard a TEE worker, deploy it via sek8s, federate it into monitoring (see
+> [below](#federate-tee-confidential-vm-servers-into-monitoring)), then register it with
+> `chutes-miner add-node`.
+
 First, update your inventory.yml with the new host configuration.
 
 Then, use the `site.yml` playbook to add the new node:
