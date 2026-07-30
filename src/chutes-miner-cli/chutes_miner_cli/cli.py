@@ -438,8 +438,9 @@ def add_node(
         help="Path to the hotkey file for your miner",
         envvar=HOTKEY_ENVVAR,
     ),
-    agent_api: Optional[str] = typer.Option(
-        None, help="Agent API base URL for the TEE worker host (public IP, port 32000)"
+    agent_api: str = typer.Option(
+        ...,
+        help="Agent API base URL for the TEE worker host (public IP, port 32000). Required.",
     ),
     miner_api: str = typer.Option(
         "http://127.0.0.1:32000",
