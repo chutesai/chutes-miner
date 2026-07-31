@@ -12,8 +12,7 @@ src/
 ├── chutes-miner/
 ├── chutes-miner-cli/
 ├── chutes-miner-gpu/
-├── chutes-registry/
-└── graval-bootstrap/
+└── chutes-registry/
 ```
 
 Each package has its own Docker configuration in the `docker/` directory and corresponding tests in the `tests/` directory.
@@ -180,7 +179,7 @@ The API will be available at `http://localhost:8080`.
 
 ### Other Packages
 
-Most other packages (chutes-cacheclean, chutes-registry, graval-bootstrap) follow a simpler pattern with shell, test, and lint services available.
+Most other packages (chutes-cacheclean, chutes-registry) follow a simpler pattern with shell, test, and lint services available.
 
 ## Testing
 
@@ -194,8 +193,7 @@ tests/
 ├── chutes-miner/
 ├── chutes-miner-cli/
 ├── chutes-miner-gpu/
-├── chutes-registry/
-└── graval-bootstrap/
+└── chutes-registry/
 ```
 
 ### Running Tests

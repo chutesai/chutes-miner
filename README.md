@@ -4,6 +4,14 @@ This repository contains all components related to mining on the chutes.ai permi
 
 We've tried to automate the bulk of the process via ansible, helm/kubernetes, so while it may seem like a lot, it should be fairly easy to get started.
 
+> **⚠️ The chutes network is now TEE-exclusive.** All GPU worker nodes run inside Intel TDX confidential VMs, which are provisioned separately via the [sek8s host-tools](https://github.com/chutesai/sek8s/tree/main/host-tools). The legacy GraVal-based GPU verification is **no longer supported** — a node without the `chutes/tee=true` label will be rejected during `add-node`.
+>
+> This repository now covers two things:
+> 1. The **control-plane cluster** (miner API, gepetto, postgres, redis, registry proxy, monitoring), provisioned with the ansible playbooks here.
+> 2. The **tooling** to register, verify, monitor, and maintain your TEE worker nodes (`chutes-miner` CLI + miner API).
+>
+> Worker (GPU) node **provisioning** itself lives entirely in [sek8s](https://github.com/chutesai/sek8s/tree/main/host-tools).
+
 ## 📋 Table of Contents
 
 - [Chutes Miner](#chutes-miner)
@@ -15,7 +23,7 @@ We've tried to automate the bulk of the process via ansible, helm/kubernetes, so
   - [Miner Components](#%EF%B8%8F-miner-components)
     - [Postgres](#%EF%B8%8F-postgres)
     - [Redis](#%EF%B8%8F-redis)
-    - [GraVal Bootstrap](#%EF%B8%8F-graval-bootstrap)
+    - [TEE Attestation](#-tee-attestation-confidential-compute)
     - [Registry Proxy](#%EF%B8%8F-registry-proxy)
     - [API](#%EF%B8%8F-api)
     - [Gepetto](#%EF%B8%8F-gepetto)
@@ -34,11 +42,11 @@ We've tried to automate the bulk of the process via ansible, helm/kubernetes, so
   - [3. Chart Configuration](#3-chart-configuration)
     - [Chutes Miner](#chutes-miner)
     - [Chutes Miner GPU](#chutes-miner-gpu)
-  - [4. Setup Your Infrastructure](#4-setup-your-infrastructure)
+  - [4. Provision the Control Plane](#4-provision-the-control-plane)
   - [5. Update Gepetto with Your Optimized Strategy](#5-update-gepetto-with-your-optimized-strategy)
   - [6. Post Install](#6-post-install)
   - [7. Register](#7-register)
-  - [8. Add Your GPU Nodes to Inventory](#8-add-your-gpu-nodes-to-inventory)
+  - [8. Deploy and Add Your TEE Worker Nodes](#8-deploy-and-add-your-tee-worker-nodes)
 - [Adding Servers](#%EF%B8%8F-adding-servers)
 - [Cluster Management Utilities](#%EF%B8%8F-cluster-management-utilities)
   - [ktx (Kube Context Switcher)](#ktx-kube-context-switcher)
@@ -93,18 +101,18 @@ Redis is primarily used for it's pubsub functionality within the miner.  Events 
 
 *__this is installed and configured automatically when deploying via helm charts__*
 
-#### ✅ GraVal bootstrap
+#### ✅ TEE attestation (confidential compute)
 
-Chutes uses a custom c/CUDA library for validating graphics cards: https://github.com/chutesai/graval
+The chutes network is **TEE-exclusive**: every GPU worker node runs inside an Intel TDX confidential VM, provisioned by the [sek8s host-tools](https://github.com/chutesai/sek8s/tree/main/host-tools). Instead of the legacy GraVal GPU challenge, worker nodes are verified via **hardware attestation** — the VM exposes an attestation service (NodePort `30443`) that serves TDX quotes and NVIDIA trust evidence proving the workload runs on genuine, isolated hardware with the expected measurement.
 
-The TL;DR is that it uses matrix multiplications seeded by device info to verify the authenticity of a GPU, including VRAM capacity tests (95% of total VRAM must be available for matrix multiplications).
-All traffic sent to instances on chutes network are encrypted with keys that can only be decrypted by the GPU advertised.
+When you run `chutes-miner add-node`, the miner API:
+1. Confirms the node carries the `chutes/tee=true` label (set by the sek8s deployment).
+2. Verifies the attestation service is reachable (`https://<node_ip>:30443/server/health`).
+3. Gathers GPU device info from the attestation service and advertises the server to the validator, which performs its own attestation verification.
 
-When you add a new node to your kubernetes cluster, each GPU on the server must be verified with the GraVal package, so a bootstrap server is deployed to accomplish this (automatically, no need to fret).
+> The legacy GraVal bootstrap path is **deprecated and blocked** — `add-node` now raises an explicit error for any non-TEE node. The standalone `graval-bootstrap` package has been removed; the miner-API's unreachable `GravalVerificationStrategy` and its `graval` k8s job/service helpers remain only pending a final cleanup review.
 
-Each time a chute starts/gets deployed, it also needs to run GraVal to calculate the decryption key that will be necessary for the GPU(s) the chute is deployed on.
-
-*__this is done automatically__*
+*__attestation is handled automatically during `add-node`; the TEE VM itself is deployed via sek8s__*
 
 #### 🔀 Registry proxy
 
@@ -141,9 +149,16 @@ This is the main thing to optimize as a miner!
 
 ### 1. Server Setup
 
-Sections 2 and 3 walk through configuration and using ansible to provision your servers/kubernetes.
+A chutes miner is made up of **two kinds of nodes**, provisioned by two different toolchains:
 
-ALL servers must be bare metal/VM, meaning it will not work on Runpod, Vast, etc., and we do not currently support shared or dynamic IPs - the IPs must be unique, static, and provide a 1:1 port mapping.
+| Node role | What it runs | How it's provisioned |
+| --------- | ------------ | -------------------- |
+| **Control plane** (1 non-GPU server) | miner API, gepetto, postgres, redis, registry proxy, monitoring | The ansible playbooks **in this repo** ([ansible guide](ansible/k3s/README.md)) |
+| **Worker** (each GPU server) | Intel TDX confidential VM running k3s + attestation service + your chutes | The **[sek8s host-tools](https://github.com/chutesai/sek8s/tree/main/host-tools)** (a separate repo) |
+
+The walkthrough below provisions the **control plane** with ansible (steps 2–7), then deploys and registers your **TEE worker nodes** via sek8s + `chutes-miner add-node` (step 8).
+
+ALL servers must be bare metal/VM, meaning it will not work on Runpod, Vast, etc., and we do not currently support shared or dynamic IPs - the IPs must be unique, static, and provide a 1:1 port mapping. GPU worker hosts must additionally be **TDX-capable** (Intel TDX-enabled CPUs + supported GPUs); see the sek8s host-tools for the exact hardware/firmware requirements.
 
 ### Important RAM note!
 
@@ -162,11 +177,13 @@ mount -a
 #### Important networking note!
 
 Before starting, you must either disable all layers of firewalls (if you like to live dangerously), or enable the following:
-- allow all traffic (all ports, all protos inc. UDP) between all nodes in your inventory
-- allow the kubernetes ephemeral port range on all of your GPU nodes, since the ports for chute deployments will be random, in that range, and need public accessibility - the default port range is 30000-32767
+- allow the kubernetes ephemeral port range on all of your GPU (TEE worker) hosts, since the ports for chute deployments will be random, in that range, and need public accessibility - the default port range is 30000-32767
+- allow access to the TEE worker attestation service (NodePort `30443`) and agent (port `32000`) from the control plane
 - allow access to the various nodePort values in your API from whatever machine you are managing/running chutes-miner add-node/etc., or just make it public (particularly import is the API node port, which defaults to 32000)
 
-You'll need one non-GPU server (4 cores, 32gb ram minimum) responsible for running k3s, postgres, redis, gepetto, and API components (not chutes), and __*ALL*__ of the GPU servers 😄 (just kidding of course, you can use as many or as few as you wish)
+> The GPU **worker** hosts are TDX confidential VMs provisioned by [sek8s](https://github.com/chutesai/sek8s/tree/main/host-tools), not by the ansible in this repo — see the sek8s host-tools for their exact firewall/port requirements. The rules above are the minimum needed for the control plane and validator to reach them.
+
+You'll need one non-GPU server (4 cores, 32gb ram minimum) responsible for running k3s, postgres, redis, gepetto, and API components (not chutes). GPU capacity is added separately as TEE worker nodes (as many or as few as you wish).
 
 [The list of supported GPUs can be found here](https://github.com/chutesai/chutes-api/blob/main/api/gpu.py)
 
@@ -194,6 +211,8 @@ touch ~/chutes/values.yaml
 
 Using your favorite text editor (vim of course), edit your local inventory.yml to suite your needs.
 
+This ansible inventory provisions the **control plane only** — do **not** list your GPU/TEE worker hosts here. TEE workers are deployed via [sek8s](https://github.com/chutesai/sek8s/tree/main/host-tools) and registered with `chutes-miner add-node` (step 8); the only worker-related entry that belongs in ansible is the `tee_workers` group used to federate their monitoring (see the [TEE federation section](ansible/k3s/README.md#federate-tee-confidential-vm-servers-into-monitoring)).
+
 For example:
 ```yaml
 
@@ -204,14 +223,26 @@ all:
       hosts:
         chutes-miner-cpu-0:
           ansible_host: 1.0.0.0
-    workers:
+    # TEE (confidential VM) worker servers.
+    #
+    # These are provisioned/managed by the separate sek8s repo, so this playbook
+    # never configures them — the provisioning plays in site.yml explicitly
+    # exclude `tee_workers`. They are listed here ONLY so the monitoring chart
+    # federates their Prometheus into the control-plane stack.
+    #
+    # In practice you typically keep TEE hosts in their own inventory file and
+    # merge it in just for the monitoring deploy, e.g.:
+    #   ansible-playbook -i inventory.yml -i tee-inventory.yml \
+    #     playbooks/deploy-charts.yml --tags monitoring-charts
+    #
+    # Only `ansible_host` is required: it must be the TEE *host* public IP (the
+    # host bridges the NodePort range to the VM, where Prometheus is on 30090).
+    # Set `federation_port` per-host only for a non-default Prometheus NodePort.
+    tee_workers:
       hosts:
-        chutes-miner-gpu-0:
+        chutes-miner-tee-0:
           ansible_host: 1.0.0.1
-        chutes-miner-gpu-1:
-          ansible_host: 1.0.0.2
-          ansible_user: different_user
-          ansible_ssh_private_key_file: ~/.ssh/other_key.pem
+          # federation_port: 30090
   vars:
     ansible_user: ubuntu
     ansible_ssh_private_key_file: ~/.ssh/key.pem
@@ -234,9 +265,10 @@ In most cases the default values will work fine.  Values are explained in detail
 ```yaml
 cache:
   overrides:
-# Add any per-node cache size (in GB) overrides here, e.g.:
-#    chutes-miner-gpu-0: 1000
-#    chutes-miner-gpu-1: 1500
+# Add any per-node cache size (in GB) overrides here, keyed by the TEE worker's
+# node name (the same --name you pass to `chutes-miner add-node`), e.g.:
+#    tee-h200-0: 1000
+#    tee-h200-1: 1500
 ```
 
 
@@ -271,9 +303,9 @@ The chutes components are split into separate sets of charts to support standalo
 
 The [chutes-miner](charts/chutes-miner/) charts contain the templates for the chutes miner API and associated components.
 
-The [chutes-miner-gpu](charts/chutes-miner-gpu/) charts contain the templates for the chutes miner components specifically used by GPU nodes.
+The [chutes-miner-gpu](charts/chutes-miner-gpu/) charts contain the templates for the components that run on the GPU worker cluster. On TEE workers these are deployed inside the confidential VM by [sek8s](https://github.com/chutesai/sek8s/tree/main/host-tools), not by the ansible in this repo (which only provisions the control plane).
 
-The [chutes-monitoring](charts/chutes-monitoring/) charts contain templates for the monitoring components, including metric federation from member clusters to the central karmada prometheus instance.  The monitoring charts and values are automatically generated and deployed by ansible.
+The [chutes-monitoring](charts/chutes-monitoring/) charts contain templates for the monitoring components, including metric federation from worker clusters into the control-plane prometheus instance.  The monitoring charts and values are automatically generated and deployed by ansible.
 
 Be sure to thoroughly examine the values for each set of charts and update according to your particular environment.  Apply any overrides to your custom values file (`~/chutes/values.yaml`) as described in [Section 2](#2-configure-prerequisites)
 
@@ -349,9 +381,13 @@ The default values should be fine here.
 
 This flag exists to allow backwards compatibility with the old microk8s setup.  If you have not migrated and need to update using the new charts set this flag to false in your values.
 
-### 4. Setup your infrastructure
+### 4. Provision the control plane
 
-Now that all the configuration is setup, use ansible to setup your infrastructure using the [guide](ansible/k3s/README.md). Once you have your nodes deployed come back here to finish setup.
+Now that all the configuration is setup, use ansible to provision your **control-plane** node using the [guide](ansible/k3s/README.md). This installs k3s, postgres, redis, gepetto, the miner API, the registry proxy, and monitoring on your non-GPU server.
+
+> GPU **worker** nodes are **not** provisioned by this ansible — they are deployed as TEE VMs via [sek8s](https://github.com/chutesai/sek8s/tree/main/host-tools) in step 8. The only worker-related task the ansible here performs is federating a TEE worker's Prometheus into the control-plane monitoring stack (see the [TEE federation section](ansible/k3s/README.md#federate-tee-confidential-vm-servers-into-monitoring)).
+
+Once the control plane is up, come back here to finish setup.
 
 ### 5. Update gepetto with your optimized strategy
 
@@ -395,9 +431,17 @@ btcli subnet register --netuid 64 --wallet.name [COLDKEY] --wallet.hotkey [HOTKE
 You __*should not*__ announce an axon here!  All communications are done via client-side initialized socket.io connections so public axons serve no purpose and are just a security risk.
 
 
-### 8. Add your GPU nodes to inventory
+### 8. Deploy and add your TEE worker nodes
 
-The last step in enabling a GPU node in your miner is to use the `add-node` command in the `chutes-miner` CLI.  This calls the miner API, triggers spinning up graval validation services, etc.  This must be run exactly once for each GPU node in order for them to be usable by your miner.
+Each GPU worker is an Intel TDX confidential VM. Provisioning happens in the **[sek8s host-tools](https://github.com/chutesai/sek8s/tree/main/host-tools)** repo, not here:
+
+1. Prepare the TDX-capable baremetal host (TDX kernel, attestation packages, PCCS, GPU vfio binding) using the sek8s host setup.
+2. Launch the confidential guest VM (runs k3s, the attestation service on NodePort `30443`, and GPU drivers). The VM has **no SSH access** — it is managed entirely through the miner API / `chutes-miner` CLI.
+3. Configure the VM's `config.yaml` with your miner credentials and networking per the sek8s docs.
+
+See the sek8s [end-to-end miner guide](https://github.com/chutesai/sek8s/blob/main/docs/end-to-end-miner.md) for the full worker deployment workflow.
+
+Once a worker VM is up and reporting `Ready`, register it with your miner using the `add-node` command in the `chutes-miner` CLI. This calls the miner API, which verifies the node's TEE attestation and advertises the server to the validator. It must be run exactly once per worker node.
 
 Make sure you install `chutes-miner-cli` package (you can do this on the CPU node, your laptop, wherever):
 ```bash
@@ -406,7 +450,7 @@ pip install chutes-miner-cli
 
 **__This is installed automatically on the control node__**
 
-Run this for each GPU node in your inventory:
+Run this for each TEE worker node:
 ```bash
 chutes-miner add-node \
   --name [SERVER NAME FROM inventory.yaml] \
@@ -418,21 +462,23 @@ chutes-miner add-node \
   --miner-api http://[MINER API SERVER IP]:[MINER API PORT]
 ```
 
-- `--name` here corresponds to the short name in your ansible inventory.yaml file, it is not the entire FQDN.
+- `--name` here corresponds to the node's short name (the k8s node name of the TEE worker, as configured in sek8s), it is not the entire FQDN.
 - `--validator` is the hotkey ss58 address of the validator that this server will be allocated to
 - `--hourly-cost` is how much you are paying hourly per GPU on this server; part of the optimization strategy in gepetto is to minimize cost when selecting servers to deploy chutes on
 - `--gpu-short-ref` is a short identifier string for the type of GPU on the server, e.g. `a6000`, `l40s`, `h100_sxm`, etc.  The list of supported GPUs can be found [here](https://github.com/chutesai/chutes-api/blob/main/api/gpu.py)
 - `--hotkey` is the path to the hotkey file you registered with, used to sign requests to be able to manage inventory on your system via the miner API
-- `--agent-api` is the URL for the agent running on the GPU node.  This is just the public IP of the node on port 32000.
+- `--agent-api` is the URL for the agent running on the TEE worker node.  This is just the public IP of the worker host on port 32000.
 - `--miner-api` is the base URL to your miner API service, which will be http://[non-GPU node IP]:[minerAPI port, default 32000], i.e. find the public/external IP address of your CPU-only node, and whatever port you configured for the API service (which is 32000 if you didn't change the default).
 
 ## ➕ Adding servers
 
-You can add additional GPU nodes at any time by simply updating inventory.yaml and running the `site.yaml` playbook with the tag `add-nodes`: [ansible readme](/ansible/karmada/README.md#to-add-a-new-node-after-the-fact)
+You can add additional TEE worker nodes at any time:
 
-This will ensure only the new node is configured, and the necessary monitoring/kubectl configuration is updated for the control plane.
+1. **Provision the worker** as a new TEE VM using the [sek8s host-tools](https://github.com/chutesai/sek8s/tree/main/host-tools) (see step 8 above).
+2. **Federate its monitoring** into the control-plane Prometheus by adding the host to a `tee_workers` inventory and running the monitoring deploy — see the [TEE federation guide](ansible/k3s/README.md#federate-tee-confidential-vm-servers-into-monitoring).
+3. **Register it** with your miner via the `chutes-miner add-node ...` command above.
 
-Once you have run ansible to setup the node, run the `chutes-miner add-node ...` command above.
+> The old flow of adding GPU nodes with the ansible `site.yaml --tags add-nodes` playbook applied to the legacy GraVal model and does **not** provision TEE workers.
 
 ## 🔧 Cluster Management Utilities
 

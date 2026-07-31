@@ -3,7 +3,6 @@ Routes for server management.
 """
 
 import asyncio
-from typing import Optional
 import aiohttp
 from chutes_miner.api.k8s.config import KubeConfig
 from loguru import logger
@@ -68,14 +67,30 @@ async def create_server(
     Add a new server/kubernetes cluster to our inventory.  This is a very
     slow/long-running response via SSE, since it needs to do a lot of things.
     """
-    server_kubeconfig: Optional[KubeConfig] = None
-    if server_args.agent_api:
-        server_kubeconfig = await get_server_kubeconfig(server_args.agent_api)
-        if not server_kubeconfig.get_context(server_args.name):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Kubeconfig from {server_args.agent_api} expected to contain context for {server_args.name}, instead found {', '.join(ctx.name for ctx in server_kubeconfig.contexts)}",
-            )
+    # The chutes network is TEE-exclusive: every worker is a standalone confidential-VM
+    # cluster, so we must fetch its kubeconfig from the on-node agent to resolve the node.
+    # agent_api is therefore required.
+    if not server_args.agent_api:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "agent_api is required: TEE worker nodes are standalone clusters and the "
+                "control plane needs the agent API (public IP, port 32000) to fetch the node's "
+                "kubeconfig. Pass --agent-api to `chutes-miner add-node`."
+            ),
+        )
+    try:
+        server_kubeconfig: KubeConfig = await get_server_kubeconfig(server_args.agent_api)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to retrieve kubeconfig from agent at {server_args.agent_api}:\n{e}",
+        )
+    if not server_kubeconfig.get_context(server_args.name):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Kubeconfig from {server_args.agent_api} expected to contain context for {server_args.name}, instead found {', '.join(ctx.name for ctx in server_kubeconfig.contexts)}",
+        )
     try:
         node = K8sOperator().get_node(server_args.name, server_kubeconfig)
     except Exception as e:

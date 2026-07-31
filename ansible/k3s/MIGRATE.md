@@ -308,7 +308,7 @@ If migration fails and rollback to MicroK8s is needed:
    ansible-playbook -i ~/chutes/inventory.yml playbooks/reset.yml
    ```
 
-3. **Reinstall MicroK8s** (manual process required, use microk8s ansible)
+3. **Reinstall MicroK8s** (fully manual — the MicroK8s ansible has been removed from this repo; restore it from an older tag/commit if you truly need it)
 
 ## Kubectl and Cluster Management Setup
 

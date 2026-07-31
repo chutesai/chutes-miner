@@ -7,6 +7,16 @@ import pytest
 
 from fixtures.bootstrap_fixtures import * # noqa
 
+# The chutes network is now TEE-exclusive. VerificationStrategy.create() explicitly blocks the
+# legacy GraVal bootstrap path (nodes without chutes/tee=true), so these end-to-end bootstrap tests
+# — which drive that path via bootstrap_server() — no longer apply. They are skipped rather than
+# deleted pending the full GraVal removal review. See test_verification_graval.py for the
+# GravalVerificationStrategy unit tests, which instantiate the strategy directly and still run.
+pytestmark = pytest.mark.skip(
+    reason="GraVal bootstrap path is blocked (TEE-exclusive); pending full GraVal removal."
+)
+
+
 @pytest.fixture(autouse=True)
 def mock_fetch_devices(mock_gpus):
 
