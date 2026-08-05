@@ -6,10 +6,6 @@ app.kubernetes.io/name: chutes-postgres
 app.kubernetes.io/name: chutes-redis
 {{- end }}
 
-{{- define "registry.labels" -}}
-app.kubernetes.io/name: chutes-registry
-{{- end }}
-
 {{- define "chutes.labels" -}}
 chutes/chute: "true"
 {{- end }}
