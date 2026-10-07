@@ -3,7 +3,7 @@
 import json
 import hashlib
 import time
-from substrateinterface import Keypair
+from substrateinterface import Keypair, KeypairType
 from typing import Dict, Any
 from chutes_miner_cli.constants import (
     VALIDATOR_HEADER,
@@ -12,6 +12,18 @@ from chutes_miner_cli.constants import (
     NONCE_HEADER,
     SIGNATURE_HEADER,
 )
+
+
+def keypair_from_hotkey(hotkey_data: Dict[str, Any]) -> Keypair:
+    """
+    Load a keypair from a hotkey file's contents. Older wallets store the 32-byte
+    "secretSeed"; newer bittensor-wallet hotkeys only store the 64-byte "privateKey".
+    """
+    if hotkey_data.get("secretSeed"):
+        return Keypair.create_from_seed(hotkey_data["secretSeed"])
+    return Keypair.create_from_private_key(
+        hotkey_data["privateKey"], ss58_format=42, crypto_type=KeypairType.SR25519
+    )
 
 
 def get_signing_message(
@@ -82,6 +94,6 @@ def sign_request(
             headers[VALIDATOR_HEADER] = headers[MINER_HEADER]
         else:
             headers[VALIDATOR_HEADER] = headers[MINER_HEADER]
-    keypair = Keypair.create_from_seed(hotkey_data["secretSeed"])
+    keypair = keypair_from_hotkey(hotkey_data)
     headers[SIGNATURE_HEADER] = keypair.sign(signature_string.encode()).hex()
     return headers, payload_string

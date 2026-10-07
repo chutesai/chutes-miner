@@ -175,5 +175,8 @@ monitor:
 minerCredentials:
   # SS58 address for the miner - provided by Ansible from hotkey file
   ss58Address: "REPLACE_WITH_ANSIBLE_SS58_ADDRESS"
-  # Secret seed for the miner (hex prefix removed) - provided by Ansible from hotkey file  
-  secretSeed: "REPLACE_WITH_ANSIBLE_SECRET_SEED"
+  # Provide one of secretSeed or privateKey (hex prefix removed) - provided by Ansible from hotkey file.
+  # Secret seed for the miner (32 bytes) - older hotkey files
+  secretSeed: ""
+  # sr25519 private key for the miner (64 bytes) - newer bittensor-wallet hotkey files have no seed
+  privateKey: ""

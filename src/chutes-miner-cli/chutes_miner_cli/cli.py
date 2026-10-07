@@ -26,7 +26,7 @@ from chutes_miner_cli.util import sign_request
 from loguru import logger
 import yaml
 
-app = typer.Typer(no_args_is_help=True)
+app = typer.Typer(no_args_is_help=True, pretty_exceptions_show_locals=False)
 
 _INSTANCE_LOGS_CURSOR_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$")
 

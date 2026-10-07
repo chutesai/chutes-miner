@@ -50,6 +50,13 @@ spec:
                   secretKeyRef:
                     name: miner-credentials
                     key: seed
+                    optional: true
+              - name: MINER_PRIVATE_KEY
+                valueFrom:
+                  secretKeyRef:
+                    name: miner-credentials
+                    key: privateKey
+                    optional: true
               - name: REDIS_PASSWORD
                 valueFrom:
                   secretKeyRef:
