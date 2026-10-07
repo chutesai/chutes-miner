@@ -9,14 +9,24 @@ from pydantic_settings import BaseSettings
 def load_miner_keypair() -> Keypair:
     """
     Load the miner keypair from MINER_PRIVATE_KEY (64-byte sr25519 private key, as stored
-    in newer bittensor-wallet hotkeys) if set, otherwise from MINER_SEED (32-byte seed).
+    in newer bittensor-wallet hotkeys) if set, otherwise from MINER_SEED (32-byte seed),
+    and verify it matches MINER_SS58.
     """
     private_key = os.getenv("MINER_PRIVATE_KEY")
     if private_key:
-        return Keypair.create_from_private_key(
+        source = "MINER_PRIVATE_KEY"
+        keypair = Keypair.create_from_private_key(
             private_key, ss58_format=42, crypto_type=KeypairType.SR25519
         )
-    return Keypair.create_from_seed(os.environ["MINER_SEED"])
+    else:
+        source = "MINER_SEED"
+        keypair = Keypair.create_from_seed(os.environ["MINER_SEED"])
+    if keypair.ss58_address != os.environ["MINER_SS58"]:
+        raise ValueError(
+            f"Keypair loaded from {source} has address {keypair.ss58_address}, "
+            f"which does not match MINER_SS58 {os.environ['MINER_SS58']}"
+        )
+    return keypair
 
 
 class Validator(BaseModel):
