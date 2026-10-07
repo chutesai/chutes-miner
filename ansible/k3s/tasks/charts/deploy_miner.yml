@@ -22,8 +22,8 @@
     --create-namespace
     -f /tmp/chutes-miner.yaml
     --set-string minerCredentials.ss58Address="{{ miner_ss58_address }}"
-    --set-string minerCredentials.secretSeed="{{ miner_secret_seed }}"
-    --set-string minerCredentials.privateKey="{{ miner_private_key }}"
+    {{ ('--set-string minerCredentials.secretSeed="' + miner_secret_seed + '"') if miner_secret_seed else '' }}
+    {{ ('--set-string minerCredentials.privateKey="' + miner_private_key + '"') if miner_private_key else '' }}
     {{ ('--version ' + miner_charts_version) if miner_charts_version is defined else '' }}
   register: miner_deployment
   changed_when: miner_deployment.rc == 0
