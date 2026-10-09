@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "chutes-monitor"
-version = "0.1.6"
+version = "0.2.0"
 description = "Package to monitor chutes in member clusters"
 authors = ["Kyle Widmann <kyle.widmann@gmail.com>"]
 readme = "README.md"
