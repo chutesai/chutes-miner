@@ -6,6 +6,9 @@ on:
     paths:
       - 'charts/**'
 
+
+permissions:
+  contents: read
 jobs:
   chart-version-check:
     runs-on: ubuntu-latest
