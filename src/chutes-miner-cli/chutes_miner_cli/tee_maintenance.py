@@ -3,6 +3,15 @@ TEE maintenance commands: check upgrade policy and enter maintenance mode.
 
 These commands hit the validator API (not the VM system-manager), using
 hotkey-based auth with X-Chutes-Hotkey / Signature / Nonce headers.
+
+A server's maintenance status is one of:
+  none        -- normal operation.
+  pending     -- maintenance requested, but sole-survivor instances (the only active instance of
+                 their chute) keep serving until a replacement is hot elsewhere or the pending
+                 deadline passes. Do NOT reboot yet.
+  maintenance -- no instances remain; safe to reboot into the upgrade.
+The validator moves pending servers to maintenance automatically; poll
+`chutes-miner tee maintenance-status --name <server>` to see when it is safe to reboot.
 """
 
 import asyncio
@@ -16,9 +25,33 @@ from rich.table import Table
 from rich import box
 
 from chutes_miner_cli.constants import HOTKEY_ENVVAR, MINER_API_ENVVAR, VALIDATOR_API_ENVVAR
-from chutes_miner_cli.util import sign_request, sort_servers, filter_server
+from chutes_miner_cli.util import sign_request, sort_servers
 
 console = Console()
+
+STATUS_STYLES = {
+    "none": "No",
+    "pending": "[yellow]Pending[/yellow]",
+    "maintenance": "[green]Maintenance[/green]",
+}
+
+
+def _server_maintenance_status(server: dict[str, Any]) -> str:
+    """Maintenance status from a validator payload (falls back to the legacy boolean)."""
+    status = server.get("maintenance_status")
+    if status:
+        return status
+    return "maintenance" if server.get("in_maintenance") else "none"
+
+
+def display_sole_survivors(survivors: list[dict[str, Any]], title: str) -> None:
+    """Render sole-survivor instances (kept serving until replaced elsewhere)."""
+    tbl = Table(title=title, box=box.ROUNDED)
+    tbl.add_column("Chute ID", style="cyan")
+    tbl.add_column("Instance ID")
+    for s in survivors:
+        tbl.add_row(s.get("chute_id", "-"), s.get("instance_id", "-"))
+    console.print(tbl)
 
 
 def display_maintenance_policy(data: dict[str, Any]) -> None:
@@ -48,18 +81,17 @@ def display_maintenance_policy(data: dict[str, Any]) -> None:
         tbl.add_column("Name")
         tbl.add_column("Version")
         tbl.add_column("Needs Upgrade")
-        tbl.add_column("In Maintenance")
+        tbl.add_column("Maintenance")
         for s in servers:
             needs = s.get("needs_upgrade", False)
-            maint = s.get("in_maintenance", False)
             needs_str = "[yellow]Yes[/yellow]" if needs else "No"
-            maint_str = "[yellow]Yes[/yellow]" if maint else "No"
+            status = _server_maintenance_status(s)
             tbl.add_row(
                 s.get("server_id", "-"),
                 s.get("name") or "-",
                 s.get("version") or "-",
                 needs_str,
-                maint_str,
+                STATUS_STYLES.get(status, status),
             )
         console.print(tbl)
     else:
@@ -94,19 +126,36 @@ def display_preflight_denial(data: dict[str, Any]) -> None:
             )
         console.print(tbl)
 
-    blocking = data.get("blocking_chute_ids") or []
-    if blocking:
-        tbl = Table(title="Blocking Sole-Survivor Instances", box=box.ROUNDED)
-        tbl.add_column("Chute ID", style="cyan")
-        tbl.add_column("Instance ID")
-        for b in blocking:
-            tbl.add_row(b.get("chute_id", "-"), b.get("instance_id", "-"))
-        console.print(tbl)
+
+def display_pending_details(data: dict[str, Any], name: str) -> None:
+    """Explain a pending server: what it is waiting on, the deadline, and how to poll."""
+    awaiting = data.get("awaiting_replacement") or []
+    if awaiting:
+        display_sole_survivors(awaiting, "Awaiting Replacement")
+    deadline = data.get("pending_deadline")
+    console.print(
+        "[yellow bold]Do NOT reboot yet.[/yellow bold] Sole-survivor instances keep serving "
+        "until a replacement is hot elsewhere; the validator then moves this server into "
+        "maintenance automatically."
+    )
+    if deadline:
+        console.print(
+            f"Unreplaced survivors are purged and the server enters maintenance by: "
+            f"[bold]{deadline}[/bold]"
+        )
+    console.print(
+        f"Check when it is safe to reboot with:\n"
+        f"  [cyan]chutes-miner tee maintenance-status --name {name}[/cyan]"
+    )
 
 
-def display_maintenance_confirmed(data: dict[str, Any]) -> None:
+def display_maintenance_confirmed(data: dict[str, Any], name: str) -> None:
     """Render a ConfirmMaintenanceResult."""
-    console.print("[green bold]Maintenance confirmed.[/green bold]")
+    status = data.get("maintenance_status", "maintenance")
+    if status == "pending":
+        console.print("[yellow bold]Maintenance pending.[/yellow bold]")
+    else:
+        console.print("[green bold]Maintenance confirmed; safe to reboot.[/green bold]")
     console.print(f"Server ID: {data.get('server_id', '-')}")
 
     purged = data.get("purged_instance_ids") or []
@@ -129,23 +178,42 @@ def display_maintenance_confirmed(data: dict[str, Any]) -> None:
         tbl.add_row("Max Concurrent / Miner", str(window.get("max_concurrent_per_miner", 1)))
         console.print(tbl)
 
+    if status == "pending":
+        console.print()
+        display_pending_details(data, name)
+
+
+def display_server_maintenance_status(data: dict[str, Any], name: str) -> None:
+    """Render a MaintenanceStatusResponse for a single server."""
+    status = data.get("maintenance_status", "none")
+    console.print(f"Server: [cyan]{name}[/cyan] ({data.get('server_id', '-')})")
+    console.print(f"Maintenance status: {STATUS_STYLES.get(status, status)}")
+    if data.get("reconciled_at"):
+        console.print(f"Last checked by validator: {data['reconciled_at']}")
+    if status == "maintenance":
+        console.print("[green bold]Safe to reboot into the upgrade.[/green bold]")
+    elif status == "pending":
+        display_pending_details(data, name)
+    else:
+        console.print("Server is not in maintenance.")
+
 
 def register(app: typer.Typer) -> None:
     """Register maintenance commands on the given Typer app."""
 
     @app.command(
         "maintenance-status",
-        help="Show upgrade window, concurrency slots, and pending servers (validator API)",
+        help=(
+            "Show upgrade window, concurrency slots, and server maintenance status, or with "
+            "--name, whether a single server is safe to reboot (validator API)"
+        ),
     )
     def maintenance_status(
+        name: Optional[str] = typer.Option(
+            None, "--name", "-n", help="Server name or ID to check (poll this while pending)"
+        ),
         raw_json: bool = typer.Option(
             False, "--raw-json", help="Output raw JSON for programmatic use"
-        ),
-        name: Optional[str] = typer.Option(
-            None,
-            "--name",
-            "-n",
-            help="Show only the server matching this name or ID",
         ),
         hotkey: str = typer.Option(
             ..., help="Path to the hotkey file for your miner", envvar=HOTKEY_ENVVAR
@@ -158,8 +226,12 @@ def register(app: typer.Typer) -> None:
     ):
         async def _run():
             headers, _ = sign_request(hotkey, purpose="tee", remote=True)
+            base = validator_api.rstrip("/")
+            if name:
+                url = f"{base}/servers/{name}/maintenance"
+            else:
+                url = f"{base}/servers/maintenance/policy"
             async with aiohttp.ClientSession(raise_for_status=False) as session:
-                url = f"{validator_api.rstrip('/')}/servers/maintenance/policy"
                 async with session.get(url, headers=headers, timeout=30) as resp:
                     if resp.status >= 400:
                         body = await resp.text()
@@ -167,13 +239,14 @@ def register(app: typer.Typer) -> None:
                         raise typer.Exit(1)
                     data = await resp.json()
 
-            data["servers"] = sort_servers(filter_server(data.get("servers"), name))
-            if name and not data["servers"]:
-                typer.echo(f"No server matching '{name}' found in maintenance status.", err=True)
-                raise typer.Exit(1)
+            if not name:
+                # --name reads that server's own status; the full listing is sorted for display.
+                data["servers"] = sort_servers(data.get("servers"))
 
             if raw_json:
                 print(json.dumps(data, indent=2))
+            elif name:
+                display_server_maintenance_status(data, name)
             else:
                 display_maintenance_policy(data)
 
@@ -230,10 +303,22 @@ def register(app: typer.Typer) -> None:
             current = preflight.get("current_slots", 0)
             limit = preflight.get("limit", 1)
             console.print(f"Maintenance slots: [bold]{current}[/bold] / {limit} in use")
-            console.print(
-                f"\n[yellow bold]Warning:[/yellow bold] This will lock the server, purge all "
-                f"running instances on server [cyan]'{name}'[/cyan], and enter maintenance mode."
-            )
+            survivors = preflight.get("sole_survivors") or []
+            if survivors:
+                display_sole_survivors(survivors, "Sole-Survivor Instances")
+                console.print(
+                    f"\n[yellow bold]Warning:[/yellow bold] This will lock server "
+                    f"[cyan]'{name}'[/cyan] and purge all running instances except the "
+                    f"sole survivors above. The server will be [bold]pending[/bold] until "
+                    f"those are replaced elsewhere (or the pending deadline passes), then "
+                    f"enter maintenance mode automatically."
+                )
+            else:
+                console.print(
+                    f"\n[yellow bold]Warning:[/yellow bold] This will lock the server, purge all "
+                    f"running instances on server [cyan]'{name}'[/cyan], and enter maintenance "
+                    f"mode."
+                )
 
             if not yes:
                 typer.confirm("Proceed?", abort=True)
@@ -253,7 +338,7 @@ def register(app: typer.Typer) -> None:
                         f"(locked={lock_data.get('locked')})"
                     )
 
-            # Enter maintenance on the validator (purges running instances).
+            # Request maintenance on the validator (purges running instances; 202 if pending).
             headers, _ = sign_request(hotkey, purpose="tee", remote=True)
             async with aiohttp.ClientSession(raise_for_status=False) as session:
                 confirm_url = f"{base}/servers/{name}/maintenance"
@@ -266,8 +351,8 @@ def register(app: typer.Typer) -> None:
 
             if raw_json:
                 print(json.dumps(result, indent=2))
-            else:
-                display_maintenance_confirmed(result)
+                return
+            display_maintenance_confirmed(result, name)
 
             console.print(
                 f"\n[yellow bold]Reminder:[/yellow bold] The server is locked. "

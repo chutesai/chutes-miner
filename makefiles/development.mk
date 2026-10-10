@@ -92,6 +92,25 @@ update-chutes-common:
 		fi; \
 	done
 
+.PHONY: publish-cli
+publish-cli: ##@development Build and publish chutes-miner-cli to PyPI (uses POETRY_PYPI_TOKEN_PYPI or configured poetry credentials; DRY_RUN=1 to skip upload)
+publish-cli:
+	@cd $(SRC_DIR)/chutes-miner-cli && \
+	file_version=$$(head -1 VERSION | tr -d '\n\r \t'); \
+	pyproject_version=$$($(POETRY) version --short); \
+	if [ "$$file_version" != "$$pyproject_version" ]; then \
+		echo "VERSION ($$file_version) does not match pyproject.toml ($$pyproject_version). Run 'make sync-pyproject-versions' first."; \
+		exit 1; \
+	fi; \
+	echo "Building chutes-miner-cli $$pyproject_version..."; \
+	rm -rf dist; \
+	$(POETRY) build; \
+	if [ -n "$(DRY_RUN)" ]; then \
+		$(POETRY) publish --dry-run; \
+	else \
+		$(POETRY) publish; \
+	fi
+
 .PHONY: ci
 ci: ##@development Run CI pipeline
 ci: clean build infrastructure lint test clean
