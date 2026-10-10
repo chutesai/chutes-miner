@@ -225,6 +225,9 @@ def display_local_inventory(inventory):
         server_table.add_column("Property", style="cyan")
         server_table.add_column("Value")
         server_table.add_row("Status", server["status"])
+        server_table.add_row(
+            "Locked", "[yellow]Yes[/yellow]" if server.get("locked") else "[green]No[/green]"
+        )
         server_table.add_row("GPUs", str(server["gpu_count"]))
         server_table.add_row("Memory/GPU", f"{server['memory_per_gpu']}GB")
         server_table.add_row("CPU/GPU", str(server["cpu_per_gpu"]))
