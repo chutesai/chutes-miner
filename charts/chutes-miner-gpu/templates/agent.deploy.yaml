@@ -50,6 +50,13 @@ spec:
                 secretKeyRef:
                   name: miner-credentials
                   key: seed
+                  optional: true
+            - name: MINER_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: miner-credentials
+                  key: privateKey
+                  optional: true
             - name: VALIDATORS
               value: {{ .Values.validators | toJson | quote }}
             - name: CLUSTER_NAME

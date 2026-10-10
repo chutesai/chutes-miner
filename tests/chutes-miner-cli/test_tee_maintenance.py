@@ -238,3 +238,29 @@ def test_maintenance_status_policy_shows_server_status(fake_session):
     assert result.exit_code == 0, result.output
     assert "Pending" in result.output
     assert session.calls == [("GET", f"{VALIDATOR_API}/servers/maintenance/policy")]
+
+
+def test_maintenance_status_policy_lists_servers_by_name(fake_session):
+    def server(name):
+        return {
+            "server_id": f"id-{name}",
+            "name": name,
+            "version": "0.3.0",
+            "needs_upgrade": True,
+            "in_maintenance": False,
+            "maintenance_status": "none",
+        }
+
+    payload = {
+        "active_window": WINDOW,
+        "window_open": True,
+        "current_slots": 0,
+        "servers": [server("zeta"), server("Alpha"), server("mid")],
+    }
+    fake_session({("GET", f"{VALIDATOR_API}/servers/maintenance/policy"): _response(payload)})
+
+    result = _invoke("maintenance-status", "--raw-json")
+
+    assert result.exit_code == 0, result.output
+    listed = [s["name"] for s in json.loads(result.output)["servers"]]
+    assert listed == ["Alpha", "mid", "zeta"]

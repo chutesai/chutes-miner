@@ -3,7 +3,7 @@
 import json
 import hashlib
 import time
-from substrateinterface import Keypair
+from substrateinterface import Keypair, KeypairType
 from typing import Dict, Any
 from chutes_miner_cli.constants import (
     VALIDATOR_HEADER,
@@ -12,6 +12,18 @@ from chutes_miner_cli.constants import (
     NONCE_HEADER,
     SIGNATURE_HEADER,
 )
+
+
+def keypair_from_hotkey(hotkey_data: Dict[str, Any]) -> Keypair:
+    """
+    Load a keypair from a hotkey file's contents. Older wallets store the 32-byte
+    "secretSeed"; newer bittensor-wallet hotkeys only store the 64-byte "privateKey".
+    """
+    if hotkey_data.get("secretSeed"):
+        return Keypair.create_from_seed(hotkey_data["secretSeed"])
+    return Keypair.create_from_private_key(
+        hotkey_data["privateKey"], ss58_format=42, crypto_type=KeypairType.SR25519
+    )
 
 
 def get_signing_message(
@@ -34,6 +46,33 @@ def get_signing_message(
         return f"{hotkey}:{nonce}:{payload_hash}"
     else:
         raise ValueError("Either payload_str or purpose must be provided")
+
+
+def sort_servers(servers: list | None) -> list:
+    """
+    Sort a list of server dicts consistently by name (case-insensitive),
+    falling back to server_id as a tiebreaker. Used across local-inventory,
+    remote-inventory, and tee maintenance-status so ordering is stable.
+    """
+    return sorted(
+        servers or [],
+        key=lambda s: ((s.get("name") or "").lower(), s.get("server_id") or ""),
+    )
+
+
+def filter_server(servers: list | None, name_or_id: str | None) -> list:
+    """
+    Filter server dicts down to those matching name_or_id exactly, by either
+    name or server_id (same semantics as the miner API lock/unlock/delete
+    routes). Returns the list unchanged when name_or_id is falsy.
+    """
+    if not name_or_id:
+        return servers or []
+    return [
+        s
+        for s in (servers or [])
+        if s.get("name") == name_or_id or s.get("server_id") == name_or_id
+    ]
 
 
 def sign_request(
@@ -82,6 +121,6 @@ def sign_request(
             headers[VALIDATOR_HEADER] = headers[MINER_HEADER]
         else:
             headers[VALIDATOR_HEADER] = headers[MINER_HEADER]
-    keypair = Keypair.create_from_seed(hotkey_data["secretSeed"])
+    keypair = keypair_from_hotkey(hotkey_data)
     headers[SIGNATURE_HEADER] = keypair.sign(signature_string.encode()).hex()
     return headers, payload_string
