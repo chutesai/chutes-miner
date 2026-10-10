@@ -169,9 +169,7 @@ def register(app: typer.Typer) -> None:
 
             data["servers"] = sort_servers(filter_server(data.get("servers"), name))
             if name and not data["servers"]:
-                typer.echo(
-                    f"No server matching '{name}' found in maintenance status.", err=True
-                )
+                typer.echo(f"No server matching '{name}' found in maintenance status.", err=True)
                 raise typer.Exit(1)
 
             if raw_json:

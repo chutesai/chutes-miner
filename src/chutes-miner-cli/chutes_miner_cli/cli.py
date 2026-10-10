@@ -373,9 +373,7 @@ def local_inventory(
                 inventory = await resp.json()
                 inventory = sort_servers(filter_server(inventory, name))
                 if name and not inventory:
-                    typer.echo(
-                        f"No server matching '{name}' found in local inventory.", err=True
-                    )
+                    typer.echo(f"No server matching '{name}' found in local inventory.", err=True)
                     raise typer.Exit(1)
                 if raw_json:
                     print(json.dumps(inventory, indent=2))
@@ -440,9 +438,7 @@ def remote_inventory(
                         )
             servers = sort_servers(filter_server(servers, name))
             if name and not servers:
-                typer.echo(
-                    f"No server matching '{name}' found in remote inventory.", err=True
-                )
+                typer.echo(f"No server matching '{name}' found in remote inventory.", err=True)
                 raise typer.Exit(1)
             if raw_json:
                 print(json.dumps({"servers": servers}, indent=2))
